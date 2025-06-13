@@ -192,11 +192,19 @@ REDIS_URL=redis://localhost:6379
 DEBUG=true
 ```
 
-## Enhanced Logging
+## Activity Logging
+
+Dev Tools logs all its activity to help you monitor and debug your development workflow:
+
+### Log Location
+- **When running installed version**: Logs are written to `~/Library/Logs/dev-tools/activity.log`
+- **When running from source**: Logs are written to `activity.log` in the current working directory
+
+### Logging Features
 
 Dev Tools provides comprehensive logging with detailed execution information:
 
-- **Activity Logging**: All commands logged to `activity.log` with timestamps
+- **Activity Logging**: All commands logged with timestamps
 - **Command Options**: Logs show execution options (e.g., `background=True, daemon=True`)
 - **Docker Commands**: Full Docker commands logged for debugging
 - **Process Tracking**: PID information for background processes
@@ -209,10 +217,13 @@ Dev Tools provides comprehensive logging with detailed execution information:
 2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Creating new container: docker run -d --name redis -p 6379:6379 redis:latest
 ```
 
-**View Logs:**
-- Use `--verbose` flag to output logs to stdout
-- Use `dev-tools logs` to view recent activity
-- Logs are automatically rotated and timestamped
+### Viewing Logs
+
+- **`--verbose` flag**: Output logs to stdout in addition to the log file
+- **`dev-tools logs`**: View the last 50 lines of activity from the log file
+- **Manual access**:
+  - Installed version: `~/Library/Logs/dev-tools/activity.log`
+  - Source version: `./activity.log`
 
 ## Dynamic Help System
 
