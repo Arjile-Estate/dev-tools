@@ -97,12 +97,17 @@ def handle_logs_command(project_dir: Path = Path(".")) -> CommandResult:
     Returns:
         CommandResult with log content or error
     """
-    activity_log = project_dir / "activity.log"
+    # Determine which log file to display based on command name
+    command_name = Path(sys.argv[0]).stem
+    if command_name == "dev-tools":
+        activity_log = Path.home() / "Library" / "Logs" / "dev-tools.log"
+    else:
+        activity_log = project_dir / "activity.log"
 
     if not activity_log.exists():
-        logger.warning(f"No activity.log file found in {project_dir}")
+        logger.warning(f"No log file found at {activity_log}")
         return CommandResult(
-            success=False, stderr=f"No activity.log file found in {project_dir}"
+            success=False, stderr=f"No log file found at {activity_log}"
         )
 
     logger.info("Displaying recent activity logs")
@@ -141,7 +146,16 @@ def main() -> None:
     parser = create_argument_parser()
     args = parser.parse_args()
 
-    setup_application_logging(verbose=args.verbose)
+    # Determine log file path based on command name
+    command_name = Path(sys.argv[0]).stem
+    if command_name == "dev-tools":
+        log_file = Path.home() / "Library" / "Logs" / "dev-tools.log"
+        # Ensure the directory exists
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        log_file = None  # Will default to activity.log in current directory
+
+    setup_application_logging(log_file=log_file, verbose=args.verbose)
     logger.info(f"Starting dev-tools with command: {args.command}")
 
     try:
