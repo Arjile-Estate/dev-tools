@@ -23,21 +23,46 @@ def create_argument_parser() -> argparse.ArgumentParser:
     Returns:
         Configured ArgumentParser instance
     """
-    parser = argparse.ArgumentParser(
-        description="Dev Tools - A command runner for development workflows",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+    # Load configuration to get available commands for help text
+    try:
+        config = load_configuration_for_project(Path("."))
+        available_commands = list(config.get("commands", {}).keys())
+        commands_str = ", ".join(available_commands)
+
+        # Generate dynamic examples based on available commands
+        examples = []
+        for cmd in available_commands[:4]:  # Show first 4 commands as examples
+            examples.append(f"  uv run dev-tools.py {cmd}")
+        if "test" in available_commands:
+            examples.append("  uv run dev-tools.py --verbose test  # Run with verbose logging")
+
+        epilog_text = f"""
+Available commands: {commands_str}
+
+Examples:
+{chr(10).join(examples)}
+        """
+    except Exception:
+        # Fallback to static help if configuration loading fails
+        available_commands = ["test", "lint", "dev", "build", "logs"]
+        commands_str = ", ".join(available_commands)
+        epilog_text = """
 Examples:
   uv run dev-tools.py test        # Run tests
   uv run dev-tools.py lint        # Run linting
   uv run dev-tools.py dev         # Start development server
   uv run dev-tools.py logs        # Show recent logs
   uv run dev-tools.py --verbose test  # Run tests with verbose logging
-        """,
+        """
+
+    parser = argparse.ArgumentParser(
+        description="Dev Tools - A command runner for development workflows",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=epilog_text,
     )
 
     parser.add_argument(
-        "command", help="Command to execute (test, lint, dev, build, logs, etc.)"
+        "command", help=f"Command to execute ({commands_str})"
     )
 
     parser.add_argument(

@@ -87,7 +87,7 @@ def get_default_commands_for_project_type(project_type: str) -> dict[str, Any]:
             "commands": {
                 "test": [{"run": "npm test"}],
                 "lint": [{"run": "npm run lint"}],
-                "dev": [{"run": "npm run dev"}],
+                "dev": [{"run": "npm run dev", "daemon": True}],
                 "build": [{"run": "npm run build"}],
                 "logs": [{"run": "tail -n 50 activity.log"}],
             }
