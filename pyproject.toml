@@ -1,7 +1,7 @@
 [project]
 name = "dev-tools"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "dev-tools helper for agentic coders"
 readme = "README.md"
 authors = [
     { name = "Olivier Sirven", email = "the.slaa+dev@gmail.com" }

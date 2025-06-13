@@ -12,6 +12,7 @@ from dev_tools.command_executor import (
 )
 from dev_tools.config_parser import load_configuration_for_project
 from dev_tools.logger_setup import get_logger, setup_application_logging
+from dev_tools.version import __version__
 
 logger = get_logger(__name__)
 
@@ -75,6 +76,12 @@ Examples:
         type=Path,
         default=Path("."),
         help="Project directory to run commands in (defaults to current directory)",
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"dev-tools {__version__}",
     )
 
     return parser
