@@ -34,7 +34,9 @@ def create_argument_parser() -> argparse.ArgumentParser:
         for cmd in available_commands[:4]:  # Show first 4 commands as examples
             examples.append(f"  uv run dev-tools.py {cmd}")
         if "test" in available_commands:
-            examples.append("  uv run dev-tools.py --verbose test  # Run with verbose logging")
+            examples.append(
+                "  uv run dev-tools.py --verbose test  # Run with verbose logging"
+            )
 
         epilog_text = f"""
 Available commands: {commands_str}
@@ -61,9 +63,7 @@ Examples:
         epilog=epilog_text,
     )
 
-    parser.add_argument(
-        "command", help=f"Command to execute ({commands_str})"
-    )
+    parser.add_argument("command", help=f"Command to execute ({commands_str})")
 
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable verbose logging to stdout"

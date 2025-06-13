@@ -109,7 +109,7 @@ name = "test-project"
         """Test command execution with multiple run commands."""
         mock_execute.return_value = Mock(success=True)
 
-        steps = [{"run": ["eslint src/", "black --check ."]}]
+        steps = [{"run": ["eslint src/", "black ."]}]
 
         result = execute_command_with_steps("lint", steps)
 

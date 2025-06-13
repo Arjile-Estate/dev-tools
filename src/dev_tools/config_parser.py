@@ -79,7 +79,7 @@ def get_default_commands_for_project_type(project_type: str) -> dict[str, Any]:
         "python": {
             "commands": {
                 "test": [{"run": "uv run pytest tests/"}],
-                "lint": [{"run": ["uv run ruff check .", "uv run black --check ."]}],
+                "lint": [{"run": ["uv run ruff check .", "uv run black ."]}],
                 "logs": [{"run": "tail -n 50 activity.log"}],
             }
         },

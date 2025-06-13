@@ -1,5 +1,6 @@
 """Command execution engine with service management and PID tracking."""
 
+import hashlib
 import logging
 import os
 import subprocess
@@ -23,6 +24,20 @@ class CommandResult:
     pid: int | None = None
 
 
+def generate_pid_filename(command: str) -> str:
+    """
+    Generate a PID filename using SHA1 hash of the command.
+
+    Args:
+        command: The command string to hash
+
+    Returns:
+        PID filename in format '.{first_8_chars_of_sha1}.pid'
+    """
+    sha1_hash = hashlib.sha1(command.encode("utf-8")).hexdigest()
+    return f".{sha1_hash[:8]}.pid"
+
+
 def execute_shell_command(
     command: str,
     background: bool = False,
@@ -43,7 +58,6 @@ def execute_shell_command(
     Returns:
         CommandResult with execution details
     """
-    logger.info(f"Executing command: {command}")
 
     try:
         if background:
@@ -106,6 +120,11 @@ def start_docker_service(service_name: str) -> CommandResult:
     """
     Start a Docker service container.
 
+    First checks if container exists:
+    - If exists and running: do nothing
+    - If exists but stopped: start it with docker start
+    - If doesn't exist: create and start with docker run
+
     Args:
         service_name: Name of the service to start
 
@@ -114,22 +133,48 @@ def start_docker_service(service_name: str) -> CommandResult:
     """
     logger.info(f"Starting Docker service: {service_name}")
 
+    # Extract container name from service name (use last part after slash)
+    container_name = service_name.split("/")[-1]
+
+    # Check if container already exists
+    check_cmd = (
+        f"docker ps -a --format '{{{{.Names}}}}' --filter name=^{container_name}$"
+    )
+    logger.info(f"Checking if container exists: {check_cmd}")
+    check_result = execute_shell_command(check_cmd, capture_output=True)
+
+    if check_result.success and container_name.strip() in check_result.stdout.strip():
+        # Container exists, check if it's running
+        status_cmd = (
+            f"docker ps --format '{{{{.Names}}}}' --filter name=^{container_name}$"
+        )
+        logger.info(f"Checking container status: {status_cmd}")
+        status_result = execute_shell_command(status_cmd, capture_output=True)
+
+        if (
+            status_result.success
+            and container_name.strip() in status_result.stdout.strip()
+        ):
+            logger.info(f"Container {container_name} is already running")
+            return CommandResult(success=True, stdout="Container already running")
+        else:
+            # Container exists but is stopped, start it
+            start_cmd = f"docker start {container_name}"
+            logger.info(f"Starting existing container: {start_cmd}")
+            return execute_shell_command(start_cmd, capture_output=True)
+
+    # Container doesn't exist, create and start it
     service_configs = {
         "redis": "docker run -d --name redis -p 6379:6379 redis:latest",
         "postgres": "docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest",
         "mysql": "docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest",
     }
 
-    command = service_configs.get(
-        service_name, f"docker run -d --name {service_name} {service_name}:latest"
+    run_cmd = service_configs.get(
+        service_name, f"docker run -d --name {container_name} {service_name}:latest"
     )
-    result = execute_shell_command(command, capture_output=True)
-
-    if not result.success and "already in use" in result.stderr:
-        logger.info(f"Service {service_name} is already running")
-        return CommandResult(success=True, stdout="Service already running")
-
-    return result
+    logger.info(f"Creating new container: {run_cmd}")
+    return execute_shell_command(run_cmd, capture_output=True)
 
 
 def stop_docker_service(service_name: str) -> CommandResult:
@@ -160,7 +205,9 @@ def execute_command_step(
     Returns:
         CommandResult with execution details
     """
-    logger.info("Executing command step")
+    background = step.get("background", False)
+    daemon = step.get("daemon", False)
+    logger.info(f"Executing command step (background={background}, daemon={daemon})")
 
     if "start_services" in step:
         for service in step["start_services"]:
@@ -174,9 +221,31 @@ def execute_command_step(
         if isinstance(commands, str):
             commands = [commands]
 
-        background = step.get("background", False)
-
         for command in commands:
+
+            # Log command options
+            options = []
+            if background:
+                options.append("background=True")
+            if daemon:
+                options.append("daemon=True")
+            options_str = f" ({', '.join(options)})" if options else ""
+            logger.info(f"Executing command: {command}{options_str}")
+
+            # Check if daemon instance is already running before starting
+            if daemon and background:
+                pid_file = Path(generate_pid_filename(command))
+                if pid_file.exists():
+                    existing_pid = read_pid_file(pid_file)
+                    if existing_pid and is_process_running(existing_pid):
+                        error_msg = f"Daemon process already running with PID {existing_pid} (pid file: {pid_file})"
+                        logger.warning(error_msg)
+                        return CommandResult(success=False, stderr=error_msg)
+                    else:
+                        # Clean up stale PID file
+                        logger.info(f"Removing stale PID file {pid_file}")
+                        remove_pid_file(pid_file)
+
             # For regular user commands, don't capture output (stream to stdout)
             # For background commands, we need to capture for PID tracking
             capture = background
@@ -186,9 +255,9 @@ def execute_command_step(
             if not result.success and not background:
                 return result
             elif background and result.pid:
-                daemon = step.get("daemon", False)
+                logger.info(f"Command started with PID {result.pid}")
                 if daemon:
-                    pid_file = Path(f".{command.replace(' ', '_')}.pid")
+                    pid_file = Path(generate_pid_filename(command))
                     create_pid_file(pid_file, result.pid)
                     logger.info(f"Created PID file {pid_file} for daemon process")
                 return result

@@ -10,8 +10,11 @@ Dev Tools automatically detects your project type (Python, Node.js, Rust, etc.) 
 
 - **Smart Project Detection**: Automatically detects project type from files like `pyproject.toml`, `package.json`, `Cargo.toml`
 - **Consistent Interface**: Same commands work across all project types
-- **Service Management**: Start/stop Docker services as prerequisites
-- **Background Process Support**: Run development servers in the background with PID tracking
+- **Intelligent Docker Service Management**: Automatically detects existing containers and restarts stopped ones
+- **Advanced Daemon Support**: SHA1-based PID tracking prevents duplicate daemon instances
+- **Enhanced Logging**: Detailed execution logs with command options and Docker commands
+- **Dynamic Help System**: Context-aware help showing available commands from configuration
+- **Container Naming**: Smart container naming from complex image paths (e.g., `registry.com/user/app` → `app`)
 - **Environment Handling**: Automatically loads `.env` files
 - **Parallel Execution**: Handle multiple commands and services efficiently
 - **Activity Logging**: Comprehensive logging to `activity.log`
@@ -80,7 +83,7 @@ Detected by presence of `package.json`:
 - `test`: `npm test`
 - `lint`: `npm run lint`
 - `build`: `npm run build`
-- `dev`: `npm run dev`
+- `dev`: `npm run dev` (runs as daemon by default)
 
 #### Rust Projects
 Detected by presence of `Cargo.toml`:
@@ -98,18 +101,18 @@ commands:
     - start_services: ["redis", "postgres"]
     - run: "uv run pytest tests/ -v"
     - cleanup: true
-  
+
   lint:
-    - run: 
+    - run:
         - "uv run ruff check ."
-        - "uv run ruff format --check ."
-  
+        - "uv run ruff format ."
+
   dev:
     - start_services: ["redis"]
     - run: "uvicorn app.main:app --reload"
     - background: true
     - daemon: true
-    
+
   custom-command:
     - run: "echo 'Custom command executed'"
 ```
@@ -126,20 +129,58 @@ Each command step supports:
 
 ### Docker Service Management
 
-Services are managed using Docker containers:
+Services are intelligently managed using Docker containers with automatic lifecycle handling:
 
 ```yaml
 commands:
   test:
-    - start_services: ["redis", "postgres"]
+    - start_services: ["redis", "postgres", "user/custom-service"]
     - run: "pytest tests/"
 ```
 
-This will:
-1. Start Redis container: `docker run -d --name redis redis:alpine`
-2. Start PostgreSQL container: `docker run -d --name postgres postgres:alpine`
-3. Execute the test command
-4. Services continue running for subsequent commands
+**Smart Service Lifecycle:**
+1. **Check existing containers**: `docker ps -a` to find existing containers
+2. **Start or restart**:
+   - If container doesn't exist → `docker run -d --name redis -p 6379:6379 redis:latest`
+   - If container exists but stopped → `docker start redis`
+   - If container is already running → skip
+3. **Container naming**: Extracts clean names from image paths
+   - `redis` → container name: `redis`
+   - `user/service` → container name: `service`
+   - `registry.com/namespace/app` → container name: `app`
+
+**Predefined Services:**
+- **Redis**: `redis:latest` on port 6379
+- **PostgreSQL**: `postgres:latest` on port 5432 (password: "password")
+- **MySQL**: `mysql:latest` on port 3306 (root password: "password")
+
+**Custom Services**: Any other service uses `{service}:latest` image
+
+## Daemon & PID Management
+
+Dev Tools provides advanced process management for long-running commands:
+
+```yaml
+commands:
+  dev:
+    - run: "uvicorn app.main:app --reload"
+      background: true
+      daemon: true
+```
+
+**Features:**
+- **SHA1-based PID files**: Uses 8-character SHA1 hash of command (e.g., `.392a9a8c.pid`)
+- **Duplicate prevention**: Prevents multiple instances of the same daemon command
+- **Stale cleanup**: Automatically removes PID files for stopped processes
+- **Process tracking**: Monitors daemon status and provides clear error messages
+
+**Example behavior:**
+```bash
+dev-tools dev          # Starts daemon, creates PID file
+dev-tools dev          # Error: "Daemon process already running with PID 12345"
+# (kill process manually)
+dev-tools dev          # Cleans stale PID file, starts new daemon
+```
 
 ## Environment Variables
 
@@ -151,25 +192,53 @@ REDIS_URL=redis://localhost:6379
 DEBUG=true
 ```
 
-## Background Processes & PID Management
+## Enhanced Logging
 
-For development servers and long-running processes:
+Dev Tools provides comprehensive logging with detailed execution information:
 
-```yaml
-commands:
-  dev:
-    - run: "uvicorn app.main:app --reload"
-    - background: true
-    - daemon: true  # Creates .uvicorn_app_main_app___reload.pid
+- **Activity Logging**: All commands logged to `activity.log` with timestamps
+- **Command Options**: Logs show execution options (e.g., `background=True, daemon=True`)
+- **Docker Commands**: Full Docker commands logged for debugging
+- **Process Tracking**: PID information for background processes
+- **Service Status**: Container lifecycle events and status changes
+
+**Logging Output Examples:**
+```
+2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Executing command: sleep 3600 (background=True, daemon=True)
+2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Started background process with PID 44447
+2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Creating new container: docker run -d --name redis -p 6379:6379 redis:latest
 ```
 
-This ensures only one instance runs at a time and allows for proper process management.
-
-## Logging
-
-- All activity is logged to `activity.log` in the project directory
-- Use `--verbose` flag to also output logs to stdout
+**View Logs:**
+- Use `--verbose` flag to output logs to stdout
 - Use `dev-tools logs` to view recent activity
+- Logs are automatically rotated and timestamped
+
+## Dynamic Help System
+
+Dev Tools provides context-aware help that automatically discovers available commands:
+
+```bash
+dev-tools --help
+```
+
+**Features:**
+- **Auto-discovery**: Reads `.dev-config.yaml` to show actual available commands
+- **Dynamic examples**: Shows examples using your project's specific commands
+- **Fallback support**: Shows default commands if configuration loading fails
+- **Command listing**: Displays all available commands with descriptions
+
+**Example Output:**
+```
+Available commands: test, lint, dev, build, logs, custom-command
+
+Examples:
+  uv run dev-tools.py test
+  uv run dev-tools.py lint
+  uv run dev-tools.py dev
+  uv run dev-tools.py build
+  uv run dev-tools.py --verbose test  # Run with verbose logging
+```
 
 ## Development
 
@@ -187,8 +256,10 @@ uv sync --group dev
 
 ### Running Tests
 
+The project includes comprehensive test coverage for all functionality:
+
 ```bash
-# Run all tests
+# Run all tests (67+ tests)
 uv run pytest
 
 # Run with coverage
@@ -197,7 +268,22 @@ uv run pytest --cov=src
 # Run specific test categories
 uv run pytest -m unit
 uv run pytest -m integration
+
+# Test specific features
+uv run pytest tests/test_command_executor.py::TestPidFilenameGeneration
+uv run pytest tests/test_command_executor.py::TestImprovedDockerServiceManagement
+uv run pytest tests/test_command_executor.py::TestDaemonImprovements
 ```
+
+**Test Coverage Includes:**
+- SHA1 PID filename generation and collision testing
+- Docker service lifecycle management (start/restart/already running)
+- Container naming from complex image paths
+- Daemon duplicate prevention and stale cleanup
+- Enhanced logging with command options
+- Service integration and failure handling
+- CLI argument parsing and help generation
+- Configuration loading and project detection
 
 ### Code Quality
 
@@ -242,37 +328,38 @@ commands:
   test:
     - start_services: ["postgres", "redis"]
     - run: "uv run pytest tests/ -v --cov=app"
-  
+
   dev:
-    - start_services: ["postgres", "redis"] 
+    - start_services: ["postgres", "redis"]
     - run: "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
-    - background: true
-    - daemon: true
-  
+      background: true
+      daemon: true
+
   lint:
     - run:
         - "uv run ruff check ."
-        - "uv run ruff format --check ."
+        - "uv run ruff format ."
         - "uv run mypy app/"
 ```
 
 ### Node.js React Project
 
 ```yaml
-# .dev-config.yaml  
+# .dev-config.yaml
 commands:
   test:
     - run: "npm run test:unit && npm run test:e2e"
-  
+
   dev:
     - run: "npm run dev"
-    - background: true
-    
+      background: true
+      daemon: true
+
   build:
-    - run: 
+    - run:
         - "npm run build"
         - "npm run build:analyze"
-  
+
   deploy:
     - run: "npm run build"
     - run: "npm run deploy:prod"

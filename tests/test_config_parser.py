@@ -24,7 +24,7 @@ commands:
   test:
     - run: "pytest tests/"
   lint:
-    - run: ["eslint src/", "black --check ."]
+    - run: ["eslint src/", "black ."]
 """
         with patch("builtins.open", mock_open(read_data=config_content)):
             with patch("pathlib.Path.exists", return_value=True):
@@ -33,7 +33,7 @@ commands:
         expected = {
             "commands": {
                 "test": [{"run": "pytest tests/"}],
-                "lint": [{"run": ["eslint src/", "black --check ."]}],
+                "lint": [{"run": ["eslint src/", "black ."]}],
             }
         }
         assert result == expected
