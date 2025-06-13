@@ -130,7 +130,7 @@ class TestCommandStepExecution:
         assert result.success is True
         assert mock_start_service.call_count == 2
         mock_execute.assert_called_with(
-            "pytest tests/", background=False, capture_output=False, cwd=None
+            "pytest tests/", background=False, capture_output=False, cwd=None, daemon=False
         )
 
     @patch("dev_tools.command_executor.execute_shell_command")
@@ -157,7 +157,7 @@ class TestCommandStepExecution:
         assert result.success is True
         assert result.pid == 12345
         mock_execute.assert_called_with(
-            "npm run dev", background=True, capture_output=True, cwd=None
+            "npm run dev", background=True, capture_output=True, cwd=None, daemon=False
         )
 
 
@@ -489,3 +489,77 @@ class TestServiceIntegration:
 
         assert result.success is False
         assert "Service failed to start" in result.stderr
+
+
+class TestDaemonFunctionality:
+    """Test suite for daemon functionality improvements."""
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    @patch("dev_tools.command_executor.create_pid_file")
+    @patch("pathlib.Path.exists")
+    def test_daemon_background_creates_pid_file(self, mock_exists, mock_create_pid, mock_execute):
+        """Test that daemon with background=True creates PID file."""
+        mock_exists.return_value = False  # No existing PID file
+        mock_execute.return_value = Mock(success=True, pid=12345)
+        
+        step = {"run": "npm run dev", "daemon": True, "background": True}
+        
+        result = execute_command_step(step)
+        
+        assert result.success is True
+        assert result.pid == 12345
+        mock_execute.assert_called_with(
+            "npm run dev", background=True, capture_output=True, cwd=None, daemon=True
+        )
+        mock_create_pid.assert_called_once()
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    @patch("dev_tools.command_executor.create_pid_file")
+    @patch("pathlib.Path.exists")
+    def test_daemon_foreground_creates_pid_file(self, mock_exists, mock_create_pid, mock_execute):
+        """Test that daemon with background=False creates PID file."""
+        mock_exists.return_value = False  # No existing PID file
+        mock_execute.return_value = Mock(success=True, pid=12345)
+        
+        step = {"run": "npm run dev", "daemon": True, "background": False}
+        
+        result = execute_command_step(step)
+        
+        assert result.success is True
+        assert result.pid == 12345
+        mock_execute.assert_called_with(
+            "npm run dev", background=False, capture_output=False, cwd=None, daemon=True
+        )
+        mock_create_pid.assert_called_once()
+
+    @patch("subprocess.Popen")
+    def test_execute_shell_command_daemon_foreground(self, mock_popen):
+        """Test daemon execution in foreground mode."""
+        mock_process = Mock()
+        mock_process.pid = 12345
+        mock_process.returncode = 0
+        mock_process.wait.return_value = None
+        mock_popen.return_value = mock_process
+        
+        result = execute_shell_command("test command", daemon=True, background=False)
+        
+        assert result.success is True
+        assert result.pid == 12345
+        assert result.returncode == 0
+        mock_popen.assert_called_once()
+        mock_process.wait.assert_called_once()
+
+    @patch("subprocess.Popen")
+    def test_execute_shell_command_daemon_background(self, mock_popen):
+        """Test daemon execution in background mode."""
+        mock_process = Mock()
+        mock_process.pid = 12345
+        mock_popen.return_value = mock_process
+        
+        result = execute_shell_command("test command", daemon=True, background=True)
+        
+        assert result.success is True
+        assert result.pid == 12345
+        mock_popen.assert_called_once()
+        # Should not wait for background processes
+        mock_process.wait.assert_not_called()

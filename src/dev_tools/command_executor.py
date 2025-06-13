@@ -44,6 +44,7 @@ def execute_shell_command(
     timeout: int | None = None,
     capture_output: bool = False,
     cwd: Path | None = None,
+    daemon: bool = False,
 ) -> CommandResult:
     """
     Execute a shell command with optional background execution.
@@ -54,6 +55,7 @@ def execute_shell_command(
         timeout: Optional timeout in seconds
         capture_output: Whether to capture output or stream to stdout
         cwd: Working directory for command execution
+        daemon: Whether this is a daemon process (for PID tracking)
 
     Returns:
         CommandResult with execution details
@@ -95,16 +97,34 @@ def execute_shell_command(
                 returncode=result.returncode,
             )
         else:
-            # Stream output directly to stdout/stderr for user commands
-            result = subprocess.run(command, shell=True, timeout=timeout, cwd=cwd)
-
-            success = result.returncode == 0
-            if success:
-                logger.info("Command completed successfully")
+            # For daemon processes running in foreground, we need to track PID
+            if daemon:
+                process = subprocess.Popen(
+                    command,
+                    shell=True,
+                    cwd=cwd,
+                )
+                logger.info(f"Started foreground daemon process with PID {process.pid}")
+                # Wait for process to complete
+                process.wait()
+                success = process.returncode == 0
+                if success:
+                    logger.info("Command completed successfully")
+                else:
+                    logger.error(f"Command failed with return code {process.returncode}")
+                
+                return CommandResult(success=success, returncode=process.returncode, pid=process.pid)
             else:
-                logger.error(f"Command failed with return code {result.returncode}")
+                # Stream output directly to stdout/stderr for user commands
+                result = subprocess.run(command, shell=True, timeout=timeout, cwd=cwd)
 
-            return CommandResult(success=success, returncode=result.returncode)
+                success = result.returncode == 0
+                if success:
+                    logger.info("Command completed successfully")
+                else:
+                    logger.error(f"Command failed with return code {result.returncode}")
+
+                return CommandResult(success=success, returncode=result.returncode)
 
     except subprocess.TimeoutExpired as e:
         logger.error(f"Command timed out after {timeout} seconds: {e}")
@@ -233,7 +253,7 @@ def execute_command_step(
             logger.info(f"Executing command: {command}{options_str}")
 
             # Check if daemon instance is already running before starting
-            if daemon and background:
+            if daemon:
                 pid_file = Path(generate_pid_filename(command))
                 if pid_file.exists():
                     existing_pid = read_pid_file(pid_file)
@@ -250,16 +270,19 @@ def execute_command_step(
             # For background commands, we need to capture for PID tracking
             capture = background
             result = execute_shell_command(
-                command, background=background, capture_output=capture, cwd=cwd
+                command, background=background, capture_output=capture, cwd=cwd, daemon=daemon
             )
             if not result.success and not background:
                 return result
+            elif result.pid and daemon:
+                # Handle daemon processes (both background and foreground)
+                logger.info(f"Daemon process with PID {result.pid}")
+                pid_file = Path(generate_pid_filename(command))
+                create_pid_file(pid_file, result.pid)
+                logger.info(f"Created PID file {pid_file} for daemon process")
+                return result
             elif background and result.pid:
                 logger.info(f"Command started with PID {result.pid}")
-                if daemon:
-                    pid_file = Path(generate_pid_filename(command))
-                    create_pid_file(pid_file, result.pid)
-                    logger.info(f"Created PID file {pid_file} for daemon process")
                 return result
 
     return CommandResult(success=True)
