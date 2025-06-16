@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dev_tools.command_executor import (
     CommandResult,
+    cleanup_stale_pid_files,
     execute_command_with_steps,
     execute_shell_command,
     load_environment_variables,
@@ -37,6 +38,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
     try:
         config = load_configuration_for_project(Path("."))
         available_commands = list(config.get("commands", {}).keys())
+        # Add built-in commands that don't require configuration
+        available_commands.extend(["logs", "cleanup-pids"])
         commands_str = ", ".join(available_commands)
 
         # Generate dynamic examples based on available commands
@@ -56,7 +59,7 @@ Examples:
         """
     except Exception:
         # Fallback to static help if configuration loading fails
-        available_commands = ["test", "lint", "dev", "build", "logs"]
+        available_commands = ["test", "lint", "dev", "build", "logs", "cleanup-pids"]
         commands_str = ", ".join(available_commands)
         epilog_text = f"""
 Examples:
@@ -64,6 +67,7 @@ Examples:
   {cmd_prefix} lint        # Run linting
   {cmd_prefix} dev         # Start development server
   {cmd_prefix} logs        # Show recent logs
+  {cmd_prefix} cleanup-pids # Clean up stale PID files
   {cmd_prefix} --verbose test  # Run tests with verbose logging
         """
 
@@ -168,7 +172,13 @@ def main() -> None:
     logger.info(f"Starting dev-tools with command: {args.command}")
 
     try:
-        result = handle_command_execution(args.command, args.project_dir)
+        # Handle special commands that don't require configuration
+        if args.command == "logs":
+            result = handle_logs_command(args.project_dir)
+        elif args.command == "cleanup-pids":
+            result = cleanup_stale_pid_files(args.project_dir)
+        else:
+            result = handle_command_execution(args.command, args.project_dir)
 
         if result.success:
             if result.stdout:

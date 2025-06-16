@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from dev_tools.command_executor import (
+    cleanup_stale_pid_files,
     create_pid_file,
     execute_command_step,
     execute_shell_command,
@@ -815,3 +816,116 @@ class TestDirectoryOption:
             "Directory '/problematic/path' is not accessible: Device not ready"
             in result.stderr
         )
+
+
+class TestPIDCleanup:
+    """Test suite for PID file cleanup functionality."""
+
+    @patch("pathlib.Path.glob")
+    def test_cleanup_stale_pid_files_no_files(self, mock_glob):
+        """Test cleanup when no PID files exist."""
+        mock_glob.return_value = []
+
+        result = cleanup_stale_pid_files(Path("/test/dir"))
+
+        assert result.success is True
+        assert "No PID files found to clean up" in result.stdout
+        mock_glob.assert_called_once_with("*.pid")
+
+    @patch("dev_tools.command_executor.remove_pid_file")
+    @patch("dev_tools.command_executor.is_process_running")
+    @patch("dev_tools.command_executor.read_pid_file")
+    @patch("pathlib.Path.glob")
+    def test_cleanup_stale_pid_files_mixed_scenario(
+        self, mock_glob, mock_read_pid, mock_is_running, mock_remove_pid
+    ):
+        """Test cleanup with mix of active and stale processes."""
+        # Mock PID files
+        pid_file_1 = Mock()
+        pid_file_1.name = "process1.pid"
+        pid_file_2 = Mock()
+        pid_file_2.name = "process2.pid"
+        pid_file_3 = Mock()
+        pid_file_3.name = "process3.pid"
+
+        mock_glob.return_value = [pid_file_1, pid_file_2, pid_file_3]
+
+        # Mock PID reading
+        mock_read_pid.side_effect = [12345, 67890, 11111]
+
+        # Mock process status: first is running, second and third are not
+        mock_is_running.side_effect = [True, False, False]
+
+        result = cleanup_stale_pid_files(Path("/test/dir"))
+
+        assert result.success is True
+        assert "Cleaned up 2 stale PID file(s)" in result.stdout
+        assert "Found 1 active process(es)" in result.stdout
+        assert "process1.pid (PID 12345)" in result.stdout
+        assert "process2.pid (PID 67890)" in result.stdout
+        assert "process3.pid (PID 11111)" in result.stdout
+
+        # Should remove only stale PID files
+        assert mock_remove_pid.call_count == 2
+        mock_remove_pid.assert_any_call(pid_file_2)
+        mock_remove_pid.assert_any_call(pid_file_3)
+
+    @patch("dev_tools.command_executor.read_pid_file")
+    @patch("pathlib.Path.glob")
+    def test_cleanup_stale_pid_files_read_error(self, mock_glob, mock_read_pid):
+        """Test cleanup when PID file reading fails."""
+        pid_file = Mock()
+        pid_file.name = "corrupted.pid"
+        mock_glob.return_value = [pid_file]
+        mock_read_pid.return_value = None
+
+        result = cleanup_stale_pid_files(Path("/test/dir"))
+
+        assert result.success is False  # Should fail when only errors occur
+        assert "Encountered 1 error(s)" in result.stdout
+        assert "Could not read PID from" in result.stdout
+
+    @patch("dev_tools.command_executor.remove_pid_file")
+    @patch("dev_tools.command_executor.is_process_running")
+    @patch("dev_tools.command_executor.read_pid_file")
+    @patch("pathlib.Path.glob")
+    def test_cleanup_stale_pid_files_all_active(
+        self, mock_glob, mock_read_pid, mock_is_running, mock_remove_pid
+    ):
+        """Test cleanup when all processes are still active."""
+        pid_file = Mock()
+        pid_file.name = "active.pid"
+        mock_glob.return_value = [pid_file]
+        mock_read_pid.return_value = 12345
+        mock_is_running.return_value = True
+
+        result = cleanup_stale_pid_files(Path("/test/dir"))
+
+        assert result.success is True
+        assert "Found 1 active process(es)" in result.stdout
+        assert "active.pid (PID 12345)" in result.stdout
+        mock_remove_pid.assert_not_called()
+
+    @patch("dev_tools.command_executor.remove_pid_file")
+    @patch("dev_tools.command_executor.is_process_running")
+    @patch("dev_tools.command_executor.read_pid_file")
+    @patch("pathlib.Path.glob")
+    def test_cleanup_stale_pid_files_all_stale(
+        self, mock_glob, mock_read_pid, mock_is_running, mock_remove_pid
+    ):
+        """Test cleanup when all processes are stale."""
+        pid_file_1 = Mock()
+        pid_file_1.name = "stale1.pid"
+        pid_file_2 = Mock()
+        pid_file_2.name = "stale2.pid"
+        mock_glob.return_value = [pid_file_1, pid_file_2]
+        mock_read_pid.side_effect = [12345, 67890]
+        mock_is_running.return_value = False
+
+        result = cleanup_stale_pid_files(Path("/test/dir"))
+
+        assert result.success is True
+        assert "Cleaned up 2 stale PID file(s)" in result.stdout
+        assert "stale1.pid (PID 12345)" in result.stdout
+        assert "stale2.pid (PID 67890)" in result.stdout
+        assert mock_remove_pid.call_count == 2

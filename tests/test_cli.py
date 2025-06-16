@@ -174,18 +174,34 @@ class TestMainFunction:
     """Test suite for main CLI function."""
 
     @patch("dev_tools.cli.setup_application_logging")
-    @patch("dev_tools.cli.handle_command_execution")
+    @patch("dev_tools.cli.handle_logs_command")
     @patch("sys.argv", ["dev-tools.py", "logs"])
-    def test_main_logs_command(self, mock_handle_command, mock_setup_logging):
+    def test_main_logs_command(self, mock_handle_logs, mock_setup_logging):
         """Test main function with logs command."""
-        mock_handle_command.return_value = Mock(success=True, stdout="log output")
+        mock_handle_logs.return_value = Mock(success=True, stdout="log output")
 
         with patch("builtins.print") as mock_print:
             main()
 
         mock_setup_logging.assert_called_once()
-        mock_handle_command.assert_called_once_with("logs", Path("."))
+        mock_handle_logs.assert_called_once_with(Path("."))
         mock_print.assert_called_with("log output")
+
+    @patch("dev_tools.cli.setup_application_logging")
+    @patch("dev_tools.cli.cleanup_stale_pid_files")
+    @patch("sys.argv", ["dev-tools.py", "cleanup-pids"])
+    def test_main_cleanup_pids_command(self, mock_cleanup, mock_setup_logging):
+        """Test main function with cleanup-pids command."""
+        mock_cleanup.return_value = Mock(
+            success=True, stdout="Cleaned up 2 stale PID files"
+        )
+
+        with patch("builtins.print") as mock_print:
+            main()
+
+        mock_setup_logging.assert_called_once()
+        mock_cleanup.assert_called_once_with(Path("."))
+        mock_print.assert_called_with("Cleaned up 2 stale PID files")
 
     @patch("dev_tools.cli.setup_application_logging")
     @patch("dev_tools.cli.handle_command_execution")

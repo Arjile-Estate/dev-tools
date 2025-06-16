@@ -478,3 +478,81 @@ def is_process_running(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+
+
+def cleanup_stale_pid_files(project_dir: Path = Path(".")) -> CommandResult:
+    """
+    Clean up stale PID files for processes that are no longer running.
+
+    Args:
+        project_dir: Directory to search for PID files
+
+    Returns:
+        CommandResult with cleanup summary
+    """
+    logger.info("Starting PID file cleanup")
+
+    # Find all PID files in the project directory
+    pid_files = list(project_dir.glob("*.pid"))
+    if not pid_files:
+        message = "No PID files found to clean up"
+        logger.info(message)
+        return CommandResult(success=True, stdout=message)
+
+    cleaned_files = []
+    active_processes = []
+    errors = []
+
+    for pid_file in pid_files:
+        try:
+            pid = read_pid_file(pid_file)
+            if pid is None:
+                logger.warning(f"Could not read PID from {pid_file}")
+                errors.append(f"Could not read PID from {pid_file}")
+                continue
+
+            if is_process_running(pid):
+                logger.info(f"Process {pid} from {pid_file} is still running")
+                active_processes.append((pid_file.name, pid))
+            else:
+                logger.info(
+                    f"Process {pid} from {pid_file} is not running, removing PID file"
+                )
+                remove_pid_file(pid_file)
+                cleaned_files.append((pid_file.name, pid))
+
+        except Exception as e:
+            error_msg = f"Error processing {pid_file}: {e}"
+            logger.error(error_msg)
+            errors.append(error_msg)
+
+    # Prepare summary message
+    summary_lines = []
+
+    if cleaned_files:
+        summary_lines.append(f"Cleaned up {len(cleaned_files)} stale PID file(s):")
+        for filename, pid in cleaned_files:
+            summary_lines.append(f"  - {filename} (PID {pid})")
+
+    if active_processes:
+        summary_lines.append(f"Found {len(active_processes)} active process(es):")
+        for filename, pid in active_processes:
+            summary_lines.append(f"  - {filename} (PID {pid})")
+
+    if errors:
+        summary_lines.append(f"Encountered {len(errors)} error(s):")
+        for error in errors:
+            summary_lines.append(f"  - {error}")
+
+    if not cleaned_files and not active_processes and not errors:
+        summary_lines.append("No PID files found to process")
+
+    summary = "\n".join(summary_lines)
+    logger.info(f"PID cleanup completed. Summary: {summary}")
+
+    # Return success if we cleaned files or found active processes, error only if all operations failed
+    success = len(errors) == 0 or len(cleaned_files) > 0 or len(active_processes) > 0
+
+    return CommandResult(
+        success=success, stdout=summary, stderr="\n".join(errors) if errors else ""
+    )
