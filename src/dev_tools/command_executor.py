@@ -248,6 +248,21 @@ def execute_command_step(
     """
     background = step.get("background", False)
     daemon = step.get("daemon", False)
+
+    # Handle directory option - if specified, use it as the working directory
+    # but keep PID files in the root (original cwd)
+    step_directory = step.get("directory")
+    if step_directory:
+        if not isinstance(step_directory, Path):
+            step_directory = Path(step_directory)
+        # Make relative paths relative to the original cwd
+        if not step_directory.is_absolute() and cwd:
+            step_directory = cwd / step_directory
+        execution_cwd = step_directory
+        logger.info(f"Using directory: {step_directory}")
+    else:
+        execution_cwd = cwd
+
     logger.info(f"Executing command step (background={background}, daemon={daemon})")
 
     if "start_services" in step:
@@ -263,7 +278,6 @@ def execute_command_step(
             commands = [commands]
 
         for command in commands:
-
             # Log command options
             options = []
             if background:
@@ -274,6 +288,7 @@ def execute_command_step(
             logger.info(f"Executing command: {command}{options_str}")
 
             # Check if daemon instance is already running before starting
+            # PID files are always stored in the original cwd (root)
             if daemon:
                 pid_file = Path(generate_pid_filename(command))
                 if pid_file.exists():
@@ -294,7 +309,7 @@ def execute_command_step(
                 command,
                 background=background,
                 capture_output=capture,
-                cwd=cwd,
+                cwd=execution_cwd,
                 daemon=daemon,
             )
             if not result.success and not background:

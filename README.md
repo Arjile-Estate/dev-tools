@@ -125,6 +125,7 @@ Each command step supports:
 - **`run`**: Command(s) to execute (string or array)
 - **`background`**: Run command in background (boolean)
 - **`daemon`**: Store PID file for single-instance processes (boolean)
+- **`directory`**: Working directory for command execution (string, absolute or relative path). Note: PID files are always stored in the project root regardless of this option
 - **`cleanup`**: Clean up services after execution (boolean)
 
 ### Docker Service Management
@@ -345,6 +346,7 @@ commands:
     - run: "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
       background: true
       daemon: true
+      directory: "backend"
 
   lint:
     - run:
@@ -365,11 +367,13 @@ commands:
     - run: "npm run dev"
       background: true
       daemon: true
+      directory: "frontend"
 
   build:
     - run:
         - "npm run build"
         - "npm run build:analyze"
+      directory: "frontend"
 
   deploy:
     - run: "npm run build"

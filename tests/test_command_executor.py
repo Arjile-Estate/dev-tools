@@ -446,7 +446,6 @@ class TestDaemonImprovements:
             patch("dev_tools.command_executor.execute_shell_command") as mock_execute,
             patch("dev_tools.command_executor.logger") as mock_logger,
         ):
-
             mock_execute.return_value = Mock(success=True)
 
             step = {"run": "test command"}
@@ -655,3 +654,111 @@ class TestBackgroundJobMessaging:
         mock_print.assert_called_once_with(
             "Running job 'echo toot && sleep 10' in the foreground. PID: 98765, PID file: .8a8dff0d.pid"
         )
+
+
+class TestDirectoryOption:
+    """Test suite for directory option functionality."""
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_execute_command_step_with_absolute_directory(self, mock_execute):
+        """Test executing command step with absolute directory path."""
+        mock_execute.return_value = Mock(success=True)
+
+        step = {"run": "ls -la", "directory": "/tmp"}
+
+        result = execute_command_step(step, Path("/home/user"))
+
+        assert result.success is True
+        mock_execute.assert_called_with(
+            "ls -la",
+            background=False,
+            capture_output=False,
+            cwd=Path("/tmp"),
+            daemon=False,
+        )
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_execute_command_step_with_relative_directory(self, mock_execute):
+        """Test executing command step with relative directory path."""
+        mock_execute.return_value = Mock(success=True)
+
+        step = {"run": "npm install", "directory": "frontend"}
+
+        result = execute_command_step(step, Path("/home/user/project"))
+
+        assert result.success is True
+        mock_execute.assert_called_with(
+            "npm install",
+            background=False,
+            capture_output=False,
+            cwd=Path("/home/user/project/frontend"),
+            daemon=False,
+        )
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_execute_command_step_with_string_directory(self, mock_execute):
+        """Test executing command step with directory as string."""
+        mock_execute.return_value = Mock(success=True)
+
+        step = {"run": "pytest", "directory": "tests"}
+
+        result = execute_command_step(step, Path("/home/user/project"))
+
+        assert result.success is True
+        mock_execute.assert_called_with(
+            "pytest",
+            background=False,
+            capture_output=False,
+            cwd=Path("/home/user/project/tests"),
+            daemon=False,
+        )
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_execute_command_step_without_directory_option(self, mock_execute):
+        """Test executing command step without directory option uses original cwd."""
+        mock_execute.return_value = Mock(success=True)
+
+        step = {"run": "make build"}
+
+        result = execute_command_step(step, Path("/home/user/project"))
+
+        assert result.success is True
+        mock_execute.assert_called_with(
+            "make build",
+            background=False,
+            capture_output=False,
+            cwd=Path("/home/user/project"),
+            daemon=False,
+        )
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    @patch("dev_tools.command_executor.create_pid_file")
+    @patch("pathlib.Path.exists")
+    def test_daemon_with_directory_keeps_pid_in_root(
+        self, mock_exists, mock_create_pid, mock_execute
+    ):
+        """Test that daemon processes with directory option still store PID files in root."""
+        mock_exists.return_value = False  # No existing PID file
+        mock_execute.return_value = Mock(success=True, pid=12345)
+
+        step = {
+            "run": "npm run dev",
+            "daemon": True,
+            "background": True,
+            "directory": "frontend",
+        }
+
+        result = execute_command_step(step, Path("/home/user/project"))
+
+        assert result.success is True
+        assert result.pid == 12345
+        # Command should be executed in the specified directory
+        mock_execute.assert_called_with(
+            "npm run dev",
+            background=True,
+            capture_output=True,
+            cwd=Path("/home/user/project/frontend"),
+            daemon=True,
+        )
+        # PID file should still be created in the root
+        mock_create_pid.assert_called_once()
