@@ -112,6 +112,10 @@ def execute_shell_command(
                 logger.info(
                     f"Created PID file {pid_file} for foreground daemon process"
                 )
+                # Display message to stdout for user
+                print(
+                    f"Running job '{command}' in the foreground. PID: {process.pid}, PID file: {pid_file}"
+                )
 
                 try:
                     # Wait for process to complete
@@ -303,6 +307,10 @@ def execute_command_step(
                 logger.info(
                     f"Created PID file {pid_file} for background daemon process"
                 )
+                # Display message to stdout for user
+                print(
+                    f"Running job '{command}' in the background. PID: {result.pid}, PID file: {pid_file}"
+                )
                 return result
             elif result.pid and daemon and not background:
                 # Foreground daemon - PID file already handled in execute_shell_command
@@ -312,6 +320,8 @@ def execute_command_step(
                 return result
             elif background and result.pid:
                 logger.info(f"Command started with PID {result.pid}")
+                # Display message to stdout for user
+                print(f"Running job '{command}' in the background")
                 return result
 
     return CommandResult(success=True)

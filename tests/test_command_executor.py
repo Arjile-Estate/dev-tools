@@ -574,3 +574,84 @@ class TestDaemonFunctionality:
         mock_popen.assert_called_once()
         # Should not wait for background processes
         mock_process.wait.assert_not_called()
+
+
+class TestBackgroundJobMessaging:
+    """Test suite for background job stdout messaging."""
+
+    @patch("builtins.print")
+    @patch("dev_tools.command_executor.execute_shell_command")
+    @patch("dev_tools.command_executor.create_pid_file")
+    @patch("pathlib.Path.exists")
+    def test_background_daemon_stdout_message(
+        self, mock_exists, mock_create_pid, mock_execute, mock_print
+    ):
+        """Test that background daemon jobs display stdout message with PID and file info."""
+        mock_exists.return_value = False  # No existing PID file
+        mock_execute.return_value = Mock(success=True, pid=12345)
+
+        step = {"run": "npm run dev", "daemon": True, "background": True}
+
+        result = execute_command_step(step)
+
+        assert result.success is True
+        assert result.pid == 12345
+        mock_print.assert_called_once_with(
+            "Running job 'npm run dev' in the background. PID: 12345, PID file: .4eedebe9.pid"
+        )
+
+    @patch("builtins.print")
+    @patch("dev_tools.command_executor.execute_shell_command")
+    @patch("pathlib.Path.exists")
+    def test_background_non_daemon_stdout_message(
+        self, mock_exists, mock_execute, mock_print
+    ):
+        """Test that background non-daemon jobs display stdout message without PID file info."""
+        mock_execute.return_value = Mock(success=True, pid=54321)
+
+        step = {"run": "long_running_task", "background": True}
+
+        result = execute_command_step(step)
+
+        assert result.success is True
+        assert result.pid == 54321
+        mock_print.assert_called_once_with(
+            "Running job 'long_running_task' in the background"
+        )
+
+    @patch("builtins.print")
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_foreground_job_no_stdout_message(self, mock_execute, mock_print):
+        """Test that foreground jobs do not display stdout message."""
+        mock_execute.return_value = Mock(success=True)
+
+        step = {"run": "pytest tests/"}
+
+        result = execute_command_step(step)
+
+        assert result.success is True
+        mock_print.assert_not_called()
+
+    @patch("builtins.print")
+    @patch("dev_tools.command_executor.remove_pid_file")
+    @patch("dev_tools.command_executor.create_pid_file")
+    @patch("subprocess.Popen")
+    def test_foreground_daemon_stdout_message(
+        self, mock_popen, mock_create_pid, mock_remove_pid, mock_print
+    ):
+        """Test that foreground daemon jobs display stdout message with PID and file info."""
+        mock_process = Mock()
+        mock_process.pid = 98765
+        mock_process.returncode = 0
+        mock_process.wait.return_value = None
+        mock_popen.return_value = mock_process
+
+        result = execute_shell_command(
+            "echo toot && sleep 10", daemon=True, background=False
+        )
+
+        assert result.success is True
+        assert result.pid == 98765
+        mock_print.assert_called_once_with(
+            "Running job 'echo toot && sleep 10' in the foreground. PID: 98765, PID file: .8a8dff0d.pid"
+        )
