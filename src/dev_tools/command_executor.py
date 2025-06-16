@@ -63,13 +63,16 @@ def execute_shell_command(
 
     try:
         if background:
+            # For background processes, redirect output to /dev/null to prevent hanging
+            # and properly detach from parent process
             process = subprocess.Popen(
                 command,
                 shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
                 cwd=cwd,
+                start_new_session=True,  # Properly detach from parent process
             )
             logger.info(f"Started background process with PID {process.pid}")
             return CommandResult(success=True, pid=process.pid)
@@ -258,6 +261,33 @@ def execute_command_step(
         # Make relative paths relative to the original cwd
         if not step_directory.is_absolute() and cwd:
             step_directory = cwd / step_directory
+
+        # Validate directory exists and is accessible
+        if not step_directory.exists():
+            error_msg = f"Directory '{step_directory}' does not exist"
+            logger.error(error_msg)
+            return CommandResult(success=False, stderr=error_msg)
+
+        if not step_directory.is_dir():
+            error_msg = f"Path '{step_directory}' is not a directory"
+            logger.error(error_msg)
+            return CommandResult(success=False, stderr=error_msg)
+
+        # Check if directory is accessible (readable and executable)
+        try:
+            # Test access by attempting to list directory contents
+            list(step_directory.iterdir())
+        except PermissionError:
+            error_msg = (
+                f"Directory '{step_directory}' is not accessible (permission denied)"
+            )
+            logger.error(error_msg)
+            return CommandResult(success=False, stderr=error_msg)
+        except Exception as e:
+            error_msg = f"Directory '{step_directory}' is not accessible: {e}"
+            logger.error(error_msg)
+            return CommandResult(success=False, stderr=error_msg)
+
         execution_cwd = step_directory
         logger.info(f"Using directory: {step_directory}")
     else:
