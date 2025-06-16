@@ -24,17 +24,19 @@ class CommandResult:
     pid: int | None = None
 
 
-def generate_pid_filename(command: str) -> str:
+def generate_pid_filename(command_name: str, command: str) -> str:
     """
-    Generate a PID filename using SHA1 hash of the command.
+    Generate a PID filename using SHA1 hash of both command name and command.
 
     Args:
+        command_name: The name of the command being executed
         command: The command string to hash
 
     Returns:
         PID filename in format '.{first_8_chars_of_sha1}.pid'
     """
-    sha1_hash = hashlib.sha1(command.encode("utf-8")).hexdigest()
+    combined_string = f"{command_name}{command}"
+    sha1_hash = hashlib.sha1(combined_string.encode("utf-8")).hexdigest()
     return f".{sha1_hash[:8]}.pid"
 
 
@@ -45,6 +47,7 @@ def execute_shell_command(
     capture_output: bool = False,
     cwd: Path | None = None,
     daemon: bool = False,
+    command_name: str = "",
 ) -> CommandResult:
     """
     Execute a shell command with optional background execution.
@@ -56,6 +59,7 @@ def execute_shell_command(
         capture_output: Whether to capture output or stream to stdout
         cwd: Working directory for command execution
         daemon: Whether this is a daemon process (for PID tracking)
+        command_name: Name of the command (for daemon PID file generation)
 
     Returns:
         CommandResult with execution details
@@ -110,7 +114,7 @@ def execute_shell_command(
                 logger.info(f"Started foreground daemon process with PID {process.pid}")
 
                 # Create PID file immediately for daemon tracking
-                pid_file = Path(generate_pid_filename(command))
+                pid_file = Path(generate_pid_filename(command_name, command))
                 create_pid_file(pid_file, process.pid)
                 logger.info(
                     f"Created PID file {pid_file} for foreground daemon process"
@@ -237,7 +241,7 @@ def stop_docker_service(service_name: str) -> CommandResult:
 
 
 def execute_command_step(
-    step: dict[str, Any], cwd: Path | None = None
+    step: dict[str, Any], cwd: Path | None = None, command_name: str = ""
 ) -> CommandResult:
     """
     Execute a single command step with all its components.
@@ -245,6 +249,7 @@ def execute_command_step(
     Args:
         step: Command step configuration
         cwd: Working directory for command execution
+        command_name: Name of the command being executed
 
     Returns:
         CommandResult with execution details
@@ -320,7 +325,7 @@ def execute_command_step(
             # Check if daemon instance is already running before starting
             # PID files are always stored in the original cwd (root)
             if daemon:
-                pid_file = Path(generate_pid_filename(command))
+                pid_file = Path(generate_pid_filename(command_name, command))
                 if pid_file.exists():
                     existing_pid = read_pid_file(pid_file)
                     if existing_pid and is_process_running(existing_pid):
@@ -341,13 +346,14 @@ def execute_command_step(
                 capture_output=capture,
                 cwd=execution_cwd,
                 daemon=daemon,
+                command_name=command_name,
             )
             if not result.success and not background:
                 return result
             elif result.pid and daemon and background:
                 # Handle background daemon processes (foreground daemons are handled in execute_shell_command)
                 logger.info(f"Background daemon process with PID {result.pid}")
-                pid_file = Path(generate_pid_filename(command))
+                pid_file = Path(generate_pid_filename(command_name, command))
                 create_pid_file(pid_file, result.pid)
                 logger.info(
                     f"Created PID file {pid_file} for background daemon process"
@@ -390,7 +396,7 @@ def execute_command_with_steps(
 
     for i, step in enumerate(steps, 1):
         logger.info(f"Executing step {i}/{len(steps)}")
-        result = execute_command_step(step, cwd)
+        result = execute_command_step(step, cwd, command_name)
         if not result.success:
             logger.error(f"Step {i} failed, aborting command execution")
             return result

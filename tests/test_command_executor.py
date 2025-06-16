@@ -136,6 +136,7 @@ class TestCommandStepExecution:
             capture_output=False,
             cwd=None,
             daemon=False,
+            command_name="",
         )
 
     @patch("dev_tools.command_executor.execute_shell_command")
@@ -162,7 +163,12 @@ class TestCommandStepExecution:
         assert result.success is True
         assert result.pid == 12345
         mock_execute.assert_called_with(
-            "npm run dev", background=True, capture_output=True, cwd=None, daemon=False
+            "npm run dev",
+            background=True,
+            capture_output=True,
+            cwd=None,
+            daemon=False,
+            command_name="",
         )
 
 
@@ -255,39 +261,53 @@ class TestPidFilenameGeneration:
 
     def test_generate_pid_filename_simple_command(self):
         """Test PID filename generation for simple command."""
+        command_name = "dev"
         command = "sleep 3600"
-        filename = generate_pid_filename(command)
+        filename = generate_pid_filename(command_name, command)
 
         # Should be 8 chars + .pid
         assert len(filename) == 13  # .{8chars}.pid
         assert filename.startswith(".")
         assert filename.endswith(".pid")
-        assert filename == ".392a9a8c.pid"  # Known SHA1 for "sleep 3600"
+        assert filename == ".4385d908.pid"  # Known SHA1 for "dev" + "sleep 3600"
 
     def test_generate_pid_filename_complex_command(self):
         """Test PID filename generation for complex command."""
+        command_name = "api"
         command = "echo 'Starting...' && sleep 3600"
-        filename = generate_pid_filename(command)
+        filename = generate_pid_filename(command_name, command)
 
         assert len(filename) == 13
         assert filename.startswith(".")
         assert filename.endswith(".pid")
-        assert filename == ".ff41d59f.pid"  # Known SHA1 for this command
+        assert filename == ".76e4a047.pid"  # Known SHA1 for "api" + this command
 
     def test_generate_pid_filename_consistency(self):
         """Test that same command always generates same filename."""
+        command_name = "test"
         command = "test command"
-        filename1 = generate_pid_filename(command)
-        filename2 = generate_pid_filename(command)
+        filename1 = generate_pid_filename(command_name, command)
+        filename2 = generate_pid_filename(command_name, command)
 
         assert filename1 == filename2
 
     def test_generate_pid_filename_different_commands(self):
         """Test that different commands generate different filenames."""
+        command_name = "test"
         command1 = "test command 1"
         command2 = "test command 2"
-        filename1 = generate_pid_filename(command1)
-        filename2 = generate_pid_filename(command2)
+        filename1 = generate_pid_filename(command_name, command1)
+        filename2 = generate_pid_filename(command_name, command2)
+
+        assert filename1 != filename2
+
+    def test_generate_pid_filename_different_command_names(self):
+        """Test that different command names with same command generate different filenames."""
+        command = "npm run dev"
+        command_name1 = "api"
+        command_name2 = "frontend"
+        filename1 = generate_pid_filename(command_name1, command)
+        filename2 = generate_pid_filename(command_name2, command)
 
         assert filename1 != filename2
 
@@ -398,11 +418,13 @@ class TestDaemonImprovements:
 
         step = {"run": "sleep 3600", "daemon": True, "background": True}
 
-        result = execute_command_step(step, Path("/tmp"))
+        result = execute_command_step(step, Path("/tmp"), "test-command")
 
         assert result.success is False
         assert "Daemon process already running with PID 12345" in result.stderr
-        assert ".392a9a8c.pid" in result.stderr  # SHA1 hash of "sleep 3600"
+        assert (
+            ".32ad89bc.pid" in result.stderr
+        )  # SHA1 hash of "test-command" + "sleep 3600"
 
     @patch("dev_tools.command_executor.execute_shell_command")
     @patch("dev_tools.command_executor.remove_pid_file")
@@ -421,7 +443,7 @@ class TestDaemonImprovements:
 
         step = {"run": "sleep 3600", "daemon": True, "background": True}
 
-        result = execute_command_step(step, Path("/tmp"))
+        result = execute_command_step(step, Path("/tmp"), "test-command")
 
         assert result.success is True
         mock_remove_pid.assert_called_once()
@@ -434,7 +456,7 @@ class TestDaemonImprovements:
         step = {"run": "test command", "daemon": True, "background": True}
 
         with patch("dev_tools.command_executor.logger") as mock_logger:
-            execute_command_step(step, Path("/tmp"))
+            execute_command_step(step, Path("/tmp"), "test-cmd")
 
             # Check that logging includes options
             mock_logger.info.assert_any_call(
@@ -451,7 +473,7 @@ class TestDaemonImprovements:
 
             step = {"run": "test command"}
 
-            execute_command_step(step, Path("/tmp"))
+            execute_command_step(step, Path("/tmp"), "test-cmd")
 
             # Check that logging works without options
             mock_logger.info.assert_any_call("Executing command: test command")
@@ -510,12 +532,17 @@ class TestDaemonFunctionality:
 
         step = {"run": "npm run dev", "daemon": True, "background": True}
 
-        result = execute_command_step(step)
+        result = execute_command_step(step, command_name="dev")
 
         assert result.success is True
         assert result.pid == 12345
         mock_execute.assert_called_with(
-            "npm run dev", background=True, capture_output=True, cwd=None, daemon=True
+            "npm run dev",
+            background=True,
+            capture_output=True,
+            cwd=None,
+            daemon=True,
+            command_name="dev",
         )
         mock_create_pid.assert_called_once()
 
@@ -528,12 +555,17 @@ class TestDaemonFunctionality:
 
         step = {"run": "npm run dev", "daemon": True, "background": False}
 
-        result = execute_command_step(step)
+        result = execute_command_step(step, command_name="dev")
 
         assert result.success is True
         assert result.pid == 12345
         mock_execute.assert_called_with(
-            "npm run dev", background=False, capture_output=False, cwd=None, daemon=True
+            "npm run dev",
+            background=False,
+            capture_output=False,
+            cwd=None,
+            daemon=True,
+            command_name="dev",
         )
         # PID file creation is now handled inside execute_shell_command for foreground daemons
 
@@ -550,7 +582,9 @@ class TestDaemonFunctionality:
         mock_process.wait.return_value = None
         mock_popen.return_value = mock_process
 
-        result = execute_shell_command("test command", daemon=True, background=False)
+        result = execute_shell_command(
+            "test command", daemon=True, background=False, command_name="test"
+        )
 
         assert result.success is True
         assert result.pid == 12345
@@ -567,7 +601,9 @@ class TestDaemonFunctionality:
         mock_process.pid = 12345
         mock_popen.return_value = mock_process
 
-        result = execute_shell_command("test command", daemon=True, background=True)
+        result = execute_shell_command(
+            "test command", daemon=True, background=True, command_name="test"
+        )
 
         assert result.success is True
         assert result.pid == 12345
@@ -592,12 +628,12 @@ class TestBackgroundJobMessaging:
 
         step = {"run": "npm run dev", "daemon": True, "background": True}
 
-        result = execute_command_step(step)
+        result = execute_command_step(step, command_name="dev")
 
         assert result.success is True
         assert result.pid == 12345
         mock_print.assert_called_once_with(
-            "Running job 'npm run dev' in the background. PID: 12345, PID file: .4eedebe9.pid"
+            "Running job 'npm run dev' in the background. PID: 12345, PID file: .363d1c30.pid"
         )
 
     @patch("builtins.print")
@@ -611,7 +647,7 @@ class TestBackgroundJobMessaging:
 
         step = {"run": "long_running_task", "background": True}
 
-        result = execute_command_step(step)
+        result = execute_command_step(step, command_name="bg-task")
 
         assert result.success is True
         assert result.pid == 54321
@@ -627,7 +663,7 @@ class TestBackgroundJobMessaging:
 
         step = {"run": "pytest tests/"}
 
-        result = execute_command_step(step)
+        result = execute_command_step(step, command_name="test")
 
         assert result.success is True
         mock_print.assert_not_called()
@@ -647,13 +683,13 @@ class TestBackgroundJobMessaging:
         mock_popen.return_value = mock_process
 
         result = execute_shell_command(
-            "echo toot && sleep 10", daemon=True, background=False
+            "echo toot && sleep 10", daemon=True, background=False, command_name="test"
         )
 
         assert result.success is True
         assert result.pid == 98765
         mock_print.assert_called_once_with(
-            "Running job 'echo toot && sleep 10' in the foreground. PID: 98765, PID file: .8a8dff0d.pid"
+            "Running job 'echo toot && sleep 10' in the foreground. PID: 98765, PID file: .0444e3ec.pid"
         )
 
 
@@ -676,6 +712,7 @@ class TestDirectoryOption:
             capture_output=False,
             cwd=Path("/tmp"),
             daemon=False,
+            command_name="",
         )
 
     @patch("pathlib.Path.iterdir")
@@ -702,6 +739,7 @@ class TestDirectoryOption:
             capture_output=False,
             cwd=Path("/home/user/project/frontend"),
             daemon=False,
+            command_name="",
         )
 
     @patch("pathlib.Path.iterdir")
@@ -728,6 +766,7 @@ class TestDirectoryOption:
             capture_output=False,
             cwd=Path("/home/user/project/tests"),
             daemon=False,
+            command_name="",
         )
 
     @patch("dev_tools.command_executor.execute_shell_command")
@@ -746,6 +785,7 @@ class TestDirectoryOption:
             capture_output=False,
             cwd=Path("/home/user/project"),
             daemon=False,
+            command_name="",
         )
 
     # NOTE: Daemon with directory test is covered by real-world testing
