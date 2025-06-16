@@ -24,6 +24,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
     Returns:
         Configured ArgumentParser instance
     """
+    # Determine the correct command name based on how the script is invoked
+    script_name = Path(sys.argv[0]).name
+    if script_name == "dev-tools.py":
+        # Running from source via uv run dev-tools.py
+        cmd_prefix = "uv run dev-tools.py"
+    else:
+        # Running from installed package
+        cmd_prefix = "dev-tools"
+
     # Load configuration to get available commands for help text
     try:
         config = load_configuration_for_project(Path("."))
@@ -33,10 +42,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
         # Generate dynamic examples based on available commands
         examples = []
         for cmd in available_commands[:4]:  # Show first 4 commands as examples
-            examples.append(f"  uv run dev-tools.py {cmd}")
+            examples.append(f"  {cmd_prefix} {cmd}")
         if "test" in available_commands:
             examples.append(
-                "  uv run dev-tools.py --verbose test  # Run with verbose logging"
+                f"  {cmd_prefix} --verbose test  # Run with verbose logging"
             )
 
         epilog_text = f"""
@@ -49,13 +58,13 @@ Examples:
         # Fallback to static help if configuration loading fails
         available_commands = ["test", "lint", "dev", "build", "logs"]
         commands_str = ", ".join(available_commands)
-        epilog_text = """
+        epilog_text = f"""
 Examples:
-  uv run dev-tools.py test        # Run tests
-  uv run dev-tools.py lint        # Run linting
-  uv run dev-tools.py dev         # Start development server
-  uv run dev-tools.py logs        # Show recent logs
-  uv run dev-tools.py --verbose test  # Run tests with verbose logging
+  {cmd_prefix} test        # Run tests
+  {cmd_prefix} lint        # Run linting
+  {cmd_prefix} dev         # Start development server
+  {cmd_prefix} logs        # Show recent logs
+  {cmd_prefix} --verbose test  # Run tests with verbose logging
         """
 
     parser = argparse.ArgumentParser(
@@ -159,10 +168,7 @@ def main() -> None:
     logger.info(f"Starting dev-tools with command: {args.command}")
 
     try:
-        if args.command == "logs":
-            result = handle_logs_command(args.project_dir)
-        else:
-            result = handle_command_execution(args.command, args.project_dir)
+        result = handle_command_execution(args.command, args.project_dir)
 
         if result.success:
             if result.stdout:

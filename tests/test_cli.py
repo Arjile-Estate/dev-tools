@@ -174,17 +174,17 @@ class TestMainFunction:
     """Test suite for main CLI function."""
 
     @patch("dev_tools.cli.setup_application_logging")
-    @patch("dev_tools.cli.handle_logs_command")
+    @patch("dev_tools.cli.handle_command_execution")
     @patch("sys.argv", ["dev-tools.py", "logs"])
-    def test_main_logs_command(self, mock_handle_logs, mock_setup_logging):
+    def test_main_logs_command(self, mock_handle_command, mock_setup_logging):
         """Test main function with logs command."""
-        mock_handle_logs.return_value = Mock(success=True, stdout="log output")
+        mock_handle_command.return_value = Mock(success=True, stdout="log output")
 
         with patch("builtins.print") as mock_print:
             main()
 
         mock_setup_logging.assert_called_once()
-        mock_handle_logs.assert_called_once()
+        mock_handle_command.assert_called_once_with("logs", Path("."))
         mock_print.assert_called_with("log output")
 
     @patch("dev_tools.cli.setup_application_logging")
