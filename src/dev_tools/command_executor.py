@@ -164,7 +164,7 @@ def execute_shell_command(
         return CommandResult(success=False, stderr=str(e), returncode=-1)
 
 
-def start_docker_service(service_name: str) -> CommandResult:
+def start_docker_service(service_config) -> CommandResult:
     """
     Start a Docker service container.
 
@@ -174,15 +174,134 @@ def start_docker_service(service_name: str) -> CommandResult:
     - If doesn't exist: create and start with docker run
 
     Args:
-        service_name: Name of the service to start
+        service_config: Name of the service (string) or service configuration (dict)
 
     Returns:
         CommandResult indicating success/failure
     """
-    logger.info(f"Starting Docker service: {service_name}")
+    # Handle both string and dictionary formats
+    if isinstance(service_config, str):
+        service_name = service_config
+        logger.info(f"Starting Docker service: {service_name}")
 
-    # Extract container name from service name (use last part after slash)
-    container_name = service_name.split("/")[-1]
+        # Extract container name from service name (use last part after slash)
+        container_name = service_name.split("/")[-1]
+
+        # Use predefined configs or default format
+        service_configs = {
+            "redis": "docker run -d --name redis -p 6379:6379 redis:latest",
+            "postgres": "docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest",
+            "mysql": "docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest",
+        }
+
+        run_cmd = service_configs.get(
+            service_name, f"docker run -d --name {container_name} {service_name}:latest"
+        )
+
+    elif isinstance(service_config, dict):
+        # Check if this is a named service format: {service_name: {image: ..., ports: ..., volumes: ...}}
+        # vs direct format: {image: ..., ports: ..., volumes: ...}
+        if len(service_config) == 1 and "image" not in service_config:
+            # Named service format - single key, and that key is not "image"
+            service_name, config = next(iter(service_config.items()))
+            if not isinstance(config, dict) or "image" not in config:
+                return CommandResult(
+                    success=False,
+                    stderr="Service configuration must include 'image'",
+                    returncode=1,
+                )
+
+            image = config["image"]
+            container_name = service_name  # Use the service name as container name
+
+            logger.info(
+                f"Starting Docker service '{service_name}' from config: {config}"
+            )
+
+            # Build docker run command
+            cmd_parts = ["docker", "run", "-d"]
+
+            # Add volumes
+            if "volumes" in config:
+                for volume in config["volumes"]:
+                    cmd_parts.extend(["-v", volume])
+
+            # Add ports
+            if "ports" in config:
+                for port in config["ports"]:
+                    # Handle port mapping formats:
+                    # "80:80" -> "-p 80:80"
+                    # "81:127.0.0.1:443" -> "-p 127.0.0.1:443:81"
+                    parts = port.split(":")
+                    if len(parts) == 3:
+                        # Format: "container_port:host_ip:host_port" -> "host_ip:host_port:container_port"
+                        formatted_port = f"{parts[1]}:{parts[2]}:{parts[0]}"
+                        cmd_parts.extend(["-p", formatted_port])
+                    else:
+                        # Standard format: "host_port:container_port"
+                        cmd_parts.extend(["-p", port])
+
+            # Add container name and image
+            cmd_parts.extend(["--name", container_name, image])
+
+            # Add custom command if specified
+            if "command" in config:
+                cmd_parts.append(config["command"])
+
+            run_cmd = " ".join(cmd_parts)
+
+        else:
+            # Direct dictionary format (backward compatibility)
+            if "image" not in service_config:
+                return CommandResult(
+                    success=False,
+                    stderr="Service configuration must include 'image'",
+                    returncode=1,
+                )
+
+            image = service_config["image"]
+            container_name = image.split("/")[-1].split(":")[
+                0
+            ]  # Extract name from image
+
+            logger.info(f"Starting Docker service from config: {service_config}")
+
+            # Build docker run command
+            cmd_parts = ["docker", "run", "-d"]
+
+            # Add volumes
+            if "volumes" in service_config:
+                for volume in service_config["volumes"]:
+                    cmd_parts.extend(["-v", volume])
+
+            # Add ports
+            if "ports" in service_config:
+                for port in service_config["ports"]:
+                    # Handle port mapping formats:
+                    # "80:80" -> "-p 80:80"
+                    # "81:127.0.0.1:443" -> "-p 127.0.0.1:443:81"
+                    parts = port.split(":")
+                    if len(parts) == 3:
+                        # Format: "container_port:host_ip:host_port" -> "host_ip:host_port:container_port"
+                        formatted_port = f"{parts[1]}:{parts[2]}:{parts[0]}"
+                        cmd_parts.extend(["-p", formatted_port])
+                    else:
+                        # Standard format: "host_port:container_port"
+                        cmd_parts.extend(["-p", port])
+
+            # Add container name and image
+            cmd_parts.extend(["--name", container_name, image])
+
+            # Add custom command if specified
+            if "command" in service_config:
+                cmd_parts.append(service_config["command"])
+
+            run_cmd = " ".join(cmd_parts)
+
+    else:
+        return CommandResult(
+            success=False, stderr="Service must be a string or dictionary", returncode=1
+        )
 
     # Check if container already exists
     check_cmd = (
@@ -212,15 +331,6 @@ def start_docker_service(service_name: str) -> CommandResult:
             return execute_shell_command(start_cmd, capture_output=True)
 
     # Container doesn't exist, create and start it
-    service_configs = {
-        "redis": "docker run -d --name redis -p 6379:6379 redis:latest",
-        "postgres": "docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest",
-        "mysql": "docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest",
-    }
-
-    run_cmd = service_configs.get(
-        service_name, f"docker run -d --name {container_name} {service_name}:latest"
-    )
     logger.info(f"Creating new container: {run_cmd}")
     return execute_shell_command(run_cmd, capture_output=True)
 

@@ -1,6 +1,6 @@
 [project]
 name = "dev-tools"
-version = "0.5.1"
+version = "0.6.0"
 description = "dev-tools helper for agentic coders"
 readme = "README.md"
 authors = [

@@ -2,11 +2,15 @@
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
+
+import pytest
 
 from dev_tools.command_executor import (
     cleanup_stale_pid_files,
+    CommandResult,
     create_pid_file,
     execute_command_step,
     execute_shell_command,
@@ -693,6 +697,335 @@ class TestBackgroundJobMessaging:
         )
 
 
+class TestNewStartServicesFormat:
+    """Test suite for new start_services format with docker configuration."""
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_dict_config_image_only(self, mock_execute):
+        """Test starting Docker service with dict config containing only image."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {"image": "rebelthor/sleep"}
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct image
+        args, kwargs = mock_execute.call_args_list[1]
+        assert "docker run -d --name sleep rebelthor/sleep" in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_dict_config_full(self, mock_execute):
+        """Test starting Docker service with full dict config."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {
+            "image": "rebelthor/sleep",
+            "ports": ["80:80", "81:127.0.0.1:443"],
+            "volumes": ["./:/data"],
+        }
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d -v ./:/data -p 80:80 -p 127.0.0.1:443:81 --name sleep rebelthor/sleep"
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_dict_config_ports_only(self, mock_execute):
+        """Test starting Docker service with dict config containing image and ports."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {"image": "redis:alpine", "ports": ["6379:6379"]}
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d -p 6379:6379 --name redis redis:alpine"
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_dict_config_volumes_only(self, mock_execute):
+        """Test starting Docker service with dict config containing image and volumes."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {
+            "image": "postgres:13",
+            "volumes": ["/var/lib/postgresql/data:/var/lib/postgresql/data"],
+        }
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d -v /var/lib/postgresql/data:/var/lib/postgresql/data --name postgres postgres:13"
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_dict_config_container_exists(self, mock_execute):
+        """Test starting Docker service with dict config when container already exists."""
+        # Mock container exists and is running
+        mock_execute.side_effect = [
+            Mock(success=True, stdout="sleep"),  # Container exists
+            Mock(success=True, stdout="sleep"),  # Container is running
+        ]
+
+        service_config = {"image": "rebelthor/sleep"}
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert result.stdout == "Container already running"
+        assert mock_execute.call_count == 2
+
+    def test_start_docker_service_with_dict_config_missing_image(self):
+        """Test starting Docker service with dict config missing required image."""
+        service_config = {"ports": ["80:80"]}
+        result = start_docker_service(service_config)
+
+        assert result.success is False
+        assert "Service configuration must include 'image'" in result.stderr
+
+    def test_start_docker_service_with_dict_config_invalid_type(self):
+        """Test starting Docker service with invalid service configuration type."""
+        service_config = 123  # Invalid type
+        result = start_docker_service(service_config)
+
+        assert result.success is False
+        assert "Service must be a string or dictionary" in result.stderr
+
+    @patch("dev_tools.command_executor.start_docker_service")
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_execute_command_step_with_mixed_start_services(
+        self, mock_execute, mock_start_service
+    ):
+        """Test command step execution with mixed start_services (string and dict)."""
+        mock_start_service.return_value = Mock(success=True)
+        mock_execute.return_value = Mock(success=True)
+
+        step = {
+            "start_services": [
+                "redis",  # String format (legacy)
+                {"image": "postgres:13", "ports": ["5432:5432"]},  # Dict format (new)
+            ],
+            "run": "test command",
+        }
+
+        result = execute_command_step(step, Path("/tmp"))
+
+        assert result.success is True
+        assert mock_start_service.call_count == 2
+        mock_start_service.assert_any_call("redis")
+        mock_start_service.assert_any_call(
+            {"image": "postgres:13", "ports": ["5432:5432"]}
+        )
+
+    @patch("dev_tools.command_executor.start_docker_service")
+    def test_execute_command_step_with_dict_service_failure(self, mock_start_service):
+        """Test that dict service startup failure stops command execution."""
+        mock_start_service.return_value = Mock(
+            success=False, stderr="Service failed to start"
+        )
+
+        step = {"start_services": [{"image": "failing/service"}], "run": "test command"}
+
+        result = execute_command_step(step, Path("/tmp"))
+
+        assert result.success is False
+        assert "Service failed to start" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_named_service_format(self, mock_execute):
+        """Test starting Docker service with named service format."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {
+            "box": {
+                "image": "alpine",
+                "volumes": ["./:/data"],
+                "ports": ["5432:127.0.0.1:5432"],
+            }
+        }
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments and container name is "box"
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = (
+            "docker run -d -v ./:/data -p 127.0.0.1:5432:5432 --name box alpine"
+        )
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_named_service_image_only(self, mock_execute):
+        """Test starting Docker service with named service format, image only."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {"cache": {"image": "redis"}}
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments and container name is "cache"
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d --name cache redis"
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_named_service_container_exists(
+        self, mock_execute
+    ):
+        """Test starting Docker service with named service format when container already exists."""
+        # Mock container exists and is running
+        mock_execute.side_effect = [
+            Mock(success=True, stdout="box"),  # Container exists
+            Mock(success=True, stdout="box"),  # Container is running
+        ]
+
+        service_config = {"box": {"image": "alpine"}}
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert result.stdout == "Container already running"
+        assert mock_execute.call_count == 2
+
+    def test_start_docker_service_with_named_service_missing_image(self):
+        """Test starting Docker service with named service format missing required image."""
+        service_config = {"box": {"ports": ["80:80"]}}
+        result = start_docker_service(service_config)
+
+        assert result.success is False
+        assert "Service configuration must include 'image'" in result.stderr
+
+    @patch("dev_tools.command_executor.start_docker_service")
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_execute_command_step_with_named_services(
+        self, mock_execute, mock_start_service
+    ):
+        """Test command step execution with named services format."""
+        mock_start_service.return_value = Mock(success=True)
+        mock_execute.return_value = Mock(success=True)
+
+        step = {
+            "start_services": [
+                {"box": {"image": "alpine", "volumes": ["./:/data"]}},
+                {"cache": {"image": "redis"}},
+            ],
+            "run": "test command",
+        }
+
+        result = execute_command_step(step, Path("/tmp"))
+
+        assert result.success is True
+        assert mock_start_service.call_count == 2
+        mock_start_service.assert_any_call(
+            {"box": {"image": "alpine", "volumes": ["./:/data"]}}
+        )
+        mock_start_service.assert_any_call({"cache": {"image": "redis"}})
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_named_service_and_command(self, mock_execute):
+        """Test starting Docker service with named service format including command."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {
+            "box": {
+                "image": "alpine",
+                "command": "sleep infinity",
+                "volumes": ["./:/data"],
+                "ports": ["5432:127.0.0.1:5432"],
+            }
+        }
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments including command
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d -v ./:/data -p 127.0.0.1:5432:5432 --name box alpine sleep infinity"
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_direct_dict_and_command(self, mock_execute):
+        """Test starting Docker service with direct dictionary format including command."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {
+            "image": "alpine",
+            "command": "tail -f /dev/null",
+            "ports": ["8080:80"],
+        }
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments including command
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d -p 8080:80 --name alpine alpine tail -f /dev/null"
+        assert expected_cmd in args[0]
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_with_command_only(self, mock_execute):
+        """Test starting Docker service with command but no other options."""
+        # Mock container doesn't exist check
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=True, stdout="container_id\n"),  # Docker run success
+        ]
+
+        service_config = {
+            "worker": {
+                "image": "ubuntu:20.04",
+                "command": "bash -c 'while true; do echo working; sleep 10; done'",
+            }
+        }
+        result = start_docker_service(service_config)
+
+        assert result.success is True
+        assert mock_execute.call_count == 2
+        # Check that docker run was called with correct arguments
+        args, kwargs = mock_execute.call_args_list[1]
+        expected_cmd = "docker run -d --name worker ubuntu:20.04 bash -c 'while true; do echo working; sleep 10; done'"
+        assert expected_cmd in args[0]
+
+
 class TestDirectoryOption:
     """Test suite for directory option functionality."""
 
@@ -969,3 +1302,410 @@ class TestPIDCleanup:
         assert "stale1.pid (PID 12345)" in result.stdout
         assert "stale2.pid (PID 67890)" in result.stdout
         assert mock_remove_pid.call_count == 2
+
+
+class TestDockerServiceErrorScenarios:
+    """Test suite for Docker service error scenarios."""
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_docker_not_available(self, mock_execute):
+        """Test starting Docker service when Docker is not available."""
+        mock_execute.return_value = CommandResult(
+            success=False, stderr="docker: command not found", returncode=-1
+        )
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "docker: command not found" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_docker_daemon_not_running(self, mock_execute):
+        """Test starting Docker service when Docker daemon is not running."""
+        mock_execute.return_value = Mock(
+            success=False, stderr="Cannot connect to the Docker daemon", returncode=1
+        )
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "Cannot connect to the Docker daemon" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_permission_denied(self, mock_execute):
+        """Test starting Docker service with permission denied."""
+        mock_execute.return_value = Mock(
+            success=False,
+            stderr="permission denied while trying to connect to the Docker daemon socket",
+            returncode=1,
+        )
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "permission denied" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_image_not_found(self, mock_execute):
+        """Test starting Docker service with non-existent image."""
+        # First call (check if container exists) succeeds
+        # Second call (docker run) fails with image not found
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(
+                success=False,
+                stderr="Unable to find image 'nonexistent:latest'",
+                returncode=125,
+            ),
+        ]
+
+        result = start_docker_service("nonexistent")
+
+        assert result.success is False
+        assert "Unable to find image" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_port_already_in_use(self, mock_execute):
+        """Test starting Docker service when port is already in use."""
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=False, stderr="port is already allocated", returncode=125),
+        ]
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "port is already allocated" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_stop_docker_service_error_scenarios(self, mock_execute):
+        """Test stop_docker_service error scenarios."""
+        # Test container not found
+        mock_execute.return_value = Mock(
+            success=False, stderr="No such container: redis", returncode=1
+        )
+
+        result = stop_docker_service("redis")
+
+        assert result.success is False
+        assert "No such container" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_insufficient_permissions(self, mock_execute):
+        """Test starting Docker service with insufficient Docker permissions."""
+        mock_execute.return_value = Mock(
+            success=False,
+            stderr="Got permission denied while trying to connect to the Docker daemon socket",
+            returncode=1,
+        )
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "permission denied" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_out_of_disk_space(self, mock_execute):
+        """Test starting Docker service when out of disk space."""
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=False, stderr="no space left on device", returncode=1),
+        ]
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "no space left on device" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_network_error(self, mock_execute):
+        """Test starting Docker service with network connectivity issues."""
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(
+                success=False,
+                stderr="Error response from daemon: network not found",
+                returncode=1,
+            ),
+        ]
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "network not found" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_invalid_configuration(self, mock_execute):
+        """Test starting Docker service with invalid configuration."""
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(success=False, stderr="invalid reference format", returncode=125),
+        ]
+
+        result = start_docker_service("redis")
+
+        assert result.success is False
+        assert "invalid reference format" in result.stderr
+
+    def test_start_docker_service_invalid_service_type(self):
+        """Test starting Docker service with invalid service type."""
+        result = start_docker_service(123)  # Invalid type
+
+        assert result.success is False
+        assert "Service must be a string or dictionary" in result.stderr
+
+    def test_start_docker_service_empty_service_config(self):
+        """Test starting Docker service with empty service configuration."""
+        result = start_docker_service({})  # Empty dict
+
+        assert result.success is False
+        assert "Service configuration must include 'image'" in result.stderr
+
+    def test_start_docker_service_named_service_empty_config(self):
+        """Test starting Docker service with named service but empty config."""
+        result = start_docker_service({"myservice": {}})
+
+        assert result.success is False
+        assert "Service configuration must include 'image'" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_start_docker_service_container_start_failure(self, mock_execute):
+        """Test starting Docker service when container creation fails."""
+        mock_execute.side_effect = [
+            Mock(success=True, stdout=""),  # Container doesn't exist
+            Mock(
+                success=False, stderr="failed to start container", returncode=1
+            ),  # docker run fails
+        ]
+
+        result = start_docker_service({"image": "redis"})
+
+        assert result.success is False
+        assert "failed to start container" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_stop_docker_service_container_removal_failure(self, mock_execute):
+        """Test stopping Docker service when stop+remove command fails."""
+        mock_execute.return_value = Mock(
+            success=False, stderr="removal of container failed", returncode=1
+        )
+
+        result = stop_docker_service("redis")
+
+        assert result.success is False
+        assert "removal of container failed" in result.stderr
+
+    @patch("dev_tools.command_executor.execute_shell_command")
+    def test_stop_docker_service_docker_daemon_error(self, mock_execute):
+        """Test stopping Docker service when Docker daemon has an error."""
+        mock_execute.return_value = Mock(
+            success=False,
+            stderr="Error response from daemon: server error",
+            returncode=1,
+        )
+
+        result = stop_docker_service("redis")
+
+        assert result.success is False
+        assert "server error" in result.stderr
+
+
+class TestCommandExecutorErrorHandling:
+    """Test suite for command executor error handling."""
+
+    @patch("pathlib.Path.exists")
+    def test_read_pid_file_permission_error(self, mock_exists):
+        """Test read_pid_file with permission error."""
+        mock_exists.return_value = True
+        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+            result = read_pid_file(Path("test.pid"))
+            assert result is None
+
+    @patch("pathlib.Path.exists")
+    def test_read_pid_file_corrupted_content(self, mock_exists):
+        """Test read_pid_file with corrupted content."""
+        mock_exists.return_value = True
+        with patch("builtins.open", mock_open(read_data="not_a_number")):
+            result = read_pid_file(Path("test.pid"))
+            assert result is None
+
+    @patch("pathlib.Path.exists")
+    def test_read_pid_file_empty_file(self, mock_exists):
+        """Test read_pid_file with empty file."""
+        mock_exists.return_value = True
+        with patch("builtins.open", mock_open(read_data="")):
+            result = read_pid_file(Path("test.pid"))
+            assert result is None
+
+    @patch("os.kill")
+    def test_is_process_running_permission_error(self, mock_kill):
+        """Test is_process_running with permission error."""
+        mock_kill.side_effect = PermissionError("Operation not permitted")
+
+        result = is_process_running(12345)
+
+        # Should return True when permission denied (process exists but no access)
+        assert result is True
+
+    @patch("os.kill")
+    def test_is_process_running_other_os_error(self, mock_kill):
+        """Test is_process_running with other OS error."""
+        mock_kill.side_effect = OSError("System error")
+
+        # Other OS errors should raise an exception
+        with pytest.raises(OSError):
+            is_process_running(12345)
+
+    def test_generate_pid_filename_edge_cases(self):
+        """Test generate_pid_filename with edge cases."""
+        # Empty command name
+        result = generate_pid_filename("", "command")
+        assert result.startswith(".")
+        assert result.endswith(".pid")
+        assert len(result) == 13  # .{8chars}.pid
+
+        # Empty command
+        result = generate_pid_filename("name", "")
+        assert result.startswith(".")
+        assert result.endswith(".pid")
+
+        # Very long strings
+        long_name = "a" * 1000
+        long_command = "b" * 1000
+        result = generate_pid_filename(long_name, long_command)
+        assert len(result) == 13  # Should still be same length
+
+    @patch("subprocess.run")
+    def test_execute_shell_command_general_exception(self, mock_run):
+        """Test execute_shell_command with general exception."""
+        mock_run.side_effect = Exception("Unexpected error")
+
+        result = execute_shell_command("test command")
+
+        assert result.success is False
+        assert "Unexpected error" in result.stderr
+
+    @patch("subprocess.run")
+    def test_execute_shell_command_keyboard_interrupt(self, mock_run):
+        """Test execute_shell_command with KeyboardInterrupt."""
+        # Use a regular Exception to simulate KeyboardInterrupt behavior without actually raising it
+        mock_run.side_effect = Exception("KeyboardInterrupt simulation")
+
+        result = execute_shell_command("test command")
+
+        assert result.success is False
+        assert "KeyboardInterrupt simulation" in result.stderr
+
+    @patch("pathlib.Path.exists")
+    def test_create_pid_file_permission_error(self, mock_exists):
+        """Test create_pid_file with permission error."""
+        mock_exists.return_value = False
+        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+            # Should raise the PermissionError
+            with pytest.raises(PermissionError):
+                create_pid_file(Path("test.pid"), 12345)
+
+    @patch("pathlib.Path.exists")
+    def test_create_pid_file_disk_full_error(self, mock_exists):
+        """Test create_pid_file when disk is full."""
+        mock_exists.return_value = False
+        with patch("builtins.open", side_effect=OSError("No space left on device")):
+            # Should raise the OSError
+            with pytest.raises(OSError):
+                create_pid_file(Path("test.pid"), 12345)
+
+    @patch("pathlib.Path.exists")
+    def test_remove_pid_file_permission_error(self, mock_exists):
+        """Test remove_pid_file with permission error."""
+        mock_exists.return_value = True
+        with patch(
+            "pathlib.Path.unlink", side_effect=PermissionError("Permission denied")
+        ):
+            # Should raise the PermissionError
+            with pytest.raises(PermissionError):
+                remove_pid_file(Path("test.pid"))
+
+    @patch("pathlib.Path.exists")
+    def test_remove_pid_file_file_in_use_error(self, mock_exists):
+        """Test remove_pid_file when file is in use."""
+        mock_exists.return_value = True
+        with patch("pathlib.Path.unlink", side_effect=OSError("Resource busy")):
+            # Should raise the OSError
+            with pytest.raises(OSError):
+                remove_pid_file(Path("test.pid"))
+
+    @patch("pathlib.Path.exists")
+    def test_read_pid_file_unicode_decode_error(self, mock_exists):
+        """Test read_pid_file with unicode decode error."""
+        mock_exists.return_value = True
+        with patch(
+            "builtins.open",
+            side_effect=UnicodeDecodeError("utf-8", b"", 0, 1, "invalid start byte"),
+        ):
+            result = read_pid_file(Path("test.pid"))
+            assert result is None
+
+    @patch("pathlib.Path.exists")
+    def test_read_pid_file_io_error(self, mock_exists):
+        """Test read_pid_file with I/O error."""
+        mock_exists.return_value = True
+        with patch("builtins.open", side_effect=IOError("I/O operation failed")):
+            result = read_pid_file(Path("test.pid"))
+            assert result is None
+
+    def test_load_environment_variables_file_not_found(self):
+        """Test load_environment_variables when .env file doesn't exist."""
+        non_existent_file = Path("/nonexistent/.env")
+        # Should not raise any exception
+        load_environment_variables(non_existent_file)
+
+    def test_load_environment_variables_permission_error(self):
+        """Test load_environment_variables with permission error."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("TEST=value")
+
+            # Mock load_dotenv to raise an exception
+            with patch(
+                "dev_tools.command_executor.load_dotenv",
+                side_effect=PermissionError("Permission denied"),
+            ):
+                # Should not crash the application
+                with pytest.raises(PermissionError):
+                    load_environment_variables(env_file)
+
+    def test_load_environment_variables_malformed_env_file(self):
+        """Test load_environment_variables with malformed .env file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("INVALID_LINE_WITHOUT_EQUALS\nVALID=value\n")
+
+            # Should not raise exception (load_dotenv handles malformed files gracefully)
+            load_environment_variables(env_file)
+
+    def test_cleanup_stale_pid_files_permission_error(self):
+        """Test cleanup_stale_pid_files with permission error accessing directory."""
+        with patch(
+            "pathlib.Path.glob", side_effect=PermissionError("Permission denied")
+        ):
+            # The function doesn't catch glob errors, so they propagate
+            with pytest.raises(PermissionError):
+                cleanup_stale_pid_files(Path("."))
+
+    @patch("pathlib.Path.glob")
+    def test_cleanup_stale_pid_files_file_removal_error(self, mock_glob):
+        """Test cleanup_stale_pid_files when individual file removal fails."""
+        mock_pid_file = Mock()
+        mock_pid_file.name = "test.pid"
+        mock_pid_file.unlink.side_effect = PermissionError("Cannot remove file")
+        mock_glob.return_value = [mock_pid_file]
+
+        with patch("dev_tools.command_executor.read_pid_file", return_value=12345):
+            with patch(
+                "dev_tools.command_executor.is_process_running", return_value=False
+            ):
+                result = cleanup_stale_pid_files(Path("."))
+
+                # Should fail when there are errors and no successful operations
+                assert result.success is False
+                assert "Cannot remove file" in result.stderr

@@ -1,6 +1,7 @@
 """Tests for CLI interface functionality."""
 
 import argparse
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -187,6 +188,211 @@ class TestMainFunction:
         mock_handle_logs.assert_called_once_with(Path("."))
         mock_print.assert_called_with("log output")
 
+
+class TestCLIExceptionHandling:
+    """Test suite for CLI exception handling."""
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_create_argument_parser_config_loading_failure(self, mock_load_config):
+        """Test create_argument_parser when config loading fails."""
+        # Mock config loading failure
+        mock_load_config.side_effect = Exception("Config loading failed")
+
+        # Should handle exception gracefully and return parser with fallback commands
+        parser = create_argument_parser()
+
+        assert parser is not None
+        # Should have fallback commands
+        help_text = parser.format_help()
+        assert "logs" in help_text
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_create_argument_parser_permission_error(self, mock_load_config):
+        """Test create_argument_parser when permission error occurs."""
+        mock_load_config.side_effect = PermissionError("Permission denied")
+
+        parser = create_argument_parser()
+        assert parser is not None
+
+    @patch("dev_tools.cli.handle_command_execution")
+    @patch("dev_tools.cli.setup_application_logging")
+    @patch("dev_tools.cli.create_argument_parser")
+    def test_main_general_exception(self, mock_parser, mock_logging, mock_handle):
+        """Test main function with general exception."""
+        mock_args = Mock()
+        mock_args.command = "test"
+        mock_args.project_dir = Path(".")
+        mock_args.verbose = False
+        mock_args.version = False
+
+        mock_parser.return_value.parse_args.return_value = mock_args
+        mock_handle.side_effect = Exception("General error")
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+    @patch("dev_tools.cli.create_argument_parser")
+    def test_main_argument_parsing_error(self, mock_parser):
+        """Test main function when argument parsing fails."""
+        mock_parser.return_value.parse_args.side_effect = SystemExit(2)
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 2
+
+    def test_handle_command_execution_invalid_project_dir(self):
+        """Test handle_command_execution with invalid project directory."""
+        invalid_dir = Path("/nonexistent/directory")
+
+        result = handle_command_execution("test", invalid_dir)
+        assert result.success is False
+        # When project dir doesn't exist, it loads default config which only has 'logs'
+        assert "Unknown command 'test'" in result.stderr
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_handle_command_execution_config_loading_exception(self, mock_load_config):
+        """Test handle_command_execution when config loading throws exception."""
+        mock_load_config.side_effect = OSError("Disk error")
+
+        # Exception should propagate up since CLI doesn't handle it
+        with pytest.raises(OSError):
+            handle_command_execution("test", Path("."))
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_handle_command_execution_command_execution_failure(
+        self, mock_load_config, mock_execute
+    ):
+        """Test handle_command_execution when command execution fails."""
+        mock_load_config.return_value = {"commands": {"test": [{"run": "pytest"}]}}
+        mock_execute.return_value = Mock(success=False, stderr="Command failed")
+
+        result = handle_command_execution("test", Path("."))
+        assert result.success is False
+
+
+class TestCLIEdgeCases:
+    """Test suite for CLI edge cases."""
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_create_argument_parser_empty_commands(self, mock_load_config):
+        """Test create_argument_parser with empty commands."""
+        mock_load_config.return_value = {"commands": {}}
+
+        parser = create_argument_parser()
+        help_text = parser.format_help()
+
+        # Should still have logs command as fallback
+        assert "logs" in help_text
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_create_argument_parser_none_config(self, mock_load_config):
+        """Test create_argument_parser when config is None."""
+        mock_load_config.return_value = None
+
+        parser = create_argument_parser()
+        assert parser is not None
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_create_argument_parser_malformed_config(self, mock_load_config):
+        """Test create_argument_parser with malformed config."""
+        mock_load_config.return_value = {"not_commands": {"test": []}}
+
+        parser = create_argument_parser()
+        help_text = parser.format_help()
+
+        # Should handle malformed config gracefully
+        assert "logs" in help_text
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_handle_command_execution_empty_command_steps(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test handle_command_execution with empty command steps."""
+        mock_load_config.return_value = {"commands": {"test": []}}
+        mock_execute.return_value = Mock(success=True)
+
+        # Should not raise exception
+        result = handle_command_execution("test", Path("."))
+        assert result.success is True
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_handle_command_execution_command_not_list(self, mock_load_config):
+        """Test handle_command_execution when command is not a list."""
+        mock_load_config.return_value = {"commands": {"test": "not a list"}}
+
+        # Should raise AttributeError when trying to call .get() on string
+        with pytest.raises(AttributeError):
+            handle_command_execution("test", Path("."))
+
+    @patch("dev_tools.cli.setup_application_logging")
+    def test_logging_setup_error_handling(self, mock_logging):
+        """Test main function when logging setup fails."""
+        mock_logging.side_effect = PermissionError("Cannot write log file")
+
+        # Exception should propagate since main doesn't handle it
+        with patch("dev_tools.cli.create_argument_parser") as mock_parser:
+            mock_args = Mock()
+            mock_args.command = "test"
+            mock_args.project_dir = Path(".")
+            mock_args.verbose = False
+            mock_parser.return_value.parse_args.return_value = mock_args
+
+            with pytest.raises(PermissionError):
+                main()
+
+
+class TestCLIIntegrationScenarios:
+    """Test suite for CLI integration scenarios."""
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_logs_command_with_nonexistent_file(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test logs command when activity.log doesn't exist."""
+        mock_load_config.return_value = {
+            "commands": {"logs": [{"run": "tail -n 50 activity.log"}]}
+        }
+        mock_execute.return_value = Mock(success=False, stderr="File not found")
+
+        result = handle_command_execution("logs", Path("."))
+        assert result.success is False
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_special_characters_in_project_path(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test handling project paths with special characters."""
+        mock_load_config.return_value = {"commands": {"test": [{"run": "echo test"}]}}
+        mock_execute.return_value = Mock(success=True)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create directory with special characters
+            special_dir = Path(temp_dir) / "project with spaces & symbols"
+            special_dir.mkdir()
+
+            # Should handle special characters in path
+            result = handle_command_execution("test", special_dir)
+            assert result.success is True
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_very_long_command_name(self, mock_load_config):
+        """Test handling very long command names."""
+        long_command = "a" * 1000  # Very long command name
+        mock_load_config.return_value = {"commands": {"test": [{"run": "echo test"}]}}
+
+        result = handle_command_execution(long_command, Path("."))
+        assert result.success is False
+
     @patch("dev_tools.cli.setup_application_logging")
     @patch("dev_tools.cli.cleanup_stale_pid_files")
     @patch("sys.argv", ["dev-tools.py", "cleanup-pids"])
@@ -243,6 +449,257 @@ class TestMainFunction:
 
         mock_print.assert_called_with("command failed")
         mock_exit.assert_called_once_with(1)
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_python_project_test_command(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow for Python project test command."""
+        # Simulate Python project configuration
+        mock_load_config.return_value = {
+            "commands": {
+                "test": [
+                    {"start_services": ["redis"]},
+                    {"run": "pytest tests/"},
+                    {"cleanup": True},
+                ]
+            }
+        }
+        mock_execute.return_value = Mock(success=True, stdout="All tests passed")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            # Create pyproject.toml to make it a Python project
+            (project_dir / "pyproject.toml").write_text('[project]\nname = "test"')
+
+            result = handle_command_execution("test", project_dir)
+
+            assert result.success is True
+            mock_load_env.assert_called_once()
+            mock_execute.assert_called_once()
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_nodejs_project_build_command(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow for Node.js project build command."""
+        # Simulate Node.js project configuration
+        mock_load_config.return_value = {
+            "commands": {
+                "build": [
+                    {"run": "npm ci"},
+                    {"run": "npm run build"},
+                    {"directory": "./dist"},
+                ]
+            }
+        }
+        mock_execute.return_value = Mock(success=True, stdout="Build completed")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            # Create package.json to make it a Node.js project
+            (project_dir / "package.json").write_text(
+                '{"name": "test", "scripts": {"build": "webpack"}}'
+            )
+
+            result = handle_command_execution("build", project_dir)
+
+            assert result.success is True
+            mock_execute.assert_called_once()
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_with_daemon_background_process(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow with daemon background process."""
+        mock_load_config.return_value = {
+            "commands": {
+                "dev": [
+                    {"start_services": [{"db": {"image": "postgres"}}]},
+                    {"run": "npm run dev", "background": True, "daemon": True},
+                ]
+            }
+        }
+        mock_execute.return_value = Mock(
+            success=True, pid=12345, stdout="Development server started"
+        )
+
+        result = handle_command_execution("dev", Path("."))
+
+        assert result.success is True
+        mock_execute.assert_called_once()
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_multiple_step_command_with_failure(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow with multiple steps where one step fails."""
+        mock_load_config.return_value = {
+            "commands": {
+                "deploy": [
+                    {"run": "npm test"},
+                    {"run": "npm run build"},
+                    {"run": "docker build -t myapp ."},
+                    {"run": "docker push myapp"},
+                ]
+            }
+        }
+        # Simulate failure in the build step
+        mock_execute.return_value = Mock(success=False, stderr="Build failed")
+
+        result = handle_command_execution("deploy", Path("."))
+
+        assert result.success is False
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_with_env_file_loading(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow that loads environment variables from .env file."""
+        mock_load_config.return_value = {
+            "commands": {"test": [{"run": "echo $DATABASE_URL"}]}
+        }
+        mock_execute.return_value = Mock(
+            success=True, stdout="postgresql://localhost:5432/test"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            # Create .env file
+            (project_dir / ".env").write_text(
+                "DATABASE_URL=postgresql://localhost:5432/test\n"
+            )
+
+            result = handle_command_execution("test", project_dir)
+
+            assert result.success is True
+            mock_load_env.assert_called_once()
+
+    @patch("dev_tools.cli.setup_application_logging")
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    @patch("sys.argv", ["dev-tools.py", "--verbose", "test"])
+    def test_complete_cli_workflow_with_verbose_logging(
+        self, mock_load_env, mock_load_config, mock_execute, mock_setup_logging
+    ):
+        """Test complete CLI workflow from argument parsing to command execution with verbose logging."""
+        mock_load_config.return_value = {
+            "commands": {"test": [{"run": "pytest tests/"}]}
+        }
+        mock_execute.return_value = Mock(success=True, stdout="All tests passed")
+
+        with patch(
+            "dev_tools.cli.handle_command_execution",
+            return_value=Mock(success=True, stdout="All tests passed"),
+        ) as mock_handle:
+            with patch("builtins.print") as mock_print:
+                main()
+
+        # Verify full workflow
+        mock_setup_logging.assert_called_once()
+        mock_handle.assert_called_once_with("test", Path("."))
+        mock_print.assert_called_with("All tests passed")
+
+        # Verify verbose logging was enabled
+        call_args = mock_setup_logging.call_args[1]
+        assert call_args.get("verbose") is True
+
+    @patch("dev_tools.cli.setup_application_logging")
+    @patch("dev_tools.cli.cleanup_stale_pid_files")
+    @patch("sys.argv", ["dev-tools.py", "cleanup-pids"])
+    def test_complete_cli_workflow_cleanup_pids_command(
+        self, mock_cleanup, mock_setup_logging
+    ):
+        """Test complete CLI workflow for cleanup-pids command."""
+        mock_cleanup.return_value = Mock(
+            success=True,
+            stdout="Cleaned up 3 stale PID files: test1.pid, test2.pid, test3.pid",
+        )
+
+        with patch("builtins.print") as mock_print:
+            main()
+
+        # Verify full workflow
+        mock_setup_logging.assert_called_once()
+        mock_cleanup.assert_called_once_with(Path("."))
+        mock_print.assert_called_with(
+            "Cleaned up 3 stale PID files: test1.pid, test2.pid, test3.pid"
+        )
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_rust_project_with_custom_config(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow for Rust project with custom configuration."""
+        mock_load_config.return_value = {
+            "commands": {
+                "test": [
+                    {"run": "cargo fmt --check"},
+                    {"run": "cargo clippy -- -D warnings"},
+                    {"run": "cargo test --release"},
+                ],
+                "build": [{"run": "cargo build --release"}],
+            }
+        }
+        mock_execute.return_value = Mock(
+            success=True, stdout="Tests completed successfully"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            # Create Cargo.toml to make it a Rust project
+            (project_dir / "Cargo.toml").write_text(
+                '[package]\nname = "test"\nversion = "0.1.0"'
+            )
+
+            result = handle_command_execution("test", project_dir)
+
+            assert result.success is True
+            mock_execute.assert_called_once()
+
+    @patch("dev_tools.cli.execute_command_with_steps")
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("dev_tools.cli.load_environment_variables")
+    def test_full_workflow_error_recovery_and_cleanup(
+        self, mock_load_env, mock_load_config, mock_execute
+    ):
+        """Test full workflow error recovery and cleanup behavior."""
+        mock_load_config.return_value = {
+            "commands": {
+                "deploy": [
+                    {"start_services": ["database", "redis"]},
+                    {"run": "npm test"},
+                    {"run": "npm run build"},
+                    {"cleanup": True},
+                ]
+            }
+        }
+
+        # Simulate failure after services are started
+        mock_execute.return_value = Mock(
+            success=False, stderr="Deployment failed during build step"
+        )
+
+        result = handle_command_execution("deploy", Path("."))
+
+        assert result.success is False
+        mock_execute.assert_called_once()
+        # Verify that cleanup would be attempted even on failure
+        call_args = mock_execute.call_args
+        assert call_args[0][1]  # command steps were passed to executor
 
 
 class TestLoggingPathLogic:

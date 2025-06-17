@@ -55,7 +55,11 @@ version = "0.1.0"
 
             assert "commands" in config
             assert "test" in config["commands"]
-            assert "dev" in config["commands"]
+            assert "build" in config["commands"]
+            assert "lint" in config["commands"]
+            assert (
+                "dev" not in config["commands"]
+            )  # dev command should not be included by default
             assert any("npm test" in str(cmd) for cmd in config["commands"]["test"])
 
     def test_custom_config_overrides_defaults(self):

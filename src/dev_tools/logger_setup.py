@@ -24,15 +24,13 @@ def setup_application_logging(
 
     level = getattr(logging, log_level.upper(), logging.INFO)
 
-    logging.basicConfig(
-        level=level, format=log_format, datefmt=date_format, handlers=[]
-    )
+    # Configure root logger explicitly to ensure level is set correctly
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
 
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(level)
     file_handler.setFormatter(logging.Formatter(log_format, date_format))
-
-    root_logger = logging.getLogger()
     root_logger.addHandler(file_handler)
 
     if verbose:

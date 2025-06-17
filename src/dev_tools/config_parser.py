@@ -33,10 +33,10 @@ def load_dev_config_from_file(config_path: Path) -> dict[str, Any] | None:
             return config
     except yaml.YAMLError as e:
         logger.error(f"Failed to parse YAML configuration file {config_path}: {e}")
-        raise
+        return None
     except Exception as e:
         logger.error(f"Failed to read configuration file {config_path}: {e}")
-        raise
+        return None
 
 
 def detect_project_type(project_dir: Path) -> str:
@@ -87,7 +87,6 @@ def get_default_commands_for_project_type(project_type: str) -> dict[str, Any]:
             "commands": {
                 "test": [{"run": "npm test"}],
                 "lint": [{"run": "npm run lint"}],
-                "dev": [{"run": "npm run dev", "daemon": True}],
                 "build": [{"run": "npm run build"}],
                 "logs": [{"run": "tail -n 50 activity.log"}],
             }
@@ -145,7 +144,13 @@ def load_configuration_for_project(project_dir: Path) -> dict[str, Any]:
         Complete configuration dictionary
     """
     config_path = project_dir / ".dev-config.yaml"
-    user_config = load_dev_config_from_file(config_path) or {}
+    try:
+        user_config = load_dev_config_from_file(config_path) or {}
+    except (yaml.YAMLError, Exception):
+        logger.warning(
+            f"Failed to load user config from {config_path}, using defaults only"
+        )
+        user_config = {}
 
     project_type = detect_project_type(project_dir)
     defaults = get_default_commands_for_project_type(project_type)

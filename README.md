@@ -83,7 +83,6 @@ Detected by presence of `package.json`:
 - `test`: `npm test`
 - `lint`: `npm run lint`
 - `build`: `npm run build`
-- `dev`: `npm run dev` (runs as daemon by default)
 
 #### Rust Projects
 Detected by presence of `Cargo.toml`:
@@ -93,69 +92,281 @@ Detected by presence of `Cargo.toml`:
 
 ## Configuration
 
-Create a `.dev-config.yaml` file in your project root to customize commands:
+Create a `.dev-config.yaml` file in your project root to customize commands with powerful service and execution management.
+
+### YAML Configuration Format
+
+The configuration file uses a hierarchical structure where each command consists of multiple steps that can start services, execute commands, and control execution flow.
+
+#### Basic Structure
 
 ```yaml
 commands:
+  command-name:
+    - step-option: value
+    - step-option: value
+    # ... additional steps
+```
+
+#### Complete Example
+
+Here's a comprehensive example showcasing all available options:
+
+```yaml
+commands:
+  # Full-featured test command with services and multiple steps
   test:
-    - start_services: ["redis", "postgres"]
-    - run: "uv run pytest tests/ -v"
+    - start_services:
+        - database:
+            image: postgres:15
+            command: "postgres -c log_statement=all"
+            volumes: ["./data:/var/lib/postgresql/data"]
+            ports: ["5432:5432"]
+        - cache:
+            image: redis:alpine
+            ports: ["6379:6379"]
+        - worker:
+            image: "myapp/worker"
+            command: "python worker.py --dev"
+            volumes: ["./app:/app"]
+    - run: "uv run pytest tests/ -v --cov=app"
     - cleanup: true
 
+  # Development server with background execution
+  dev:
+    - start_services: ["postgres", "redis"]  # Simple string format
+    - run: "uvicorn app.main:app --reload --host 0.0.0.0"
+      background: true
+      daemon: true
+      directory: "backend"
+
+  # Multi-command linting with different directories
   lint:
     - run:
         - "uv run ruff check ."
         - "uv run ruff format ."
+        - "uv run mypy app/"
+      directory: "backend"
+    - run: "npm run lint"
+      directory: "frontend"
 
-  dev:
-    - start_services: ["redis"]
-    - run: "uvicorn app.main:app --reload"
-    - background: true
-    - daemon: true
+  # Build command with sequential steps
+  build:
+    - run: "npm run build"
+      directory: "frontend"
+    - run: "uv build"
+      directory: "backend"
+    - run: "docker build -t myapp ."
 
-  custom-command:
-    - run: "echo 'Custom command executed'"
+  # Custom deployment command
+  deploy:
+    - start_services:
+        - deployment-db:
+            image: postgres:15
+            ports: ["5433:5432"]
+    - run: "python scripts/migrate.py"
+    - run: "python scripts/deploy.py --env=prod"
+      background: true
 ```
 
-### Configuration Options
+### Available Configuration Options
 
-Each command step supports:
+#### Command Step Options
 
-- **`start_services`**: Array of Docker services to start
-- **`run`**: Command(s) to execute (string or array)
-- **`background`**: Run command in background (boolean)
-- **`daemon`**: Store PID file for single-instance processes (boolean)
-- **`directory`**: Working directory for command execution (string, absolute or relative path). Note: PID files are always stored in the project root regardless of this option
-- **`cleanup`**: Clean up services after execution (boolean)
+Each command step is a dictionary that can contain the following options:
+
+##### `start_services` (Array)
+Start Docker services before executing commands. Supports multiple formats:
+
+**String Format (Simple):**
+```yaml
+start_services: ["redis", "postgres", "mysql"]
+```
+
+**Named Service Format (Advanced):**
+```yaml
+start_services:
+  - database:
+      image: postgres:15
+      command: "postgres -c log_statement=all"  # Custom startup command
+      volumes: ["./data:/var/lib/postgresql/data", "./config:/etc/postgresql"]
+      ports: ["5432:5432", "5433:127.0.0.1:5432"]
+  - cache:
+      image: redis:alpine
+      ports: ["6379:6379"]
+  - worker:
+      image: "myregistry.com/myapp/worker:latest"
+      command: "python worker.py --dev"
+      volumes: ["./app:/app", "./logs:/logs"]
+      ports: ["8080:8080"]
+```
+
+**Service Configuration Fields:**
+- `image` (required): Docker image name
+- `command` (optional): Custom command to run in container
+- `volumes` (optional): Array of volume mounts in format `["host:container"]`
+- `ports` (optional): Array of port mappings in format `["host:container"]` or `["container:host_ip:host_port"]`
+
+**Port Mapping Examples:**
+- `"80:80"` → `-p 80:80`
+- `"81:127.0.0.1:443"` → `-p 127.0.0.1:443:81`
+
+##### `run` (String or Array)
+Commands to execute. Can be a single command or multiple commands.
+
+```yaml
+# Single command
+run: "uv run pytest tests/"
+
+# Multiple commands (executed sequentially)
+run:
+  - "uv run ruff check ."
+  - "uv run ruff format ."
+  - "uv run pytest tests/"
+```
+
+##### `background` (Boolean)
+Run the command in the background (non-blocking).
+
+```yaml
+run: "uvicorn app.main:app --reload"
+background: true
+```
+
+##### `daemon` (Boolean)
+Store PID file for single-instance processes. Prevents multiple instances of the same command.
+
+```yaml
+run: "uvicorn app.main:app --reload"
+background: true
+daemon: true  # Creates SHA1-based PID file (e.g., .a1b2c3d4.pid)
+```
+
+##### `directory` (String)
+Working directory for command execution. Can be absolute or relative path.
+
+```yaml
+run: "npm run build"
+directory: "frontend"  # Relative to project root
+
+# Or absolute path
+run: "make build"
+directory: "/opt/myproject/backend"
+```
+
+**Note:** PID files are always stored in the project root regardless of the directory option.
+
+##### `cleanup` (Boolean)
+Clean up services after command execution.
+
+```yaml
+- start_services: ["postgres", "redis"]
+- run: "uv run pytest tests/"
+- cleanup: true  # Stops and removes containers
+```
 
 ### Docker Service Management
 
-Services are intelligently managed using Docker containers with automatic lifecycle handling:
+#### Intelligent Service Lifecycle
 
+Services are automatically managed with smart container lifecycle handling:
+
+1. **Container Detection**: Checks if container already exists
+2. **State Management**:
+   - **Doesn't exist**: Creates new container with `docker run`
+   - **Exists but stopped**: Restarts with `docker start`
+   - **Already running**: Skips (no action needed)
+3. **Container Naming**: Uses service name as container name
+
+#### Predefined Services
+
+The following services have predefined configurations for convenience:
+
+```yaml
+# These are equivalent to the detailed configurations below
+start_services: ["redis", "postgres", "mysql"]
+
+# Predefined service configurations:
+# redis → docker run -d --name redis -p 6379:6379 redis:latest
+# postgres → docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest  
+# mysql → docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest
+```
+
+#### Custom Service Examples
+
+**Simple Custom Service:**
+```yaml
+start_services: ["myuser/myapp"]  # Uses myuser/myapp:latest, container name: myapp
+```
+
+**Advanced Custom Service:**
+```yaml
+start_services:
+  - api:
+      image: "myregistry.com/api:v1.2.3"
+      command: "gunicorn app:app --workers 4"
+      volumes: ["./app:/app", "./logs:/var/log/app"]
+      ports: ["8000:8000", "9000:127.0.0.1:9090"]
+```
+
+### Configuration Examples by Use Case
+
+#### Microservices Development
+```yaml
+commands:
+  dev:
+    - start_services:
+        - postgres:
+            image: postgres:15
+            ports: ["5432:5432"]
+        - redis:
+            image: redis:alpine
+            ports: ["6379:6379"]
+        - rabbitmq:
+            image: rabbitmq:3-management
+            ports: ["5672:5672", "15672:15672"]
+    - run: "uvicorn api.main:app --reload"
+      background: true
+      daemon: true
+      directory: "services/api"
+    - run: "python worker.py"
+      background: true 
+      daemon: true
+      directory: "services/worker"
+```
+
+#### Testing with Service Dependencies
 ```yaml
 commands:
   test:
-    - start_services: ["redis", "postgres", "user/custom-service"]
-    - run: "pytest tests/"
+    - start_services:
+        - test-db:
+            image: postgres:15
+            command: "postgres -c fsync=off -c synchronous_commit=off"
+            ports: ["5433:5432"]
+        - test-redis:
+            image: redis:alpine
+            ports: ["6380:6379"]
+    - run: "uv run pytest tests/ --maxfail=1 -v"
+    - cleanup: true
 ```
 
-**Smart Service Lifecycle:**
-1. **Check existing containers**: `docker ps -a` to find existing containers
-2. **Start or restart**:
-   - If container doesn't exist → `docker run -d --name redis -p 6379:6379 redis:latest`
-   - If container exists but stopped → `docker start redis`
-   - If container is already running → skip
-3. **Container naming**: Extracts clean names from image paths
-   - `redis` → container name: `redis`
-   - `user/service` → container name: `service`
-   - `registry.com/namespace/app` → container name: `app`
-
-**Predefined Services:**
-- **Redis**: `redis:latest` on port 6379
-- **PostgreSQL**: `postgres:latest` on port 5432 (password: "password")
-- **MySQL**: `mysql:latest` on port 3306 (root password: "password")
-
-**Custom Services**: Any other service uses `{service}:latest` image
+#### Multi-Environment Build Pipeline
+```yaml
+commands:
+  build-dev:
+    - run: "npm run build:dev"
+      directory: "frontend"
+    - run: "uv build"
+      directory: "backend"
+    
+  build-prod:
+    - run: "npm run build:prod"
+      directory: "frontend"
+    - run: "uv build --wheel"
+      directory: "backend"
+    - run: "docker build -t myapp:latest ."
+```
 
 ## Daemon & PID Management
 
