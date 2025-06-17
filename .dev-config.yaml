@@ -1,0 +1,36 @@
+commands:
+  test-daemon:
+    - run: "echo toot && sleep 10"
+      daemon: true
+
+  test-service:
+    - run: "docker ps"
+    - start_services: [ "rebelthor/sleep" ]
+
+  alpine:
+    - run: "docker ps"
+    - start_services:
+        - box:
+            image: alpine
+            volumes: ["./:/data"]
+            ports: ["5432:127.0.0.1:5432"]
+
+  alpine-redis:
+    - run: "docker ps"
+    - start_services:
+        - box:
+            image: alpine
+            command: "sleep infinity"
+            volumes: ["./:/data"]
+            ports: ["5432:127.0.0.1:5432"]
+        - cache:
+            image: redis
+
+  test-directory:
+    - run: "pwd && ls -la"
+      directory: "src"
+
+  test-daemon-with-directory:
+    - run: "echo 'Running in:' && pwd && sleep 5"
+      daemon: true
+      directory: "src"
