@@ -174,27 +174,27 @@ func TestGetDefaultCommandsForProjectType(t *testing.T) {
 		{
 			name:        "go project defaults",
 			projectType: ProjectTypeGo,
-			wantCommands: []string{"test", "lint", "build", "logs"},
+			wantCommands: []string{"test", "lint", "build"},
 		},
 		{
 			name:        "python project defaults",
 			projectType: ProjectTypePython,
-			wantCommands: []string{"test", "lint", "logs"},
+			wantCommands: []string{"test", "lint"},
 		},
 		{
 			name:        "nodejs project defaults",
 			projectType: ProjectTypeNodeJS,
-			wantCommands: []string{"test", "lint", "build", "logs"},
+			wantCommands: []string{"test", "lint", "build"},
 		},
 		{
 			name:        "rust project defaults",
 			projectType: ProjectTypeRust,
-			wantCommands: []string{"test", "lint", "dev", "build", "logs"},
+			wantCommands: []string{"test", "lint", "dev", "build"},
 		},
 		{
 			name:        "unknown project defaults",
 			projectType: ProjectTypeUnknown,
-			wantCommands: []string{"logs"},
+			wantCommands: []string{},
 		},
 	}
 
@@ -274,7 +274,7 @@ func TestLoadConfigurationForProject(t *testing.T) {
 	}
 
 	// Should have both default Go commands and custom commands
-	expectedCommands := []string{"test", "lint", "build", "logs", "custom"}
+	expectedCommands := []string{"test", "lint", "build", "custom"}
 	for _, cmd := range expectedCommands {
 		if _, exists := config.Commands[cmd]; !exists {
 			t.Errorf("Expected command '%s' not found in final config", cmd)

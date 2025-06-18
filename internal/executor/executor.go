@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"dev-tools/internal/colors"
 	"dev-tools/internal/config"
 )
 
@@ -108,8 +109,8 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 			log.Printf("Failed to create PID file: %v", err)
 		} else {
 			log.Printf("Created PID file %s for daemon process", pidFile)
-			fmt.Printf("Running job '%s' in the foreground. PID: %d, PID file: %s\n", 
-				opts.Command, cmd.Process.Pid, pidFile)
+			fmt.Printf("%s\n", colors.Success("Running job '%s' in the foreground. PID: %d, PID file: %s", 
+				opts.Command, cmd.Process.Pid, pidFile))
 		}
 
 		// Wait for process to complete
@@ -263,7 +264,7 @@ func CleanupStalePIDFiles(projectDir string) CommandResult {
 	var summary strings.Builder
 
 	if len(cleanedFiles) > 0 {
-		fmt.Fprintf(&summary, "Cleaned up %d stale PID file(s):\n", len(cleanedFiles))
+		fmt.Fprintf(&summary, "%s\n", colors.Info("Cleaned up %d stale PID file(s):", len(cleanedFiles)))
 		for _, file := range cleanedFiles {
 			fmt.Fprintf(&summary, "  - %s\n", file)
 		}
@@ -273,7 +274,7 @@ func CleanupStalePIDFiles(projectDir string) CommandResult {
 		if summary.Len() > 0 {
 			summary.WriteString("\n")
 		}
-		fmt.Fprintf(&summary, "Found %d active process(es):\n", len(activeProcesses))
+		fmt.Fprintf(&summary, "%s\n", colors.Info("Found %d active process(es):", len(activeProcesses)))
 		for _, process := range activeProcesses {
 			fmt.Fprintf(&summary, "  - %s\n", process)
 		}
@@ -283,14 +284,14 @@ func CleanupStalePIDFiles(projectDir string) CommandResult {
 		if summary.Len() > 0 {
 			summary.WriteString("\n")
 		}
-		fmt.Fprintf(&summary, "Encountered %d error(s):\n", len(errors))
+		fmt.Fprintf(&summary, "%s\n", colors.Warning("Encountered %d error(s):", len(errors)))
 		for _, error := range errors {
 			fmt.Fprintf(&summary, "  - %s\n", error)
 		}
 	}
 
 	if len(cleanedFiles) == 0 && len(activeProcesses) == 0 && len(errors) == 0 {
-		summary.WriteString("No PID files found to process")
+		summary.WriteString(colors.Info("No PID files found to process"))
 	}
 
 	log.Printf("PID cleanup completed. Summary: %s", summary.String())
@@ -399,13 +400,13 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 					log.Printf("Failed to create PID file: %v", err)
 				} else {
 					log.Printf("Created PID file %s for background daemon process", pidFile)
-					fmt.Printf("Running job '%s' in the background. PID: %d, PID file: %s\n",
-						command, result.PID, pidFile)
+					fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
+						command, result.PID, pidFile))
 				}
 				return result
 			} else if result.PID != 0 && step.Background {
 				log.Printf("Command started with PID %d", result.PID)
-				fmt.Printf("Running job '%s' in the background\n", command)
+				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background", command))
 				return result
 			}
 		}

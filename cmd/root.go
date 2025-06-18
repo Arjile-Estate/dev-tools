@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dev-tools/internal/colors"
 	"dev-tools/internal/config"
 	"dev-tools/internal/executor"
 )
@@ -16,6 +17,7 @@ import (
 var (
 	verbose    bool
 	projectDir string
+	noColor    bool
 )
 
 // generateDynamicHelp creates help text that includes available commands
@@ -62,7 +64,7 @@ Examples:
 
 Available commands: %s
 
-Examples:`, strings.Join(commands, ", "))
+Examples:`, colors.Highlight(strings.Join(commands, ", ")))
 
 		// Show examples for first few commands
 		exampleCount := 0
@@ -101,11 +103,15 @@ sensible defaults, while allowing customization through configuration files.`,
 
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging to stdout")
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.6.2"
+	rootCmd.Version = "0.7.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		// Initialize color support for help display
+		colors.InitializeColorSupport(noColor)
+
 		_, _ = fmt.Fprint(cmd.OutOrStdout(), generateDynamicHelp(projectDir))
 		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), `
@@ -114,6 +120,7 @@ Usage:
 
 Flags:
   -h, --help                 help for dev-tools
+      --no-color             Disable colored output
   -p, --project-dir string   Project directory to run commands in (default ".")
   -v, --verbose              Enable verbose logging to stdout
       --version              version for dev-tools
@@ -161,6 +168,9 @@ func getLogFilePath(executable, homeDir, projectDir string) (string, bool) {
 }
 
 func setupLogging(cmd *cobra.Command, args []string) {
+	// Initialize color support
+	colors.InitializeColorSupport(noColor)
+
 	// Setup basic logging
 	if verbose {
 		log.SetOutput(os.Stdout)
@@ -224,13 +234,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Load environment variables
 	envFile := filepath.Join(projectDir, ".env")
 	if err := executor.LoadEnvironmentVariables(envFile); err != nil {
-		return fmt.Errorf("failed to load environment variables: %w", err)
+		return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
 	}
 
 	// Load configuration
 	config, err := config.LoadConfigurationForProject(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return fmt.Errorf("%s: %w", colors.Error("failed to load configuration"), err)
 	}
 
 	// Check if command exists
@@ -240,8 +250,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		for cmd := range config.Commands {
 			availableCommands = append(availableCommands, cmd)
 		}
-		return fmt.Errorf("unknown command '%s'. Available commands: %s",
-			commandName, strings.Join(availableCommands, ", "))
+		return fmt.Errorf("%s", colors.Error("unknown command '%s'. Available commands: %s",
+			commandName, strings.Join(availableCommands, ", ")))
 	}
 
 	// Execute command
@@ -271,7 +281,7 @@ func handleLogsCommand(cmd *cobra.Command) error {
 		// Fallback to project directory if we can't determine executable
 		logFile := filepath.Join(projectDir, "activity.log")
 		if _, err := os.Stat(logFile); os.IsNotExist(err) {
-			return fmt.Errorf("no log file found at %s", logFile)
+			return fmt.Errorf("%s", colors.Error("no log file found at %s", logFile))
 		}
 
 		result := executor.ExecuteShellCommand(executor.ExecuteOptions{
@@ -280,7 +290,7 @@ func handleLogsCommand(cmd *cobra.Command) error {
 		})
 
 		if !result.Success {
-			return fmt.Errorf("failed to read logs: %s", result.Stderr)
+			return fmt.Errorf("%s", colors.Error("failed to read logs: %s", result.Stderr))
 		}
 
 		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
@@ -293,7 +303,7 @@ func handleLogsCommand(cmd *cobra.Command) error {
 		// Fallback to project directory if we can't get home directory
 		logFile := filepath.Join(projectDir, "activity.log")
 		if _, err := os.Stat(logFile); os.IsNotExist(err) {
-			return fmt.Errorf("no log file found at %s", logFile)
+			return fmt.Errorf("%s", colors.Error("no log file found at %s", logFile))
 		}
 
 		result := executor.ExecuteShellCommand(executor.ExecuteOptions{
@@ -302,7 +312,7 @@ func handleLogsCommand(cmd *cobra.Command) error {
 		})
 
 		if !result.Success {
-			return fmt.Errorf("failed to read logs: %s", result.Stderr)
+			return fmt.Errorf("%s", colors.Error("failed to read logs: %s", result.Stderr))
 		}
 
 		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
