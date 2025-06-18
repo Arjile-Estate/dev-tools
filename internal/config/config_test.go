@@ -62,6 +62,23 @@ func TestLoadDevConfigFromFile(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "config with multiple run commands in array",
+			fileContent: `commands:
+  test-multicmd:
+    - run:
+      - "echo command 1"
+      - "echo command 2"
+      - "echo command 3"`,
+			wantErr: false,
+			wantConfig: &DevConfig{
+				Commands: map[string][]CommandStep{
+					"test-multicmd": {
+						{Run: RunCommand{"echo command 1", "echo command 2", "echo command 3"}},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

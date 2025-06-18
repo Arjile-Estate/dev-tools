@@ -6,6 +6,11 @@ commands:
     - run: "echo toot && sleep 10"
       daemon: true
 
+  test-multicmd:
+    - run:
+      - "echo command 1"
+      - "echo command 2"
+
   test-service:
     - run: "sleep 2 && docker ps"
     - start_services: [ "sleep" ]
