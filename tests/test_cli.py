@@ -48,6 +48,62 @@ class TestArgumentParser:
         args = parser.parse_args(["build"])
         assert args.command == "build"
 
+    def test_create_argument_parser_project_dir_flag(self):
+        """Test --project-dir flag parsing."""
+        parser = create_argument_parser()
+
+        args = parser.parse_args(["--project-dir", "/some/path", "test"])
+        assert args.project_dir == Path("/some/path")
+
+        args = parser.parse_args(["-p", "/other/path", "test"])
+        assert args.project_dir == Path("/other/path")
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    def test_create_argument_parser_respects_project_dir_for_help(
+        self, mock_load_config
+    ):
+        """Test that create_argument_parser loads config from project_dir when showing help."""
+
+        # Mock different configs for different directories
+        def mock_load_config_side_effect(project_dir):
+            if str(project_dir) == "/custom/project":
+                return {"commands": {"custom-command": [{"run": "echo custom"}]}}
+            else:
+                return {"commands": {"default-command": [{"run": "echo default"}]}}
+
+        mock_load_config.side_effect = mock_load_config_side_effect
+
+        # Test with default directory
+        parser = create_argument_parser()
+        help_text = parser.format_help()
+        assert "default-command" in help_text or "logs" in help_text
+
+        # Test with custom project directory
+        parser = create_argument_parser(Path("/custom/project"))
+        help_text = parser.format_help()
+        assert "custom-command" in help_text
+
+    @patch("dev_tools.cli.load_configuration_for_project")
+    @patch("sys.argv", ["dev-tools", "--project-dir", "/custom/project", "--help"])
+    def test_main_help_with_project_dir_flag(self, mock_load_config):
+        """Test that main() respects --project-dir when showing help."""
+
+        # Mock different configs for different directories
+        def mock_load_config_side_effect(project_dir):
+            if str(project_dir) == "/custom/project":
+                return {"commands": {"custom-command": [{"run": "echo custom"}]}}
+            else:
+                return {"commands": {"default-command": [{"run": "echo default"}]}}
+
+        mock_load_config.side_effect = mock_load_config_side_effect
+
+        # The SystemExit from --help should be raised
+        with pytest.raises(SystemExit):
+            main()
+
+        # Verify that the custom project config was loaded
+        mock_load_config.assert_called_with(Path("/custom/project"))
+
 
 class TestLogsCommand:
     """Test suite for logs command handling."""

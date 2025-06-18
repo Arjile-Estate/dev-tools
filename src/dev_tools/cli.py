@@ -18,9 +18,12 @@ from dev_tools.version import __version__
 logger = get_logger(__name__)
 
 
-def create_argument_parser() -> argparse.ArgumentParser:
+def create_argument_parser(project_dir: Path = Path(".")) -> argparse.ArgumentParser:
     """
     Create and configure the command-line argument parser.
+
+    Args:
+        project_dir: Project directory to load configuration from
 
     Returns:
         Configured ArgumentParser instance
@@ -36,7 +39,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
 
     # Load configuration to get available commands for help text
     try:
-        config = load_configuration_for_project(Path("."))
+        config = load_configuration_for_project(project_dir)
         available_commands = list(config.get("commands", {}).keys())
         # Add built-in commands that don't require configuration
         available_commands.extend(["logs", "cleanup-pids"])
@@ -156,7 +159,24 @@ def handle_command_execution(command: str, project_dir: Path) -> CommandResult:
 
 def main() -> None:
     """Main entry point for the CLI application."""
-    parser = create_argument_parser()
+    # Check if help is requested and extract project_dir for proper help text
+    project_dir = Path(".")
+    if "--help" in sys.argv or "-h" in sys.argv:
+        # Try to extract project_dir from arguments for help display
+        try:
+            if "--project-dir" in sys.argv:
+                idx = sys.argv.index("--project-dir")
+                if idx + 1 < len(sys.argv):
+                    project_dir = Path(sys.argv[idx + 1])
+            elif "-p" in sys.argv:
+                idx = sys.argv.index("-p")
+                if idx + 1 < len(sys.argv):
+                    project_dir = Path(sys.argv[idx + 1])
+        except (ValueError, IndexError):
+            # If parsing fails, use default project_dir
+            pass
+
+    parser = create_argument_parser(project_dir)
     args = parser.parse_args()
 
     # Determine log file path based on command name
