@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -91,7 +92,7 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 		// Stream output directly to stdout/stderr for foreground daemon
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		
+
 		err := cmd.Start()
 		if err != nil {
 			log.Printf("Failed to start daemon command: %v", err)
@@ -105,21 +106,48 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 
 		// Create PID file for daemon tracking
 		pidFile := GeneratePIDFilename(opts.CommandName, opts.Command)
-		if err := CreatePIDFile(pidFile, cmd.Process.Pid); err != nil {
-			log.Printf("Failed to create PID file: %v", err)
+		if pidErr := CreatePIDFile(pidFile, cmd.Process.Pid); pidErr != nil {
+			log.Printf("Failed to create PID file: %v", pidErr)
 		} else {
 			log.Printf("Created PID file %s for daemon process", pidFile)
-			fmt.Printf("%s\n", colors.Success("Running job '%s' in the foreground. PID: %d, PID file: %s", 
+			fmt.Printf("%s\n", colors.Success("Running job '%s' in the foreground. PID: %d, PID file: %s",
 				opts.Command, cmd.Process.Pid, pidFile))
 		}
 
-		// Wait for process to complete
-		err = cmd.Wait()
-		success := err == nil
+		// Set up signal handling for graceful termination
+		signalChan := make(chan os.Signal, 1)
+		signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+		// Wait for process to complete or receive signal
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+
+		var waitErr error
+		select {
+		case waitErr = <-done:
+			// Process completed normally
+		case sig := <-signalChan:
+			log.Printf("Received signal %v, terminating daemon process", sig)
+			// Forward signal to child process
+			if cmd.Process != nil {
+				if sigErr := cmd.Process.Signal(sig); sigErr != nil {
+					log.Printf("Failed to forward signal to child process: %v", sigErr)
+					// Force kill if signal forwarding fails
+					if killErr := cmd.Process.Kill(); killErr != nil {
+						log.Printf("Failed to kill child process: %v", killErr)
+					}
+				}
+			}
+			waitErr = <-done // Wait for process to actually exit
+		}
+
+		success := waitErr == nil
 		returnCode := 0
 
-		if err != nil {
-			if exitError, ok := err.(*exec.ExitError); ok {
+		if waitErr != nil {
+			if exitError, ok := waitErr.(*exec.ExitError); ok {
 				returnCode = exitError.ExitCode()
 			} else {
 				returnCode = -1
@@ -130,8 +158,8 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 		}
 
 		// Clean up PID file
-		if err := RemovePIDFile(pidFile); err != nil {
-			log.Printf("Failed to remove PID file: %v", err)
+		if pidErr := RemovePIDFile(pidFile); pidErr != nil {
+			log.Printf("Failed to remove PID file: %v", pidErr)
 		} else {
 			log.Printf("Removed PID file %s after daemon completion", pidFile)
 		}
@@ -147,12 +175,51 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err := cmd.Run()
-	success := err == nil
+	// Set up signal handling for graceful termination
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start the command
+	err := cmd.Start()
+	if err != nil {
+		log.Printf("Failed to start command: %v", err)
+		return CommandResult{
+			Success:    false,
+			Stderr:     err.Error(),
+			ReturnCode: -1,
+		}
+	}
+
+	// Wait for process to complete or receive signal
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	var waitError error
+	select {
+	case waitError = <-done:
+		// Process completed normally
+	case sig := <-signalChan:
+		log.Printf("Received signal %v, terminating command process", sig)
+		// Forward signal to child process
+		if cmd.Process != nil {
+			if sigErr := cmd.Process.Signal(sig); sigErr != nil {
+				log.Printf("Failed to forward signal to child process: %v", sigErr)
+				// Force kill if signal forwarding fails
+				if killErr := cmd.Process.Kill(); killErr != nil {
+					log.Printf("Failed to kill child process: %v", killErr)
+				}
+			}
+		}
+		waitError = <-done // Wait for process to actually exit
+	}
+
+	success := waitError == nil
 	returnCode := 0
 
-	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+	if waitError != nil {
+		if exitError, ok := waitError.(*exec.ExitError); ok {
 			returnCode = exitError.ExitCode()
 		} else {
 			returnCode = -1
@@ -361,7 +428,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 	if len(step.Run) > 0 {
 		for _, command := range []string(step.Run) {
 			log.Printf("Executing command: %s", command)
-			
+
 			// Check if daemon instance is already running
 			if step.Daemon {
 				pidFile := GeneratePIDFilename(commandName, command)
@@ -581,7 +648,7 @@ func LoadEnvironmentVariables(envFile string) error {
 
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-		
+
 		// Remove quotes if present
 		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
 			(value[0] == '\'' && value[len(value)-1] == '\'')) {
