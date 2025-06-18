@@ -26,19 +26,19 @@ type RunCommand []string
 func (r *RunCommand) UnmarshalYAML(value *yaml.Node) error {
 	var single string
 	var multiple []string
-	
+
 	// Try to unmarshal as a single string first
 	if err := value.Decode(&single); err == nil {
 		*r = []string{single}
 		return nil
 	}
-	
+
 	// If that fails, try to unmarshal as array of strings
 	if err := value.Decode(&multiple); err == nil {
 		*r = multiple
 		return nil
 	}
-	
+
 	return fmt.Errorf("run must be a string or array of strings")
 }
 
@@ -48,13 +48,13 @@ type StartServices []interface{}
 // UnmarshalYAML implements custom unmarshaling for StartServices
 func (s *StartServices) UnmarshalYAML(value *yaml.Node) error {
 	var services []interface{}
-	
+
 	// Try to unmarshal as array of interfaces
 	if err := value.Decode(&services); err == nil {
 		*s = services
 		return nil
 	}
-	
+
 	return fmt.Errorf("start_services must be an array")
 }
 
@@ -127,14 +127,12 @@ func GetDefaultCommandsForProjectType(projectType ProjectType) *DevConfig {
 				"test":  {{Run: RunCommand{"go test ./..."}}},
 				"lint":  {{Run: RunCommand{"golangci-lint run"}}},
 				"build": {{Run: RunCommand{"go build ./..."}}},
-				"logs":  {{Run: RunCommand{"tail -n 50 activity.log"}}},
 			},
 		},
 		ProjectTypePython: {
 			Commands: map[string][]CommandStep{
 				"test": {{Run: RunCommand{"uv run pytest tests/"}}},
 				"lint": {{Run: RunCommand{"uv run ruff check .", "uv run black ."}}},
-				"logs": {{Run: RunCommand{"tail -n 50 activity.log"}}},
 			},
 		},
 		ProjectTypeNodeJS: {
@@ -142,7 +140,6 @@ func GetDefaultCommandsForProjectType(projectType ProjectType) *DevConfig {
 				"test":  {{Run: RunCommand{"npm test"}}},
 				"lint":  {{Run: RunCommand{"npm run lint"}}},
 				"build": {{Run: RunCommand{"npm run build"}}},
-				"logs":  {{Run: RunCommand{"tail -n 50 activity.log"}}},
 			},
 		},
 		ProjectTypeRust: {
@@ -151,12 +148,10 @@ func GetDefaultCommandsForProjectType(projectType ProjectType) *DevConfig {
 				"lint":  {{Run: RunCommand{"cargo clippy"}}},
 				"dev":   {{Run: RunCommand{"cargo run"}}},
 				"build": {{Run: RunCommand{"cargo build"}}},
-				"logs":  {{Run: RunCommand{"tail -n 50 activity.log"}}},
 			},
 		},
 		ProjectTypeUnknown: {
 			Commands: map[string][]CommandStep{
-				"logs": {{Run: RunCommand{"tail -n 50 activity.log"}}},
 			},
 		},
 	}
