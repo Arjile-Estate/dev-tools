@@ -1,4 +1,7 @@
 commands:
+  dev-logs:
+    - run: "tail -n 50 activity.log"
+
   test-daemon:
     - run: "echo toot && sleep 10"
       daemon: true
