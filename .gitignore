@@ -1,11 +1,63 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dev-tools
+dev-tools.exe
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Logs
+*.log
+activity.log
+
+# PID files
+*.pid
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Docker
+Dockerfile.dev
+docker-compose.override.yml
+
+# Build directories
 build/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-activity.log
+bin/

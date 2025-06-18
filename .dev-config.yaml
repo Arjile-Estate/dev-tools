@@ -4,8 +4,8 @@ commands:
       daemon: true
 
   test-service:
-    - run: "docker ps"
-    - start_services: [ "rebelthor/sleep" ]
+    - run: "sleep 2 && docker ps"
+    - start_services: [ "sleep" ]
 
   alpine:
     - run: "docker ps"
@@ -28,9 +28,19 @@ commands:
 
   test-directory:
     - run: "pwd && ls -la"
-      directory: "src"
+      directory: "cmd"
 
   test-daemon-with-directory:
     - run: "echo 'Running in:' && pwd && sleep 5"
       daemon: true
-      directory: "src"
+      directory: "cmd"
+  test-realtime:
+    - run: "echo Starting... && sleep 1 && echo Middle... && sleep 1 && echo Done!"
+
+  test-background-daemon:
+    - run: "sleep 30"
+      background: true
+      daemon: true
+
+  test-failing:
+    - run: "echo This command will fail && exit 42"

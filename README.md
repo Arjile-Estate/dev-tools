@@ -4,11 +4,11 @@ A unified command runner for development workflows that provides consistent inte
 
 ## Overview
 
-Dev Tools automatically detects your project type (Python, Node.js, Rust, etc.) and provides sensible defaults for common development commands like `test`, `lint`, `build`, and `dev`. It can also be customized with project-specific configurations.
+Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, etc.) and provides sensible defaults for common development commands like `test`, `lint`, `build`, and `dev`. It can also be customized with project-specific configurations.
 
 ## Features
 
-- **Smart Project Detection**: Automatically detects project type from files like `pyproject.toml`, `package.json`, `Cargo.toml`
+- **Smart Project Detection**: Automatically detects project type from files like `go.mod`, `pyproject.toml`, `package.json`, `Cargo.toml`
 - **Consistent Interface**: Same commands work across all project types
 - **Intelligent Docker Service Management**: Automatically detects existing containers and restarts stopped ones
 - **Advanced Daemon Support**: SHA1-based PID tracking prevents duplicate daemon instances
@@ -18,34 +18,28 @@ Dev Tools automatically detects your project type (Python, Node.js, Rust, etc.) 
 - **Environment Handling**: Automatically loads `.env` files
 - **Parallel Execution**: Handle multiple commands and services efficiently
 - **Activity Logging**: Comprehensive logging to `activity.log`
+- **Single Binary**: No runtime dependencies or virtual environments needed
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.12 or higher
-- [uv](https://docs.astral.sh/uv/) package manager
+- Go 1.21 or higher
 
-### System Installation (Recommended)
-
-Use the provided install script to install dev-tools system-wide:
+### Build from Source
 
 ```bash
 git clone <repository-url>
 cd dev-tools
-./install.sh
+go mod tidy
+go build -o dev-tools .
 ```
 
-This will install the tool using `uv tool install` and make the `dev-tools` command available globally.
-
-### Development Installation
-
-For development or if you prefer to run from source:
+### Install Globally
 
 ```bash
-git clone <repository-url>
-cd dev-tools
-uv sync
+# Copy binary to your PATH
+sudo cp dev-tools /usr/local/bin/
 ```
 
 ## Usage
@@ -53,30 +47,43 @@ uv sync
 ### Basic Commands
 
 ```bash
-# After system installation with ./install.sh
+# Run tests for any project type
 dev-tools test
+
+# Start development server
 dev-tools dev
+
+# Run linting
 dev-tools lint
+
+# Build project
 dev-tools build
+
+# View recent logs
 dev-tools logs
+
+# Clean up stale daemon processes
+dev-tools cleanup-pids
+
+# Run with verbose logging
 dev-tools --verbose test
 
-# Or if running from source
-uv run dev-tools.py test
-uv run dev-tools.py dev
-uv run dev-tools.py lint
-uv run dev-tools.py build
-uv run dev-tools.py logs
-uv run dev-tools.py --verbose test
+# Use in different directory
+dev-tools --project-dir /path/to/project test
 ```
 
 ### Project Types & Default Commands
 
+#### Go Projects
+Detected by presence of `go.mod`:
+- `test`: `go test ./...`
+- `lint`: `golangci-lint run`
+- `build`: `go build ./...`
+
 #### Python Projects
 Detected by presence of `pyproject.toml` or `requirements.txt`:
 - `test`: `uv run pytest tests/`
-- `lint`: `uv run ruff check .`
-- `build`: `uv build`
+- `lint`: `uv run ruff check .` and `uv run black .`
 
 #### Node.js Projects
 Detected by presence of `package.json`:
@@ -88,6 +95,7 @@ Detected by presence of `package.json`:
 Detected by presence of `Cargo.toml`:
 - `test`: `cargo test`
 - `lint`: `cargo clippy`
+- `dev`: `cargo run`
 - `build`: `cargo build`
 
 ## Configuration
@@ -129,13 +137,13 @@ commands:
             image: "myapp/worker"
             command: "python worker.py --dev"
             volumes: ["./app:/app"]
-    - run: "uv run pytest tests/ -v --cov=app"
+    - run: "go test ./... -v"
     - cleanup: true
 
   # Development server with background execution
   dev:
     - start_services: ["postgres", "redis"]  # Simple string format
-    - run: "uvicorn app.main:app --reload --host 0.0.0.0"
+    - run: "go run main.go"
       background: true
       daemon: true
       directory: "backend"
@@ -143,9 +151,9 @@ commands:
   # Multi-command linting with different directories
   lint:
     - run:
-        - "uv run ruff check ."
-        - "uv run ruff format ."
-        - "uv run mypy app/"
+        - "golangci-lint run"
+        - "go fmt ./..."
+        - "go vet ./..."
       directory: "backend"
     - run: "npm run lint"
       directory: "frontend"
@@ -154,7 +162,7 @@ commands:
   build:
     - run: "npm run build"
       directory: "frontend"
-    - run: "uv build"
+    - run: "go build -o app ."
       directory: "backend"
     - run: "docker build -t myapp ."
 
@@ -164,8 +172,8 @@ commands:
         - deployment-db:
             image: postgres:15
             ports: ["5433:5432"]
-    - run: "python scripts/migrate.py"
-    - run: "python scripts/deploy.py --env=prod"
+    - run: "go run scripts/migrate.go"
+    - run: "go run scripts/deploy.go --env=prod"
       background: true
 ```
 
@@ -216,20 +224,20 @@ Commands to execute. Can be a single command or multiple commands.
 
 ```yaml
 # Single command
-run: "uv run pytest tests/"
+run: "go test ./..."
 
 # Multiple commands (executed sequentially)
 run:
-  - "uv run ruff check ."
-  - "uv run ruff format ."
-  - "uv run pytest tests/"
+  - "golangci-lint run"
+  - "go fmt ./..."
+  - "go test ./..."
 ```
 
 ##### `background` (Boolean)
 Run the command in the background (non-blocking).
 
 ```yaml
-run: "uvicorn app.main:app --reload"
+run: "go run main.go"
 background: true
 ```
 
@@ -237,7 +245,7 @@ background: true
 Store PID file for single-instance processes. Prevents multiple instances of the same command.
 
 ```yaml
-run: "uvicorn app.main:app --reload"
+run: "go run main.go"
 background: true
 daemon: true  # Creates SHA1-based PID file (e.g., .a1b2c3d4.pid)
 ```
@@ -255,15 +263,6 @@ directory: "/opt/myproject/backend"
 ```
 
 **Note:** PID files are always stored in the project root regardless of the directory option.
-
-##### `cleanup` (Boolean)
-Clean up services after command execution.
-
-```yaml
-- start_services: ["postgres", "redis"]
-- run: "uv run pytest tests/"
-- cleanup: true  # Stops and removes containers
-```
 
 ### Docker Service Management
 
@@ -325,11 +324,11 @@ commands:
         - rabbitmq:
             image: rabbitmq:3-management
             ports: ["5672:5672", "15672:15672"]
-    - run: "uvicorn api.main:app --reload"
+    - run: "go run cmd/api/main.go"
       background: true
       daemon: true
       directory: "services/api"
-    - run: "python worker.py"
+    - run: "go run cmd/worker/main.go"
       background: true 
       daemon: true
       directory: "services/worker"
@@ -347,7 +346,7 @@ commands:
         - test-redis:
             image: redis:alpine
             ports: ["6380:6379"]
-    - run: "uv run pytest tests/ --maxfail=1 -v"
+    - run: "go test ./... -v"
     - cleanup: true
 ```
 
@@ -357,13 +356,13 @@ commands:
   build-dev:
     - run: "npm run build:dev"
       directory: "frontend"
-    - run: "uv build"
+    - run: "go build -tags dev -o app-dev ."
       directory: "backend"
     
   build-prod:
     - run: "npm run build:prod"
       directory: "frontend"
-    - run: "uv build --wheel"
+    - run: "go build -ldflags='-s -w' -o app ."
       directory: "backend"
     - run: "docker build -t myapp:latest ."
 ```
@@ -375,7 +374,7 @@ Dev Tools provides advanced process management for long-running commands:
 ```yaml
 commands:
   dev:
-    - run: "uvicorn app.main:app --reload"
+    - run: "go run main.go"
       background: true
       daemon: true
 ```
@@ -406,11 +405,7 @@ DEBUG=true
 
 ## Activity Logging
 
-Dev Tools logs all its activity to help you monitor and debug your development workflow:
-
-### Log Location
-- **When running installed version**: Logs are written to `~/Library/Logs/dev-tools/activity.log`
-- **When running from source**: Logs are written to `activity.log` in the current working directory
+Dev Tools logs all its activity to help you monitor and debug your development workflow.
 
 ### Logging Features
 
@@ -422,46 +417,11 @@ Dev Tools provides comprehensive logging with detailed execution information:
 - **Process Tracking**: PID information for background processes
 - **Service Status**: Container lifecycle events and status changes
 
-**Logging Output Examples:**
-```
-2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Executing command: sleep 3600 (background=True, daemon=True)
-2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Started background process with PID 44447
-2025-06-13 12:34:03 - dev_tools.command_executor - INFO - Creating new container: docker run -d --name redis -p 6379:6379 redis:latest
-```
-
 ### Viewing Logs
 
 - **`--verbose` flag**: Output logs to stdout in addition to the log file
 - **`dev-tools logs`**: View the last 50 lines of activity from the log file
-- **Manual access**:
-  - Installed version: `~/Library/Logs/dev-tools/activity.log`
-  - Source version: `./activity.log`
-
-## Dynamic Help System
-
-Dev Tools provides context-aware help that automatically discovers available commands:
-
-```bash
-dev-tools --help
-```
-
-**Features:**
-- **Auto-discovery**: Reads `.dev-config.yaml` to show actual available commands
-- **Dynamic examples**: Shows examples using your project's specific commands
-- **Fallback support**: Shows default commands if configuration loading fails
-- **Command listing**: Displays all available commands with descriptions
-
-**Example Output:**
-```
-Available commands: test, lint, dev, build, logs, custom-command
-
-Examples:
-  uv run dev-tools.py test
-  uv run dev-tools.py lint
-  uv run dev-tools.py dev
-  uv run dev-tools.py build
-  uv run dev-tools.py --verbose test  # Run with verbose logging
-```
+- **Manual access**: `./activity.log` in the project directory
 
 ## Development
 
@@ -471,10 +431,10 @@ Examples:
 # Clone and setup
 git clone <repository-url>
 cd dev-tools
-uv sync
+go mod tidy
 
-# Install development dependencies
-uv sync --group dev
+# Install golangci-lint for linting
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
 ```
 
 ### Running Tests
@@ -482,20 +442,19 @@ uv sync --group dev
 The project includes comprehensive test coverage for all functionality:
 
 ```bash
-# Run all tests (67+ tests)
-uv run pytest
+# Run all tests
+go test ./...
 
-# Run with coverage
-uv run pytest --cov=src
+# Run with verbose output
+go test -v ./...
 
-# Run specific test categories
-uv run pytest -m unit
-uv run pytest -m integration
+# Run tests with coverage
+go test -cover ./...
 
-# Test specific features
-uv run pytest tests/test_command_executor.py::TestPidFilenameGeneration
-uv run pytest tests/test_command_executor.py::TestImprovedDockerServiceManagement
-uv run pytest tests/test_command_executor.py::TestDaemonImprovements
+# Run specific package tests
+go test ./internal/config
+go test ./internal/executor
+go test ./cmd
 ```
 
 **Test Coverage Includes:**
@@ -512,36 +471,61 @@ uv run pytest tests/test_command_executor.py::TestDaemonImprovements
 
 ```bash
 # Format code
-uv run ruff format .
+go fmt ./...
 
 # Lint code
-uv run ruff check .
+golangci-lint run
 
-# Fix auto-fixable issues
-uv run ruff check --fix .
+# Build binary
+go build -o dev-tools .
 ```
 
 ## Project Structure
 
 ```
 dev-tools/
-├── src/dev_tools/           # Main package
-│   ├── cli.py              # Command-line interface
-│   ├── command_executor.py # Command execution engine
-│   ├── config_parser.py    # Configuration management
-│   └── logger_setup.py     # Logging configuration
-├── tests/                  # Test suite
-│   ├── test_cli.py
-│   ├── test_command_executor.py
-│   ├── test_config_parser.py
-│   └── test_integration.py
-├── dev-tools.py           # Main entry point
-├── install.sh             # System installation script
-├── pyproject.toml         # Project configuration
-└── README.md             # This file
+├── main.go                    # Main entry point
+├── go.mod                     # Go module definition
+├── cmd/                       # CLI commands
+│   ├── root.go               # Root command and CLI setup
+│   └── root_test.go          # CLI tests
+├── internal/                  # Internal packages
+│   ├── config/               # Configuration management
+│   │   ├── config.go         # Config parsing logic
+│   │   └── config_test.go    # Config tests
+│   └── executor/             # Command execution engine
+│       ├── executor.go       # Execution logic
+│       └── executor_test.go  # Execution tests
+├── CLAUDE.md                 # Development guide
+└── README.md                 # This file
 ```
 
 ## Examples
+
+### Go REST API Project
+
+```yaml
+# .dev-config.yaml
+commands:
+  test:
+    - start_services: ["postgres", "redis"]
+    - run: "go test ./... -v -cover"
+
+  dev:
+    - start_services: ["postgres", "redis"]
+    - run: "go run cmd/server/main.go"
+      background: true
+      daemon: true
+
+  lint:
+    - run:
+        - "golangci-lint run"
+        - "go fmt ./..."
+        - "go vet ./..."
+
+  build:
+    - run: "go build -o app cmd/server/main.go"
+```
 
 ### Python FastAPI Project
 
@@ -591,13 +575,36 @@ commands:
     - run: "npm run deploy:prod"
 ```
 
+### Rust CLI Project
+
+```yaml
+# .dev-config.yaml
+commands:
+  test:
+    - run: "cargo test -- --test-threads=1"
+
+  dev:
+    - run: "cargo run -- --dev"
+      background: true
+      daemon: true
+
+  lint:
+    - run:
+        - "cargo clippy -- -D warnings"
+        - "cargo fmt --check"
+
+  build:
+    - run: "cargo build --release"
+```
+
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new functionality
-4. Ensure all tests pass: `uv run pytest`
-5. Submit a pull request
+4. Ensure all tests pass: `go test ./...`
+5. Ensure linting passes: `golangci-lint run`
+6. Submit a pull request
 
 ## License
 
