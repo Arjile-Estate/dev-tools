@@ -33,7 +33,7 @@ sensible defaults, while allowing customization through configuration files.`
 
 Examples:
   dev-tools test        # Run tests
-  dev-tools lint        # Run linting  
+  dev-tools lint        # Run linting
   dev-tools build       # Build project
   dev-tools logs        # Show recent logs
   dev-tools cleanup-pids # Clean up stale PID files`
@@ -42,13 +42,13 @@ Examples:
 	// Add available commands
 	var commands []string
 	commandSet := make(map[string]bool)
-	
+
 	// Add commands from config
 	for cmd := range config.Commands {
 		commands = append(commands, cmd)
 		commandSet[cmd] = true
 	}
-	
+
 	// Add built-in commands (avoid duplicates)
 	builtInCommands := []string{"logs", "cleanup-pids", "version"}
 	for _, cmd := range builtInCommands {
@@ -102,13 +102,13 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging to stdout")
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 
-	rootCmd.Version = "0.6.1"
+	rootCmd.Version = "0.6.2"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		fmt.Fprint(cmd.OutOrStdout(), generateDynamicHelp(projectDir))
-		fmt.Fprintln(cmd.OutOrStdout())
-		fmt.Fprintf(cmd.OutOrStdout(), `
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), generateDynamicHelp(projectDir))
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), `
 Usage:
   %s [flags] [command]
 
@@ -123,13 +123,81 @@ Flags:
 	return rootCmd
 }
 
+// isRunningViaGoRun detects if the application is running via 'go run'
+func isRunningViaGoRun(executable string) bool {
+	// 'go run' creates temporary executables in paths like:
+	// /tmp/go-build123456789/b001/exe/main (Linux)
+	// /var/folders/xy/abcdef/T/go-build987654321/b001/exe/main (macOS)
+	return strings.Contains(executable, "go-build") &&
+		   (strings.Contains(executable, "/tmp/") || strings.Contains(executable, "/T/"))
+}
+
+// getHomeDirectory returns the user's home directory
+func getHomeDirectory() (string, error) {
+	home := os.Getenv("HOME")
+	if home == "" {
+		return "", fmt.Errorf("HOME environment variable not set")
+	}
+	return home, nil
+}
+
+// ensureLogDirectory creates the log directory if it doesn't exist
+func ensureLogDirectory(logFilePath string) error {
+	logDir := filepath.Dir(logFilePath)
+	return os.MkdirAll(logDir, 0755)
+}
+
+// getLogFilePath returns the appropriate log file path based on execution method
+func getLogFilePath(executable, homeDir, projectDir string) (string, bool) {
+	isGoRun := isRunningViaGoRun(executable)
+
+	if isGoRun {
+		// When running via 'go run', use project directory
+		return filepath.Join(projectDir, "activity.log"), true
+	} else {
+		// When running compiled binary, use ~/Library/Logs/dev-tools.log
+		return filepath.Join(homeDir, "Library", "Logs", "dev-tools.log"), false
+	}
+}
+
 func setupLogging(cmd *cobra.Command, args []string) {
 	// Setup basic logging
 	if verbose {
 		log.SetOutput(os.Stdout)
 	} else {
-		// Create activity.log in project directory
-		logFile := filepath.Join(projectDir, "activity.log")
+		// Get executable path
+		executable, err := os.Executable()
+		if err != nil {
+			// Fallback to project directory if we can't determine executable
+			logFile := filepath.Join(projectDir, "activity.log")
+			if file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				log.SetOutput(file)
+			}
+			log.SetFlags(log.LstdFlags)
+			return
+		}
+
+		// Get home directory
+		homeDir, err := getHomeDirectory()
+		if err != nil {
+			// Fallback to project directory if we can't get home directory
+			logFile := filepath.Join(projectDir, "activity.log")
+			if file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				log.SetOutput(file)
+			}
+			log.SetFlags(log.LstdFlags)
+			return
+		}
+
+		// Determine log file path based on execution method
+		logFile, _ := getLogFilePath(executable, homeDir, projectDir)
+
+		// Ensure log directory exists
+		if err := ensureLogDirectory(logFile); err != nil {
+			// Fallback to project directory if we can't create log directory
+			logFile = filepath.Join(projectDir, "activity.log")
+		}
+
 		if file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			log.SetOutput(file)
 		}
@@ -139,7 +207,7 @@ func setupLogging(cmd *cobra.Command, args []string) {
 
 func runCommand(cmd *cobra.Command, args []string) error {
 	commandName := args[0]
-	
+
 	log.Printf("Starting dev-tools with command: %s", commandName)
 
 	// Handle special built-in commands
@@ -149,7 +217,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	case "cleanup-pids":
 		return handleCleanupPidsCommand(cmd)
 	case "version":
-		fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
 		return nil
 	}
 
@@ -178,11 +246,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Execute command
 	result := executor.ExecuteCommandWithSteps(commandName, steps, projectDir)
-	
+
 	// For most commands, we want to show output and return the exit code
 	// rather than treating non-zero exit codes as errors
 	if result.Stdout != "" {
-		fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
 	}
 
 	if !result.Success {
@@ -196,8 +264,54 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 func handleLogsCommand(cmd *cobra.Command) error {
 	log.Print("Displaying recent activity logs")
-	
-	logFile := filepath.Join(projectDir, "activity.log")
+
+	// Get executable path
+	executable, err := os.Executable()
+	if err != nil {
+		// Fallback to project directory if we can't determine executable
+		logFile := filepath.Join(projectDir, "activity.log")
+		if _, err := os.Stat(logFile); os.IsNotExist(err) {
+			return fmt.Errorf("no log file found at %s", logFile)
+		}
+
+		result := executor.ExecuteShellCommand(executor.ExecuteOptions{
+			Command:       fmt.Sprintf("tail -n 50 %s", logFile),
+			CaptureOutput: true,
+		})
+
+		if !result.Success {
+			return fmt.Errorf("failed to read logs: %s", result.Stderr)
+		}
+
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+		return nil
+	}
+
+	// Get home directory
+	homeDir, err := getHomeDirectory()
+	if err != nil {
+		// Fallback to project directory if we can't get home directory
+		logFile := filepath.Join(projectDir, "activity.log")
+		if _, err := os.Stat(logFile); os.IsNotExist(err) {
+			return fmt.Errorf("no log file found at %s", logFile)
+		}
+
+		result := executor.ExecuteShellCommand(executor.ExecuteOptions{
+			Command:       fmt.Sprintf("tail -n 50 %s", logFile),
+			CaptureOutput: true,
+		})
+
+		if !result.Success {
+			return fmt.Errorf("failed to read logs: %s", result.Stderr)
+		}
+
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+		return nil
+	}
+
+	// Determine log file path based on execution method
+	logFile, _ := getLogFilePath(executable, homeDir, projectDir)
+
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s", logFile)
 	}
@@ -211,7 +325,7 @@ func handleLogsCommand(cmd *cobra.Command) error {
 		return fmt.Errorf("failed to read logs: %s", result.Stderr)
 	}
 
-	fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
 	return nil
 }
 
@@ -221,6 +335,6 @@ func handleCleanupPidsCommand(cmd *cobra.Command) error {
 		return fmt.Errorf("cleanup failed: %s", result.Stderr)
 	}
 
-	fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
 	return nil
 }

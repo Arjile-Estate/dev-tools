@@ -487,7 +487,7 @@ func TestLoadEnvironmentVariables(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up any existing env var
 			if tt.expectedVar != "" {
-				os.Unsetenv(tt.expectedVar)
+				_ = os.Unsetenv(tt.expectedVar)
 			}
 
 			// Create env file if content provided
@@ -514,7 +514,7 @@ func TestLoadEnvironmentVariables(t *testing.T) {
 
 			// Clean up
 			if tt.envFile == envFile {
-				os.Remove(envFile)
+				_ = os.Remove(envFile)
 			}
 		})
 	}

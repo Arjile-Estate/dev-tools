@@ -477,7 +477,7 @@ func TestDaemonCommandAlreadyRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create PID file: %v", err)
 	}
-	defer os.Remove(pidFile)
+	defer func() { _ = os.Remove(pidFile) }()
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"test-daemon"})
