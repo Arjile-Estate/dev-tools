@@ -8,7 +8,7 @@ import (
 func TestColorizeWhenEnabled(t *testing.T) {
 	// Enable colors for testing
 	colorEnabled = true
-	
+
 	tests := []struct {
 		name     string
 		function func(string, ...interface{}) string
@@ -46,7 +46,7 @@ func TestColorizeWhenEnabled(t *testing.T) {
 			expected: Blue + "highlight message" + Reset,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.function(tt.input)
@@ -60,7 +60,7 @@ func TestColorizeWhenEnabled(t *testing.T) {
 func TestColorizeWhenDisabled(t *testing.T) {
 	// Disable colors for testing
 	colorEnabled = false
-	
+
 	tests := []struct {
 		name     string
 		function func(string, ...interface{}) string
@@ -98,7 +98,7 @@ func TestColorizeWhenDisabled(t *testing.T) {
 			expected: "highlight message",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.function(tt.input)
@@ -111,10 +111,10 @@ func TestColorizeWhenDisabled(t *testing.T) {
 
 func TestColorFormattingWithArguments(t *testing.T) {
 	colorEnabled = true
-	
+
 	result := Success("Process %s completed with code %d", "test", 0)
 	expected := Green + "Process test completed with code 0" + Reset
-	
+
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
@@ -123,9 +123,9 @@ func TestColorFormattingWithArguments(t *testing.T) {
 func TestInitializeColorSupportWithNoColorFlag(t *testing.T) {
 	// Reset state
 	colorEnabled = true
-	
+
 	InitializeColorSupport(true)
-	
+
 	if colorEnabled {
 		t.Error("Expected colors to be disabled when noColor=true")
 	}
@@ -141,15 +141,15 @@ func TestInitializeColorSupportWithNOCOLOREnv(t *testing.T) {
 			_ = os.Setenv("NO_COLOR", originalNoColor)
 		}
 	}()
-	
+
 	// Reset state
 	colorEnabled = true
-	
+
 	// Set NO_COLOR environment variable
 	_ = os.Setenv("NO_COLOR", "1")
-	
+
 	InitializeColorSupport(false)
-	
+
 	if colorEnabled {
 		t.Error("Expected colors to be disabled when NO_COLOR is set")
 	}
@@ -165,15 +165,15 @@ func TestInitializeColorSupportWithDumbTerm(t *testing.T) {
 			_ = os.Setenv("TERM", originalTerm)
 		}
 	}()
-	
+
 	// Reset state
 	colorEnabled = true
-	
+
 	// Set TERM to dumb
 	_ = os.Setenv("TERM", "dumb")
-	
+
 	InitializeColorSupport(false)
-	
+
 	if colorEnabled {
 		t.Error("Expected colors to be disabled when TERM=dumb")
 	}
@@ -184,7 +184,7 @@ func TestIsColorEnabled(t *testing.T) {
 	if !IsColorEnabled() {
 		t.Error("Expected IsColorEnabled to return true when colors are enabled")
 	}
-	
+
 	colorEnabled = false
 	if IsColorEnabled() {
 		t.Error("Expected IsColorEnabled to return false when colors are disabled")
@@ -238,7 +238,7 @@ func TestStripColors(t *testing.T) {
 			expected: "error and success",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := StripColors(tt.input)
@@ -251,10 +251,10 @@ func TestStripColors(t *testing.T) {
 
 func TestColorizeWithEmptyText(t *testing.T) {
 	colorEnabled = true
-	
+
 	result := Success("")
 	expected := ""
-	
+
 	if result != expected {
 		t.Errorf("Expected empty string for empty input, got %q", result)
 	}
@@ -269,7 +269,7 @@ func TestColorConstants(t *testing.T) {
 		"Blue":     "\033[34m",
 		"DarkGray": "\033[90m",
 	}
-	
+
 	actualColors := map[string]string{
 		"Reset":    Reset,
 		"Red":      Red,
@@ -278,7 +278,7 @@ func TestColorConstants(t *testing.T) {
 		"Blue":     Blue,
 		"DarkGray": DarkGray,
 	}
-	
+
 	for name, expected := range expectedColors {
 		if actual := actualColors[name]; actual != expected {
 			t.Errorf("Expected %s to be %q, got %q", name, expected, actual)

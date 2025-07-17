@@ -94,11 +94,11 @@ and provides consistent commands across different project types.
 
 It automatically detects project types (Go, Python, Node.js, Rust) and provides
 sensible defaults, while allowing customization through configuration files.`,
-		Args:              cobra.MinimumNArgs(1),
-		PersistentPreRun:  setupLogging,
-		RunE:              runCommand,
-		SilenceUsage:      false,
-		SilenceErrors:     false,
+		Args:             cobra.MinimumNArgs(1),
+		PersistentPreRun: setupLogging,
+		RunE:             runCommand,
+		SilenceUsage:     false,
+		SilenceErrors:    false,
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging to stdout")
@@ -136,7 +136,7 @@ func isRunningViaGoRun(executable string) bool {
 	// /tmp/go-build123456789/b001/exe/main (Linux)
 	// /var/folders/xy/abcdef/T/go-build987654321/b001/exe/main (macOS)
 	return strings.Contains(executable, "go-build") &&
-		   (strings.Contains(executable, "/tmp/") || strings.Contains(executable, "/T/"))
+		(strings.Contains(executable, "/tmp/") || strings.Contains(executable, "/T/"))
 }
 
 // getHomeDirectory returns the user's home directory

@@ -36,7 +36,7 @@ func TestRootCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rootCmd := NewRootCommand()
 			rootCmd.SetArgs(tt.args)
-			
+
 			// Capture output
 			var buf bytes.Buffer
 			rootCmd.SetOut(&buf)
@@ -52,7 +52,7 @@ func TestRootCommand(t *testing.T) {
 
 func TestLogsCommand(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test activity log in tmpDir
 	logContent := "2023-01-01 12:00:00 - test - INFO - Test log message\n"
 	err := os.WriteFile(filepath.Join(tmpDir, "activity.log"), []byte(logContent), 0644)
@@ -62,7 +62,7 @@ func TestLogsCommand(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "logs"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -89,7 +89,7 @@ func TestCleanupPidsCommand(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "cleanup-pids"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -107,7 +107,7 @@ func TestCleanupPidsCommand(t *testing.T) {
 
 func TestCommandWithProjectDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a go.mod to make it a Go project
 	goModPath := filepath.Join(tmpDir, "go.mod")
 	err := os.WriteFile(goModPath, []byte("module test"), 0644)
@@ -117,7 +117,7 @@ func TestCommandWithProjectDir(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "logs"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -142,7 +142,7 @@ func TestUnknownCommand(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "nonexistent-command"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -181,7 +181,7 @@ func TestValidCommandExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
-	
+
 	testFile := filepath.Join("internal", "test", "test.go")
 	testContent := `package test
 
@@ -199,7 +199,7 @@ func TestDummy(t *testing.T) {
 	rootCmd := NewRootCommand()
 	// Use a command that should work - test command for Go project
 	rootCmd.SetArgs([]string{"test"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -224,7 +224,7 @@ func TestVerboseLogging(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "--verbose", "logs"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -243,7 +243,7 @@ func TestVerboseLogging(t *testing.T) {
 
 func TestGenerateDynamicHelpWithConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test config file
 	configContent := `commands:
   custom-command:
@@ -256,7 +256,7 @@ func TestGenerateDynamicHelpWithConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test config: %v", err)
 	}
-	
+
 	// Also create go.mod to make it a Go project
 	goModPath := filepath.Join(tmpDir, "go.mod")
 	err = os.WriteFile(goModPath, []byte("module test"), 0644)
@@ -266,18 +266,18 @@ func TestGenerateDynamicHelpWithConfig(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "--help"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
 
 	_ = rootCmd.Execute() // Help command doesn't return error
-	
+
 	output := buf.String()
-	
+
 	// Debug: print the actual output
 	t.Logf("Help output: %s", output)
-	
+
 	// Should contain custom commands
 	if !strings.Contains(output, "custom-command") {
 		t.Errorf("Help should include custom commands from config. Output: %s", output)
@@ -285,7 +285,7 @@ func TestGenerateDynamicHelpWithConfig(t *testing.T) {
 	if !strings.Contains(output, "another-command") {
 		t.Errorf("Help should include custom commands from config. Output: %s", output)
 	}
-	
+
 	// Should contain built-in commands
 	if !strings.Contains(output, "cleanup-pids") {
 		t.Errorf("Help should include built-in commands. Output: %s", output)
@@ -293,20 +293,20 @@ func TestGenerateDynamicHelpWithConfig(t *testing.T) {
 	if !strings.Contains(output, "version") {
 		t.Errorf("Help should include built-in commands. Output: %s", output)
 	}
-	
+
 	// Should have logs command only in Available commands list (not counting examples and help text)
 	// Count logs in the "Available commands" line specifically
 	if !strings.Contains(output, "Available commands:") {
 		t.Error("Help should contain 'Available commands:' section")
 	}
-	
+
 	// Check that logs appears in the available commands
 	availableCommandsIdx := strings.Index(output, "Available commands:")
 	examplesIdx := strings.Index(output, "Examples:")
 	if availableCommandsIdx == -1 || examplesIdx == -1 {
 		t.Error("Help should have both 'Available commands:' and 'Examples:' sections")
 	}
-	
+
 	availableCommandsSection := output[availableCommandsIdx:examplesIdx]
 	if !strings.Contains(availableCommandsSection, "logs") {
 		t.Error("logs command should appear in Available commands section")
@@ -315,9 +315,9 @@ func TestGenerateDynamicHelpWithConfig(t *testing.T) {
 
 func TestGenerateDynamicHelpNoConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// No config file, just go.mod
-	goModPath := filepath.Join(tmpDir, "go.mod") 
+	goModPath := filepath.Join(tmpDir, "go.mod")
 	err := os.WriteFile(goModPath, []byte("module test"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create go.mod: %v", err)
@@ -325,18 +325,18 @@ func TestGenerateDynamicHelpNoConfig(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "--help"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
 
 	_ = rootCmd.Execute()
-	
+
 	output := buf.String()
-	
+
 	// Debug: print the actual output
 	t.Logf("Help output (no config): %s", output)
-	
+
 	// Should contain default commands from Go project type
 	if !strings.Contains(output, "test") {
 		t.Errorf("Help should include default test command for Go projects. Output: %s", output)
@@ -348,7 +348,7 @@ func TestGenerateDynamicHelpNoConfig(t *testing.T) {
 
 func TestHandleLogsCommandEmptyLog(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create an empty activity.log file
 	activityLog := filepath.Join(tmpDir, "activity.log")
 	err := os.WriteFile(activityLog, []byte(""), 0644)
@@ -358,7 +358,7 @@ func TestHandleLogsCommandEmptyLog(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "logs"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -367,7 +367,7 @@ func TestHandleLogsCommandEmptyLog(t *testing.T) {
 	if err != nil {
 		t.Errorf("logs command should succeed with empty log file: %v", err)
 	}
-	
+
 	// Should have empty output for empty log file
 	output := buf.String()
 	if output != "" {
@@ -378,7 +378,7 @@ func TestHandleLogsCommandEmptyLog(t *testing.T) {
 func TestHandleLogsCommandWithValidFile(t *testing.T) {
 	// Test that handleLogsCommand works with a valid log file
 	tmpDir := t.TempDir()
-	
+
 	// Create a test activity.log with some content
 	activityLog := filepath.Join(tmpDir, "activity.log")
 	testContent := "2025/06/18 12:00:00 Test log message\n2025/06/18 12:01:00 Another test message\n"
@@ -390,7 +390,7 @@ func TestHandleLogsCommandWithValidFile(t *testing.T) {
 	// Test using the full command execution rather than direct function call
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "logs"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -400,7 +400,7 @@ func TestHandleLogsCommandWithValidFile(t *testing.T) {
 		t.Errorf("logs command should succeed with valid log file: %v", err)
 		return
 	}
-	
+
 	// Should contain the test content
 	output := buf.String()
 	if !strings.Contains(output, "Test log message") {
@@ -414,7 +414,7 @@ func TestHandleLogsCommandWithValidFile(t *testing.T) {
 func TestCommandWithRelativeProjectDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()
-	
+
 	// Change to parent of tmpDir
 	parentDir := filepath.Dir(tmpDir)
 	if err := os.Chdir(parentDir); err != nil {
@@ -425,7 +425,7 @@ func TestCommandWithRelativeProjectDir(t *testing.T) {
 			t.Logf("Failed to restore directory: %v", err)
 		}
 	}()
-	
+
 	// Create go.mod in tmpDir
 	relativeDir := filepath.Base(tmpDir)
 	goModPath := filepath.Join(relativeDir, "go.mod")
@@ -436,7 +436,7 @@ func TestCommandWithRelativeProjectDir(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"--project-dir", relativeDir, "version"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -481,7 +481,7 @@ func TestDaemonCommandAlreadyRunning(t *testing.T) {
 
 	rootCmd := NewRootCommand()
 	rootCmd.SetArgs([]string{"test-daemon"})
-	
+
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)

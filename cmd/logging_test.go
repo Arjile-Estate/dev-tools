@@ -8,43 +8,43 @@ import (
 
 func TestGetLogFilePath(t *testing.T) {
 	tests := []struct {
-		name           string
-		executable     string
-		homeDir        string
-		projectDir     string
-		expectedPath   string
+		name            string
+		executable      string
+		homeDir         string
+		projectDir      string
+		expectedPath    string
 		expectedIsGoRun bool
 	}{
 		{
-			name:           "go run executable",
-			executable:     "/tmp/go-build123456789/b001/exe/main",
-			homeDir:        "/home/user",
-			projectDir:     "/project",
-			expectedPath:   "/project/activity.log",
+			name:            "go run executable",
+			executable:      "/tmp/go-build123456789/b001/exe/main",
+			homeDir:         "/home/user",
+			projectDir:      "/project",
+			expectedPath:    "/project/activity.log",
 			expectedIsGoRun: true,
 		},
 		{
-			name:           "compiled binary",
-			executable:     "/usr/local/bin/dev-tools",
-			homeDir:        "/home/user",
-			projectDir:     "/project",
-			expectedPath:   "/home/user/Library/Logs/dev-tools.log",
+			name:            "compiled binary",
+			executable:      "/usr/local/bin/dev-tools",
+			homeDir:         "/home/user",
+			projectDir:      "/project",
+			expectedPath:    "/home/user/Library/Logs/dev-tools.log",
 			expectedIsGoRun: false,
 		},
 		{
-			name:           "local compiled binary",
-			executable:     "./dev-tools",
-			homeDir:        "/home/user",
-			projectDir:     "/project",
-			expectedPath:   "/home/user/Library/Logs/dev-tools.log",
+			name:            "local compiled binary",
+			executable:      "./dev-tools",
+			homeDir:         "/home/user",
+			projectDir:      "/project",
+			expectedPath:    "/home/user/Library/Logs/dev-tools.log",
 			expectedIsGoRun: false,
 		},
 		{
-			name:           "go run with different temp path",
-			executable:     "/var/folders/xy/abcdef/T/go-build987654321/b001/exe/dev-tools",
-			homeDir:        "/Users/john",
-			projectDir:     "/workspace",
-			expectedPath:   "/workspace/activity.log",
+			name:            "go run with different temp path",
+			executable:      "/var/folders/xy/abcdef/T/go-build987654321/b001/exe/dev-tools",
+			homeDir:         "/Users/john",
+			projectDir:      "/workspace",
+			expectedPath:    "/workspace/activity.log",
 			expectedIsGoRun: true,
 		},
 	}
@@ -52,11 +52,11 @@ func TestGetLogFilePath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			actualPath, actualIsGoRun := getLogFilePath(tt.executable, tt.homeDir, tt.projectDir)
-			
+
 			if actualPath != tt.expectedPath {
 				t.Errorf("getLogFilePath() path = %v, want %v", actualPath, tt.expectedPath)
 			}
-			
+
 			if actualIsGoRun != tt.expectedIsGoRun {
 				t.Errorf("getLogFilePath() isGoRun = %v, want %v", actualIsGoRun, tt.expectedIsGoRun)
 			}

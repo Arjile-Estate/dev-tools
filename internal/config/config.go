@@ -58,13 +58,70 @@ func (s *StartServices) UnmarshalYAML(value *yaml.Node) error {
 	return fmt.Errorf("start_services must be an array")
 }
 
+// ComposeConfig represents Docker Compose configuration
+type ComposeConfig struct {
+	File     string   `yaml:"file"`
+	Services []string `yaml:"services,omitempty"`
+	Profiles []string `yaml:"profiles,omitempty"`
+}
+
+// ServicesConfig represents the new services configuration
+type ServicesConfig struct {
+	Compose       *ComposeConfig `yaml:"compose,omitempty"`
+	Containers    []interface{}  `yaml:"containers,omitempty"`
+	Cleanup       bool           `yaml:"cleanup,omitempty"`
+	WaitForHealth bool           `yaml:"wait_for_health,omitempty"`
+	Timeout       int            `yaml:"timeout,omitempty"`
+}
+
+// UnmarshalYAML implements custom unmarshaling for ServicesConfig with defaults
+func (s *ServicesConfig) UnmarshalYAML(value *yaml.Node) error {
+	// Set defaults
+	s.Cleanup = false
+	s.WaitForHealth = true
+	s.Timeout = 30
+
+	// Create a temporary struct to avoid infinite recursion
+	type servicesConfigAlias struct {
+		Compose       *ComposeConfig `yaml:"compose,omitempty"`
+		Containers    []interface{}  `yaml:"containers,omitempty"`
+		Cleanup       *bool          `yaml:"cleanup,omitempty"`
+		WaitForHealth *bool          `yaml:"wait_for_health,omitempty"`
+		Timeout       *int           `yaml:"timeout,omitempty"`
+	}
+
+	var temp servicesConfigAlias
+
+	if err := value.Decode(&temp); err != nil {
+		return err
+	}
+
+	// Copy values from temp to s
+	s.Compose = temp.Compose
+	s.Containers = temp.Containers
+
+	// Override defaults only if explicitly set
+	if temp.Cleanup != nil {
+		s.Cleanup = *temp.Cleanup
+	}
+	if temp.WaitForHealth != nil {
+		s.WaitForHealth = *temp.WaitForHealth
+	}
+	if temp.Timeout != nil {
+		s.Timeout = *temp.Timeout
+	}
+
+	return nil
+}
+
 // CommandStep represents a single step in a command execution
 type CommandStep struct {
-	Run           RunCommand    `yaml:"run,omitempty"`
-	StartServices StartServices `yaml:"start_services,omitempty"`
-	Background    bool          `yaml:"background,omitempty"`
-	Daemon        bool          `yaml:"daemon,omitempty"`
-	Directory     string        `yaml:"directory,omitempty"`
+	Run           RunCommand     `yaml:"run,omitempty"`
+	StartServices StartServices  `yaml:"start_services,omitempty"`
+	Services      ServicesConfig `yaml:"services,omitempty"`
+	Background    bool           `yaml:"background,omitempty"`
+	Daemon        bool           `yaml:"daemon,omitempty"`
+	Directory     string         `yaml:"directory,omitempty"`
 }
 
 // DevConfig represents the complete development configuration
@@ -151,8 +208,7 @@ func GetDefaultCommandsForProjectType(projectType ProjectType) *DevConfig {
 			},
 		},
 		ProjectTypeUnknown: {
-			Commands: map[string][]CommandStep{
-			},
+			Commands: map[string][]CommandStep{},
 		},
 	}
 

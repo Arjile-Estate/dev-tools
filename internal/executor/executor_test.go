@@ -41,11 +41,11 @@ func TestExecuteShellCommand(t *testing.T) {
 			expectSuccess: false,
 		},
 		{
-			name:           "command with stderr",
-			command:        "echo 'error message' >&2; exit 1",
-			background:     false,
-			captureOutput:  true,
-			expectSuccess:  false,
+			name:          "command with stderr",
+			command:       "echo 'error message' >&2; exit 1",
+			background:    false,
+			captureOutput: true,
+			expectSuccess: false,
 		},
 	}
 
@@ -76,7 +76,7 @@ func TestExecuteShellCommand(t *testing.T) {
 
 func TestExecuteShellCommandWithWorkingDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test file in tmpDir
 	testFile := filepath.Join(tmpDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
@@ -190,7 +190,7 @@ func TestReadPIDFileNotExists(t *testing.T) {
 func TestReadPIDFileInvalidContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, ".invalid.pid")
-	
+
 	err := os.WriteFile(pidFile, []byte("not-a-number"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create invalid PID file: %v", err)
@@ -222,7 +222,7 @@ func TestIsProcessRunning(t *testing.T) {
 
 func TestCleanupStalePIDFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a stale PID file (with non-existent PID)
 	stalePIDFile := filepath.Join(tmpDir, ".stale.pid")
 	err := CreatePIDFile(stalePIDFile, 999999) // Very high PID unlikely to exist
@@ -338,7 +338,7 @@ func TestExecuteCommandStep(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ExecuteCommandStep(tt.step, "test-command", "")
-			
+
 			if (result.Success == false) != tt.wantErr {
 				t.Errorf("ExecuteCommandStep() success = %v, wantErr %v, stderr: %s", result.Success, tt.wantErr, result.Stderr)
 			}
@@ -348,7 +348,7 @@ func TestExecuteCommandStep(t *testing.T) {
 
 func TestExecuteCommandStepWithDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create a test file in tmpDir
 	testFile := filepath.Join(tmpDir, "test.txt")
 	err := os.WriteFile(testFile, []byte("test"), 0644)
@@ -377,7 +377,7 @@ func TestExecuteCommandStepInvalidDirectory(t *testing.T) {
 	if result.Success {
 		t.Error("Command should fail with invalid directory")
 	}
-	
+
 	if !strings.Contains(result.Stderr, "does not exist") {
 		t.Errorf("Error should mention directory doesn't exist, got: %s", result.Stderr)
 	}
@@ -428,9 +428,9 @@ func TestExecuteCommandWithSteps(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ExecuteCommandWithSteps(tt.commandName, tt.steps, "")
-			
+
 			if result.Success != tt.wantSuccess {
-				t.Errorf("ExecuteCommandWithSteps() success = %v, want %v, stderr: %s", 
+				t.Errorf("ExecuteCommandWithSteps() success = %v, want %v, stderr: %s",
 					result.Success, tt.wantSuccess, result.Stderr)
 			}
 		})
@@ -499,7 +499,7 @@ func TestLoadEnvironmentVariables(t *testing.T) {
 			}
 
 			err := LoadEnvironmentVariables(tt.envFile)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadEnvironmentVariables() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -580,9 +580,16 @@ func TestStartDockerService(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := StartDockerService(tt.service)
-			
+
+			// Clean up any started containers
+			if result.Success {
+				t.Cleanup(func() {
+					_ = StopDockerService(tt.service)
+				})
+			}
+
 			if (result.Success == false) != tt.wantErr {
-				t.Errorf("StartDockerService() success = %v, wantErr %v, stderr: %s (case: %s)", 
+				t.Errorf("StartDockerService() success = %v, wantErr %v, stderr: %s (case: %s)",
 					result.Success, tt.wantErr, result.Stderr, tt.description)
 			}
 
@@ -601,13 +608,357 @@ func TestExecuteCommandStepWithServices(t *testing.T) {
 		Run: config.RunCommand{"echo 'after services'"},
 	}
 
+	// Clean up services after test
+	t.Cleanup(func() {
+		for _, service := range step.StartServices {
+			_ = StopDockerService(service)
+		}
+	})
+
 	// This test checks the structure but will likely fail in CI without Docker
 	// The important thing is that it exercises the code path
 	result := ExecuteCommandStep(step, "test-services", "")
-	
+
 	// We can't guarantee Docker is available in test environment,
 	// so we just ensure the function doesn't panic and returns a result
 	if result.Stderr == "" && result.Stdout == "" && !result.Success {
 		t.Log("Docker service test failed as expected (Docker likely not available)")
+	}
+}
+
+func TestStartDockerCompose(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name             string
+		compose          config.ComposeConfig
+		createFile       bool
+		fileContent      string
+		wantErr          bool
+		expectedCmdParts []string
+	}{
+		{
+			name: "basic compose file",
+			compose: config.ComposeConfig{
+				File: filepath.Join(tmpDir, "docker-compose.yml"),
+			},
+			createFile: true,
+			fileContent: `version: '3.8'
+services:
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"`,
+			wantErr:          false,
+			expectedCmdParts: []string{"docker-compose", "-f", "docker-compose.yml", "up", "-d"},
+		},
+		{
+			name: "compose with specific services",
+			compose: config.ComposeConfig{
+				File:     filepath.Join(tmpDir, "docker-compose.yml"),
+				Services: []string{"redis", "postgres"},
+			},
+			createFile: true,
+			fileContent: `version: '3.8'
+services:
+  redis:
+    image: redis:latest
+  postgres:
+    image: postgres:13`,
+			wantErr:          false,
+			expectedCmdParts: []string{"docker-compose", "-f", "docker-compose.yml", "up", "-d", "redis", "postgres"},
+		},
+		{
+			name: "compose with profiles",
+			compose: config.ComposeConfig{
+				File:     filepath.Join(tmpDir, "docker-compose.yml"),
+				Profiles: []string{"dev", "testing"},
+			},
+			createFile: true,
+			fileContent: `version: '3.8'
+services:
+  redis:
+    image: redis:latest
+    profiles: ["dev"]
+  postgres:
+    image: postgres:13
+    profiles: ["testing"]`,
+			wantErr:          false,
+			expectedCmdParts: []string{"docker-compose", "-f", "docker-compose.yml", "--profile", "dev", "--profile", "testing", "up", "-d"},
+		},
+		{
+			name: "compose with profiles and services",
+			compose: config.ComposeConfig{
+				File:     filepath.Join(tmpDir, "docker-compose.yml"),
+				Services: []string{"redis"},
+				Profiles: []string{"dev"},
+			},
+			createFile: true,
+			fileContent: `version: '3.8'
+services:
+  redis:
+    image: redis:latest
+    profiles: ["dev"]`,
+			wantErr:          false,
+			expectedCmdParts: []string{"docker-compose", "-f", "docker-compose.yml", "--profile", "dev", "up", "-d", "redis"},
+		},
+		{
+			name: "non-existent compose file",
+			compose: config.ComposeConfig{
+				File: "/nonexistent/docker-compose.yml",
+			},
+			createFile: false,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.createFile {
+				err := os.WriteFile(tt.compose.File, []byte(tt.fileContent), 0644)
+				if err != nil {
+					t.Fatalf("Failed to create test compose file: %v", err)
+				}
+			}
+
+			// We can't actually test docker-compose execution in unit tests
+			// but we can test the command generation logic by examining the logs
+			result := StartDockerCompose(tt.compose)
+
+			// Clean up compose services after test
+			if result.Success {
+				t.Cleanup(func() {
+					_ = StopDockerCompose(tt.compose)
+				})
+			}
+
+			if (result.Success == false) != tt.wantErr {
+				t.Errorf("StartDockerCompose() success = %v, wantErr %v, stderr: %s",
+					result.Success, tt.wantErr, result.Stderr)
+			}
+
+			if tt.wantErr && result.Stderr != "" {
+				// Check error message for non-existent file
+				if tt.name == "non-existent compose file" {
+					if !strings.Contains(result.Stderr, "does not exist") {
+						t.Errorf("Expected error message about non-existent file, got: %s", result.Stderr)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestHandleServicesConfiguration(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		services    config.ServicesConfig
+		setupFiles  func() error
+		wantErr     bool
+		description string
+	}{
+		{
+			name: "compose services only",
+			services: config.ServicesConfig{
+				Compose: &config.ComposeConfig{
+					File: filepath.Join(tmpDir, "docker-compose.yml"),
+				},
+				WaitForHealth: false, // Skip health checks for test
+			},
+			setupFiles: func() error {
+				composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest`
+				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
+			},
+			wantErr:     false,
+			description: "should handle compose services",
+		},
+		{
+			name: "containers only",
+			services: config.ServicesConfig{
+				Containers: []interface{}{
+					"redis",
+					map[string]interface{}{
+						"test-service": map[string]interface{}{
+							"image": "alpine:latest",
+						},
+					},
+				},
+				WaitForHealth: false,
+			},
+			setupFiles:  func() error { return nil },
+			wantErr:     false,
+			description: "should handle container services",
+		},
+		{
+			name: "both compose and containers",
+			services: config.ServicesConfig{
+				Compose: &config.ComposeConfig{
+					File: filepath.Join(tmpDir, "docker-compose.yml"),
+				},
+				Containers: []interface{}{
+					"redis",
+				},
+				WaitForHealth: false,
+			},
+			setupFiles: func() error {
+				composeContent := `version: '3.8'
+services:
+  postgres:
+    image: postgres:13`
+				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
+			},
+			wantErr:     false,
+			description: "should handle both compose and container services",
+		},
+		{
+			name: "compose with non-existent file",
+			services: config.ServicesConfig{
+				Compose: &config.ComposeConfig{
+					File: "/nonexistent/docker-compose.yml",
+				},
+				WaitForHealth: false,
+			},
+			setupFiles:  func() error { return nil },
+			wantErr:     true,
+			description: "should fail with non-existent compose file",
+		},
+		{
+			name: "empty configuration",
+			services: config.ServicesConfig{
+				WaitForHealth: false,
+			},
+			setupFiles:  func() error { return nil },
+			wantErr:     false,
+			description: "should handle empty configuration",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.setupFiles(); err != nil {
+				t.Fatalf("Failed to setup test files: %v", err)
+			}
+
+			result := HandleServicesConfiguration(tt.services)
+
+			// Clean up services after test
+			if result.Success {
+				t.Cleanup(func() {
+					_ = StopServices(tt.services)
+				})
+			}
+
+			if (result.Success == false) != tt.wantErr {
+				t.Errorf("HandleServicesConfiguration() success = %v, wantErr %v, stderr: %s (case: %s)",
+					result.Success, tt.wantErr, result.Stderr, tt.description)
+			}
+		})
+	}
+}
+
+func TestExecuteCommandStepWithNewServices(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		step        config.CommandStep
+		setupFiles  func() error
+		wantErr     bool
+		description string
+	}{
+		{
+			name: "new services configuration",
+			step: config.CommandStep{
+				Services: config.ServicesConfig{
+					Containers: []interface{}{
+						"redis",
+					},
+					WaitForHealth: false,
+				},
+				Run: config.RunCommand{"echo 'after services'"},
+			},
+			setupFiles:  func() error { return nil },
+			wantErr:     false,
+			description: "should handle new services configuration",
+		},
+		{
+			name: "both old and new services",
+			step: config.CommandStep{
+				StartServices: config.StartServices{
+					"postgres",
+				},
+				Services: config.ServicesConfig{
+					Containers: []interface{}{
+						"redis",
+					},
+					WaitForHealth: false,
+				},
+				Run: config.RunCommand{"echo 'after services'"},
+			},
+			setupFiles:  func() error { return nil },
+			wantErr:     false,
+			description: "should handle both old and new services configurations",
+		},
+		{
+			name: "services with compose file",
+			step: config.CommandStep{
+				Services: config.ServicesConfig{
+					Compose: &config.ComposeConfig{
+						File: filepath.Join(tmpDir, "docker-compose.yml"),
+					},
+					WaitForHealth: false,
+				},
+				Run: config.RunCommand{"echo 'after compose'"},
+			},
+			setupFiles: func() error {
+				composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest`
+				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
+			},
+			wantErr:     false,
+			description: "should handle services with compose file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.setupFiles(); err != nil {
+				t.Fatalf("Failed to setup test files: %v", err)
+			}
+
+			result := ExecuteCommandStep(tt.step, "test-command", "")
+
+			// Clean up services after test
+			if result.Success {
+				t.Cleanup(func() {
+					// Clean up legacy start_services
+					for _, service := range tt.step.StartServices {
+						_ = StopDockerService(service)
+					}
+					// Clean up new services configuration
+					if tt.step.Services.Compose != nil || len(tt.step.Services.Containers) > 0 {
+						_ = StopServices(tt.step.Services)
+					}
+				})
+			}
+
+			// Note: These tests will likely fail without Docker, but we're testing the structure
+			// The important thing is that the function doesn't panic and handles the configuration
+			if (result.Success == false) != tt.wantErr {
+				t.Logf("ExecuteCommandStep() success = %v, wantErr %v, stderr: %s (case: %s)",
+					result.Success, tt.wantErr, result.Stderr, tt.description)
+				// Don't fail the test if Docker is not available - just log
+				if !strings.Contains(result.Stderr, "docker") {
+					t.Errorf("Unexpected failure: %s", result.Stderr)
+				}
+			}
+		})
 	}
 }

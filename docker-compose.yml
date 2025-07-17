@@ -1,0 +1,49 @@
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    profiles: ["dev"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+  
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: dev_tools_db
+      POSTGRES_USER: dev_user
+    ports:
+      - "5433:5432"
+    profiles: ["dev"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev_user"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Additional services for testing
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    profiles: ["dev", "testing"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  postgres_data:

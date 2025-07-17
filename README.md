@@ -10,6 +10,7 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 
 - **Smart Project Detection**: Automatically detects project type from files like `go.mod`, `pyproject.toml`, `package.json`, `Cargo.toml`
 - **Consistent Interface**: Same commands work across all project types
+- **Advanced Service Management**: Full Docker Compose and Docker container support with health checks
 - **Intelligent Docker Service Management**: Automatically detects existing containers and restarts stopped ones
 - **Advanced Daemon Support**: SHA1-based PID tracking prevents duplicate daemon instances
 - **Enhanced Logging**: Detailed execution logs with command options and Docker commands
@@ -122,27 +123,42 @@ Here's a comprehensive example showcasing all available options:
 
 ```yaml
 commands:
-  # Full-featured test command with services and multiple steps
+  # Full-featured test command with modern services configuration
   test:
-    - start_services:
-        - database:
-            image: postgres:15
-            command: "postgres -c log_statement=all"
-            volumes: ["./data:/var/lib/postgresql/data"]
-            ports: ["5432:5432"]
-        - cache:
-            image: redis:alpine
-            ports: ["6379:6379"]
-        - worker:
-            image: "myapp/worker"
-            command: "python worker.py --dev"
-            volumes: ["./app:/app"]
+    - services:
+        containers:
+          - database:
+              image: postgres:15
+              command: "postgres -c log_statement=all"
+              environment:
+                POSTGRES_PASSWORD: "password"
+                POSTGRES_DB: "testdb"
+              volumes: ["./data:/var/lib/postgresql/data"]
+              ports: ["5432:5432"]
+              healthcheck:
+                test: "pg_isready -U postgres"
+                interval: "30s"
+          - cache:
+              image: redis:alpine
+              ports: ["6379:6379"]
+          - worker:
+              image: "myapp/worker"
+              command: "python worker.py --dev"
+              volumes: ["./app:/app"]
+              environment:
+                WORKER_MODE: "dev"
+        wait_for_health: true
+        timeout: 45
     - run: "go test ./... -v"
-    - cleanup: true
 
-  # Development server with background execution
+  # Development server with Docker Compose
   dev:
-    - start_services: ["postgres", "redis"]  # Simple string format
+    - services:
+        compose:
+          file: "docker-compose.dev.yml"
+          services: ["postgres", "redis"]
+          profiles: ["dev"]
+        wait_for_health: true
     - run: "go run main.go"
       background: true
       daemon: true
@@ -166,12 +182,20 @@ commands:
       directory: "backend"
     - run: "docker build -t myapp ."
 
-  # Custom deployment command
+  # Custom deployment command with service cleanup
   deploy:
-    - start_services:
-        - deployment-db:
-            image: postgres:15
-            ports: ["5433:5432"]
+    - services:
+        containers:
+          - deployment-db:
+              image: postgres:15
+              ports: ["5433:5432"]
+              environment:
+                POSTGRES_PASSWORD: "deploy_password"
+              healthcheck:
+                test: "pg_isready -U postgres"
+                interval: "10s"
+        cleanup: true  # Clean up services after deployment
+        wait_for_health: true
     - run: "go run scripts/migrate.go"
     - run: "go run scripts/deploy.go --env=prod"
       background: true
@@ -183,8 +207,78 @@ commands:
 
 Each command step is a dictionary that can contain the following options:
 
-##### `start_services` (Array)
-Start Docker services before executing commands. Supports multiple formats:
+##### `services` (Object) - **Modern Service Management**
+The recommended way to manage Docker services with comprehensive features including Docker Compose support, health checks, and cleanup management.
+
+**Full Services Configuration:**
+```yaml
+services:
+  # Docker Compose support
+  compose:
+    file: "docker-compose.yml"           # Path to compose file
+    services: ["redis", "postgres"]      # Optional: specific services
+    profiles: ["dev", "testing"]         # Optional: compose profiles
+
+  # Individual Docker containers
+  containers:
+    - "redis"                           # Simple predefined service
+    - database:                         # Advanced container config
+        image: "postgres:15"
+        environment:
+          POSTGRES_PASSWORD: "password"
+          POSTGRES_DB: "myapp"
+        ports: ["5432:5432"]
+        volumes: ["./data:/var/lib/postgresql/data"]
+        networks: ["myapp-network"]
+        restart: "unless-stopped"
+        memory: "512m"
+        cpus: "0.5"
+        healthcheck:
+          test: "pg_isready -U postgres"
+          interval: "30s"
+          timeout: "10s"
+          retries: "3"
+
+  # Service management options
+  cleanup: false                        # Default: false - keep services running
+  wait_for_health: true                 # Default: true - wait for health checks
+  timeout: 30                          # Default: 30 seconds startup timeout
+```
+
+**Docker Compose Examples:**
+```yaml
+services:
+  compose:
+    file: "docker-compose.yml"
+    services: ["api", "database", "cache"]
+    profiles: ["dev"]
+  wait_for_health: true
+  timeout: 60
+```
+
+**Container Configuration Fields:**
+- `image` (required): Docker image name
+- `environment` (optional): Environment variables as key-value pairs
+- `command` (optional): Custom command to run in container
+- `volumes` (optional): Array of volume mounts `["host:container"]`
+- `ports` (optional): Array of port mappings `["host:container"]`
+- `networks` (optional): Array of networks to connect to
+- `restart` (optional): Restart policy (`no`, `always`, `unless-stopped`, `on-failure`)
+- `memory` (optional): Memory limit (e.g., `512m`, `1g`)
+- `cpus` (optional): CPU limit (e.g., `0.5`, `2.0`)
+- `healthcheck` (optional): Health check configuration
+
+**Health Check Configuration:**
+```yaml
+healthcheck:
+  test: "curl -f http://localhost:8080/health"  # Health check command
+  interval: "30s"                              # Check interval
+  timeout: "10s"                               # Command timeout
+  retries: "3"                                 # Retry attempts
+```
+
+##### `start_services` (Array) - **Legacy (Deprecated)**
+⚠️ **DEPRECATED**: Use `services` configuration instead. This option will be removed in a future version.
 
 **String Format (Simple):**
 ```yaml
@@ -196,28 +290,10 @@ start_services: ["redis", "postgres", "mysql"]
 start_services:
   - database:
       image: postgres:15
-      command: "postgres -c log_statement=all"  # Custom startup command
-      volumes: ["./data:/var/lib/postgresql/data", "./config:/etc/postgresql"]
-      ports: ["5432:5432", "5433:127.0.0.1:5432"]
-  - cache:
-      image: redis:alpine
-      ports: ["6379:6379"]
-  - worker:
-      image: "myregistry.com/myapp/worker:latest"
-      command: "python worker.py --dev"
-      volumes: ["./app:/app", "./logs:/logs"]
-      ports: ["8080:8080"]
+      command: "postgres -c log_statement=all"
+      volumes: ["./data:/var/lib/postgresql/data"]
+      ports: ["5432:5432"]
 ```
-
-**Service Configuration Fields:**
-- `image` (required): Docker image name
-- `command` (optional): Custom command to run in container
-- `volumes` (optional): Array of volume mounts in format `["host:container"]`
-- `ports` (optional): Array of port mappings in format `["host:container"]` or `["container:host_ip:host_port"]`
-
-**Port Mapping Examples:**
-- `"80:80"` → `-p 80:80`
-- `"81:127.0.0.1:443"` → `-p 127.0.0.1:443:81`
 
 ##### `run` (String or Array)
 Commands to execute. Can be a single command or multiple commands.
@@ -264,7 +340,47 @@ directory: "/opt/myproject/backend"
 
 **Note:** PID files are always stored in the project root regardless of the directory option.
 
-### Docker Service Management
+### Advanced Service Management
+
+#### Docker Compose Integration
+
+Dev Tools provides comprehensive Docker Compose support:
+
+**Features:**
+- **Multi-format support**: Automatically detects and uses `docker compose` (new) or `docker-compose` (legacy)
+- **Service selection**: Start specific services from compose file
+- **Profile support**: Use Docker Compose profiles for different environments
+- **Health monitoring**: Wait for services to be healthy before proceeding
+
+**Example Docker Compose configuration:**
+```yaml
+services:
+  compose:
+    file: "docker-compose.yml"
+    services: ["api", "database", "cache"]  # Optional: specific services
+    profiles: ["dev", "testing"]           # Optional: compose profiles
+  wait_for_health: true
+  timeout: 60
+```
+
+#### Enhanced Container Management
+
+Individual containers support extensive configuration options:
+
+**Resource Management:**
+- **Memory limits**: Control container memory usage
+- **CPU limits**: Set CPU allocation
+- **Restart policies**: Configure container restart behavior
+
+**Networking:**
+- **Custom networks**: Connect containers to specific networks
+- **Port mapping**: Flexible port configuration
+- **Environment variables**: Set container environment
+
+**Health Monitoring:**
+- **Health checks**: Configure container health validation
+- **Startup timeout**: Control service startup time
+- **Health validation**: Wait for services to be ready
 
 #### Intelligent Service Lifecycle
 
@@ -276,6 +392,8 @@ Services are automatically managed with smart container lifecycle handling:
    - **Exists but stopped**: Restarts with `docker start`
    - **Already running**: Skips (no action needed)
 3. **Container Naming**: Uses service name as container name
+4. **Health Validation**: Waits for services to be healthy (if enabled)
+5. **Cleanup Management**: Optional service cleanup after command completion
 
 #### Predefined Services
 
@@ -287,7 +405,7 @@ start_services: ["redis", "postgres", "mysql"]
 
 # Predefined service configurations:
 # redis → docker run -d --name redis -p 6379:6379 redis:latest
-# postgres → docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest  
+# postgres → docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest
 # mysql → docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest
 ```
 
@@ -310,44 +428,55 @@ start_services:
 
 ### Configuration Examples by Use Case
 
-#### Microservices Development
+#### Microservices Development with Docker Compose
 ```yaml
 commands:
   dev:
-    - start_services:
-        - postgres:
-            image: postgres:15
-            ports: ["5432:5432"]
-        - redis:
-            image: redis:alpine
-            ports: ["6379:6379"]
-        - rabbitmq:
-            image: rabbitmq:3-management
-            ports: ["5672:5672", "15672:15672"]
+    - services:
+        compose:
+          file: "docker-compose.dev.yml"
+          services: ["postgres", "redis", "rabbitmq"]
+          profiles: ["dev"]
+        wait_for_health: true
+        timeout: 60
     - run: "go run cmd/api/main.go"
       background: true
       daemon: true
       directory: "services/api"
     - run: "go run cmd/worker/main.go"
-      background: true 
+      background: true
       daemon: true
       directory: "services/worker"
 ```
 
-#### Testing with Service Dependencies
+#### Testing with Service Dependencies and Health Checks
 ```yaml
 commands:
   test:
-    - start_services:
-        - test-db:
-            image: postgres:15
-            command: "postgres -c fsync=off -c synchronous_commit=off"
-            ports: ["5433:5432"]
-        - test-redis:
-            image: redis:alpine
-            ports: ["6380:6379"]
+    - services:
+        containers:
+          - test-db:
+              image: postgres:15
+              command: "postgres -c fsync=off -c synchronous_commit=off"
+              environment:
+                POSTGRES_PASSWORD: "test_password"
+                POSTGRES_DB: "testdb"
+              ports: ["5433:5432"]
+              healthcheck:
+                test: "pg_isready -U postgres"
+                interval: "5s"
+                timeout: "3s"
+                retries: "5"
+          - test-redis:
+              image: redis:alpine
+              ports: ["6380:6379"]
+              healthcheck:
+                test: "redis-cli ping"
+                interval: "5s"
+        wait_for_health: true
+        cleanup: true  # Clean up test services after testing
+        timeout: 30
     - run: "go test ./... -v"
-    - cleanup: true
 ```
 
 #### Multi-Environment Build Pipeline
@@ -358,7 +487,7 @@ commands:
       directory: "frontend"
     - run: "go build -tags dev -o app-dev ."
       directory: "backend"
-    
+
   build-prod:
     - run: "npm run build:prod"
       directory: "frontend"
@@ -508,11 +637,33 @@ dev-tools/
 # .dev-config.yaml
 commands:
   test:
-    - start_services: ["postgres", "redis"]
+    - services:
+        compose:
+          file: "docker-compose.test.yml"
+          services: ["postgres", "redis"]
+        wait_for_health: true
+        cleanup: true
     - run: "go test ./... -v -cover"
 
   dev:
-    - start_services: ["postgres", "redis"]
+    - services:
+        containers:
+          - postgres:
+              image: postgres:15
+              environment:
+                POSTGRES_PASSWORD: "dev_password"
+                POSTGRES_DB: "myapp_dev"
+              ports: ["5432:5432"]
+              healthcheck:
+                test: "pg_isready -U postgres"
+                interval: "30s"
+          - redis:
+              image: redis:alpine
+              ports: ["6379:6379"]
+              healthcheck:
+                test: "redis-cli ping"
+                interval: "30s"
+        wait_for_health: true
     - run: "go run cmd/server/main.go"
       background: true
       daemon: true
@@ -533,11 +684,32 @@ commands:
 # .dev-config.yaml
 commands:
   test:
-    - start_services: ["postgres", "redis"]
+    - services:
+        compose:
+          file: "docker-compose.yml"
+          services: ["postgres", "redis"]
+          profiles: ["test"]
+        wait_for_health: true
+        cleanup: true
     - run: "uv run pytest tests/ -v --cov=app"
 
   dev:
-    - start_services: ["postgres", "redis"]
+    - services:
+        containers:
+          - postgres:
+              image: postgres:15
+              environment:
+                POSTGRES_PASSWORD: "dev_password"
+                POSTGRES_DB: "fastapi_dev"
+              ports: ["5432:5432"]
+              volumes: ["./data:/var/lib/postgresql/data"]
+              healthcheck:
+                test: "pg_isready -U postgres"
+                interval: "30s"
+          - redis:
+              image: redis:alpine
+              ports: ["6379:6379"]
+        wait_for_health: true
     - run: "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
       background: true
       daemon: true
@@ -595,6 +767,85 @@ commands:
 
   build:
     - run: "cargo build --release"
+```
+
+## Migration Guide: `start_services` to `services`
+
+### Why Migrate?
+
+The new `services` configuration provides:
+- **Docker Compose support**: Full integration with compose files
+- **Health checks**: Wait for services to be ready before proceeding
+- **Service cleanup**: Automatic cleanup after command completion
+- **Enhanced container options**: Environment variables, resource limits, networking
+- **Better error handling**: More robust service management
+
+### Migration Examples
+
+#### Simple Migration
+```yaml
+# Old (deprecated)
+start_services: ["redis", "postgres"]
+
+# New (recommended)
+services:
+  containers: ["redis", "postgres"]
+  wait_for_health: true
+```
+
+#### Complex Migration
+```yaml
+# Old (deprecated)
+start_services:
+  - database:
+      image: postgres:15
+      volumes: ["./data:/var/lib/postgresql/data"]
+      ports: ["5432:5432"]
+
+# New (recommended)
+services:
+  containers:
+    - database:
+        image: postgres:15
+        environment:
+          POSTGRES_PASSWORD: "password"
+          POSTGRES_DB: "myapp"
+        volumes: ["./data:/var/lib/postgresql/data"]
+        ports: ["5432:5432"]
+        healthcheck:
+          test: "pg_isready -U postgres"
+          interval: "30s"
+  wait_for_health: true
+  timeout: 60
+```
+
+#### Docker Compose Migration
+```yaml
+# Old (not possible with start_services)
+# Had to manage each service individually
+
+# New (recommended)
+services:
+  compose:
+    file: "docker-compose.yml"
+    services: ["redis", "postgres", "nginx"]
+    profiles: ["dev"]
+  wait_for_health: true
+  timeout: 45
+```
+
+### Migration Strategy
+
+1. **Gradual migration**: Both `start_services` and `services` can coexist
+2. **Test thoroughly**: Ensure services start correctly with new configuration
+3. **Leverage new features**: Add health checks and environment variables
+4. **Consider Docker Compose**: Migrate complex setups to compose files
+
+### Backward Compatibility
+
+The `start_services` configuration continues to work but shows deprecation warnings:
+```
+WARNING: 'start_services' is deprecated. Please migrate to 'services' configuration.
 ```
 
 ## Contributing

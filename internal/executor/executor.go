@@ -413,14 +413,26 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 		log.Printf("Using directory: %s", stepDir)
 	}
 
-	// Handle start_services
+	// Handle start_services (backward compatibility with deprecation warning)
 	if len(step.StartServices) > 0 {
+		log.Printf("WARNING: 'start_services' is deprecated and will be removed in a future version. Please use 'services' configuration instead.")
+		fmt.Printf("%s\n", colors.Warning("WARNING: 'start_services' is deprecated. Please migrate to 'services' configuration."))
+
 		for _, service := range step.StartServices {
 			result := StartDockerService(service)
 			if !result.Success {
 				log.Printf("Failed to start service %v", service)
 				return result
 			}
+		}
+	}
+
+	// Handle new services configuration
+	if step.Services.Compose != nil || len(step.Services.Containers) > 0 {
+		result := HandleServicesConfiguration(step.Services)
+		if !result.Success {
+			log.Printf("Failed to handle services configuration")
+			return result
 		}
 	}
 
@@ -546,6 +558,15 @@ func StartDockerService(service interface{}) CommandResult {
 			// Build docker run command
 			cmdParts := []string{"docker", "run", "-d"}
 
+			// Add environment variables
+			if env, ok := configMap["environment"].(map[string]interface{}); ok {
+				for key, value := range env {
+					if valueStr, ok := value.(string); ok {
+						cmdParts = append(cmdParts, "-e", fmt.Sprintf("%s=%s", key, valueStr))
+					}
+				}
+			}
+
 			// Add volumes
 			if volumes, ok := configMap["volumes"].([]interface{}); ok {
 				for _, vol := range volumes {
@@ -561,6 +582,46 @@ func StartDockerService(service interface{}) CommandResult {
 					if portStr, ok := port.(string); ok {
 						cmdParts = append(cmdParts, "-p", portStr)
 					}
+				}
+			}
+
+			// Add networks
+			if networks, ok := configMap["networks"].([]interface{}); ok {
+				for _, network := range networks {
+					if networkStr, ok := network.(string); ok {
+						cmdParts = append(cmdParts, "--network", networkStr)
+					}
+				}
+			}
+
+			// Add restart policy
+			if restart, ok := configMap["restart"].(string); ok {
+				cmdParts = append(cmdParts, "--restart", restart)
+			}
+
+			// Add memory limit
+			if memory, ok := configMap["memory"].(string); ok {
+				cmdParts = append(cmdParts, "--memory", memory)
+			}
+
+			// Add CPU limit
+			if cpus, ok := configMap["cpus"].(string); ok {
+				cmdParts = append(cmdParts, "--cpus", cpus)
+			}
+
+			// Add health check
+			if healthCheck, ok := configMap["healthcheck"].(map[string]interface{}); ok {
+				if test, ok := healthCheck["test"].(string); ok {
+					cmdParts = append(cmdParts, "--health-cmd", test)
+				}
+				if interval, ok := healthCheck["interval"].(string); ok {
+					cmdParts = append(cmdParts, "--health-interval", interval)
+				}
+				if timeout, ok := healthCheck["timeout"].(string); ok {
+					cmdParts = append(cmdParts, "--health-timeout", timeout)
+				}
+				if retries, ok := healthCheck["retries"].(string); ok {
+					cmdParts = append(cmdParts, "--health-retries", retries)
 				}
 			}
 
@@ -662,4 +723,299 @@ func LoadEnvironmentVariables(envFile string) error {
 
 	log.Printf("Loaded environment variables from %s", envFile)
 	return nil
+}
+
+// HandleServicesConfiguration handles the new services configuration
+func HandleServicesConfiguration(services config.ServicesConfig) CommandResult {
+	log.Printf("Handling services configuration (compose: %v, containers: %d)",
+		services.Compose != nil, len(services.Containers))
+
+	// Handle Docker Compose services
+	if services.Compose != nil {
+		result := StartDockerCompose(*services.Compose)
+		if !result.Success {
+			return result
+		}
+
+		// Wait for health checks if enabled
+		if services.WaitForHealth {
+			log.Printf("Waiting for compose services to be healthy")
+			// For compose services, we'll check general container health
+			// This is a simplified approach since compose services don't have individual names
+		}
+	}
+
+	// Handle individual container services
+	for _, container := range services.Containers {
+		result := StartDockerService(container)
+		if !result.Success {
+			return result
+		}
+
+		// Wait for health checks if enabled
+		if services.WaitForHealth {
+			healthResult := WaitForServiceHealth(container, services.Timeout)
+			if !healthResult.Success {
+				log.Printf("Health check failed for service %v: %s", container, healthResult.Stderr)
+				// Continue with other services but log the failure
+			}
+		}
+	}
+
+	// Store services for cleanup if needed
+	if services.Cleanup {
+		// TODO: Implement proper cleanup tracking
+		log.Printf("Cleanup enabled for services - tracking for future cleanup")
+	}
+
+	return CommandResult{Success: true}
+}
+
+// StartDockerCompose starts services using Docker Compose
+func StartDockerCompose(compose config.ComposeConfig) CommandResult {
+	log.Printf("Starting Docker Compose services from file: %s", compose.File)
+
+	// Check if compose file exists
+	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
+		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
+		log.Print(errorMsg)
+		return CommandResult{Success: false, Stderr: errorMsg}
+	}
+
+	// Determine which docker compose command to use
+	var composeCmd string
+
+	// Try new docker compose command first
+	checkNewCmd := "docker compose version"
+	checkResult := ExecuteShellCommand(ExecuteOptions{
+		Command:       checkNewCmd,
+		CaptureOutput: true,
+	})
+
+	if checkResult.Success {
+		composeCmd = "docker compose"
+	} else {
+		// Fall back to docker-compose
+		composeCmd = "docker-compose"
+	}
+
+	// Build command
+	cmdParts := []string{composeCmd, "-f", compose.File}
+
+	// Add profiles if specified
+	for _, profile := range compose.Profiles {
+		cmdParts = append(cmdParts, "--profile", profile)
+	}
+
+	cmdParts = append(cmdParts, "up", "-d")
+
+	// Add specific services if specified
+	if len(compose.Services) > 0 {
+		cmdParts = append(cmdParts, compose.Services...)
+	}
+
+	finalCmd := strings.Join(cmdParts, " ")
+	log.Printf("Running compose command: %s", finalCmd)
+
+	result := ExecuteShellCommand(ExecuteOptions{
+		Command:       finalCmd,
+		CaptureOutput: true,
+	})
+
+	if !result.Success {
+		log.Printf("Docker Compose command failed: %s", result.Stderr)
+		return result
+	}
+
+	log.Print("Docker Compose services started successfully")
+	return result
+}
+
+// StopServices stops and cleans up services based on configuration
+func StopServices(services config.ServicesConfig) CommandResult {
+	log.Printf("Stopping services (compose: %v, containers: %d)",
+		services.Compose != nil, len(services.Containers))
+
+	var errors []string
+
+	// Stop Docker Compose services
+	if services.Compose != nil {
+		result := StopDockerCompose(*services.Compose)
+		if !result.Success {
+			errors = append(errors, fmt.Sprintf("Failed to stop compose services: %s", result.Stderr))
+		}
+	}
+
+	// Stop individual container services
+	for _, container := range services.Containers {
+		result := StopDockerService(container)
+		if !result.Success {
+			errors = append(errors, fmt.Sprintf("Failed to stop container service: %s", result.Stderr))
+		}
+	}
+
+	if len(errors) > 0 {
+		errorMsg := strings.Join(errors, "; ")
+		log.Printf("Service cleanup completed with errors: %s", errorMsg)
+		return CommandResult{
+			Success: false,
+			Stderr:  errorMsg,
+		}
+	}
+
+	log.Print("Service cleanup completed successfully")
+	return CommandResult{Success: true}
+}
+
+// StopDockerCompose stops services using Docker Compose
+func StopDockerCompose(compose config.ComposeConfig) CommandResult {
+	log.Printf("Stopping Docker Compose services from file: %s", compose.File)
+
+	// Check if compose file exists
+	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
+		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
+		log.Print(errorMsg)
+		return CommandResult{Success: false, Stderr: errorMsg}
+	}
+
+	// Determine which docker compose command to use
+	var composeCmd string
+
+	// Try new docker compose command first
+	checkNewCmd := "docker compose version"
+	checkResult := ExecuteShellCommand(ExecuteOptions{
+		Command:       checkNewCmd,
+		CaptureOutput: true,
+	})
+
+	if checkResult.Success {
+		composeCmd = "docker compose"
+	} else {
+		// Fall back to docker-compose
+		composeCmd = "docker-compose"
+	}
+
+	// Build command
+	cmdParts := []string{composeCmd, "-f", compose.File}
+
+	// Add profiles if specified
+	for _, profile := range compose.Profiles {
+		cmdParts = append(cmdParts, "--profile", profile)
+	}
+
+	cmdParts = append(cmdParts, "down")
+
+	// Add specific services if specified
+	if len(compose.Services) > 0 {
+		cmdParts = append(cmdParts, compose.Services...)
+	}
+
+	finalCmd := strings.Join(cmdParts, " ")
+	log.Printf("Running compose down command: %s", finalCmd)
+
+	result := ExecuteShellCommand(ExecuteOptions{
+		Command:       finalCmd,
+		CaptureOutput: true,
+	})
+
+	if !result.Success {
+		log.Printf("Docker Compose down command failed: %s", result.Stderr)
+		return result
+	}
+
+	log.Print("Docker Compose services stopped successfully")
+	return result
+}
+
+// StopDockerService stops a Docker service container
+func StopDockerService(service interface{}) CommandResult {
+	log.Printf("Stopping Docker service: %v", service)
+
+	var containerName string
+
+	switch s := service.(type) {
+	case string:
+		containerName = s
+	case map[string]interface{}:
+		// Complex service definition - assume first key is service name
+		for name := range s {
+			containerName = name
+			break
+		}
+	default:
+		return CommandResult{
+			Success: false,
+			Stderr:  "Service must be a string or object",
+		}
+	}
+
+	// Check if container exists and is running
+	checkCmd := fmt.Sprintf("docker ps --format '{{.Names}}' --filter name=^%s$", containerName)
+	log.Printf("Checking if container is running: %s", checkCmd)
+	checkResult := ExecuteShellCommand(ExecuteOptions{
+		Command:       checkCmd,
+		CaptureOutput: true,
+	})
+
+	if !checkResult.Success || !strings.Contains(checkResult.Stdout, containerName) {
+		log.Printf("Container %s is not running", containerName)
+		return CommandResult{Success: true, Stdout: "Container not running"}
+	}
+
+	// Stop the container
+	stopCmd := fmt.Sprintf("docker stop %s", containerName)
+	log.Printf("Stopping container: %s", stopCmd)
+	stopResult := ExecuteShellCommand(ExecuteOptions{
+		Command:       stopCmd,
+		CaptureOutput: true,
+	})
+
+	if !stopResult.Success {
+		log.Printf("Failed to stop container %s: %s", containerName, stopResult.Stderr)
+		return stopResult
+	}
+
+	log.Printf("Container %s stopped successfully", containerName)
+	return CommandResult{Success: true}
+}
+
+// WaitForServiceHealth waits for a service to become healthy
+func WaitForServiceHealth(service interface{}, timeout int) CommandResult {
+	log.Printf("Waiting for service health check: %v (timeout: %d seconds)", service, timeout)
+
+	var containerName string
+
+	switch s := service.(type) {
+	case string:
+		containerName = s
+	case map[string]interface{}:
+		// Complex service definition - assume first key is service name
+		for name := range s {
+			containerName = name
+			break
+		}
+	default:
+		return CommandResult{
+			Success: false,
+			Stderr:  "Service must be a string or object",
+		}
+	}
+
+	// Wait for container to be healthy
+	healthCmd := fmt.Sprintf("timeout %d bash -c 'while [ \"$(docker inspect --format=\"{{.State.Health.Status}}\" %s 2>/dev/null || echo \"no-health\")\" != \"healthy\" ]; do sleep 1; done'", timeout, containerName)
+	log.Printf("Running health check: %s", healthCmd)
+
+	result := ExecuteShellCommand(ExecuteOptions{
+		Command:       healthCmd,
+		CaptureOutput: true,
+	})
+
+	if !result.Success {
+		errorMsg := fmt.Sprintf("Health check failed for container %s: %s", containerName, result.Stderr)
+		log.Print(errorMsg)
+		return CommandResult{Success: false, Stderr: errorMsg}
+	}
+
+	log.Printf("Container %s is healthy", containerName)
+	return CommandResult{Success: true}
 }

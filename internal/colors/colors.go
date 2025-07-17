@@ -8,12 +8,12 @@ import (
 
 // ANSI color codes
 const (
-	Reset     = "\033[0m"
-	Red       = "\033[31m"
-	Green     = "\033[32m"
-	Yellow    = "\033[33m"
-	Blue      = "\033[34m"
-	DarkGray  = "\033[90m"
+	Reset    = "\033[0m"
+	Red      = "\033[31m"
+	Green    = "\033[32m"
+	Yellow   = "\033[33m"
+	Blue     = "\033[34m"
+	DarkGray = "\033[90m"
 )
 
 // Global flag to control color output
@@ -106,11 +106,11 @@ func StripColors(text string) string {
 		Blue, "",
 		DarkGray, "",
 	}
-	
+
 	result := text
 	for i := 0; i < len(replacements); i += 2 {
 		result = strings.ReplaceAll(result, replacements[i], replacements[i+1])
 	}
-	
+
 	return result
 }

@@ -1,7 +1,126 @@
 commands:
+  # Standard Go project commands with modern services configuration
+  test:
+    - run: "go test ./... -v"
+
+  # Example using Docker Compose
+  test-compose:
+    - services:
+        compose:
+          file: "docker-compose.yml"
+          services: ["redis", "postgres"]
+          profiles: ["dev"]
+        wait_for_health: true
+        timeout: 45
+    - run: "go test ./... -v"
+
+  lint:
+    - run:
+        - "golangci-lint run"
+        - "go fmt ./..."
+
+  build:
+    - run: "go build -o dev-tools ."
+
+  dev:
+    - services:
+        containers:
+          - redis:
+              image: redis:alpine
+              ports: ["6379:6379"]
+              restart: "unless-stopped"
+              healthcheck:
+                test: "redis-cli ping"
+                interval: "30s"
+        wait_for_health: true
+    - run: "go run main.go"
+      background: true
+      daemon: true
+
+  # Development with Docker Compose
+  dev-compose:
+    - services:
+        compose:
+          file: "docker-compose.yml"
+          services: ["redis"]
+          profiles: ["dev"]
+        wait_for_health: true
+    - run: "go run main.go"
+      background: true
+      daemon: true
+
+  # Example with service cleanup
+  integration-test:
+    - services:
+        containers:
+          - test-postgres:
+              image: postgres:15
+              environment:
+                POSTGRES_PASSWORD: "test_password"
+                POSTGRES_DB: "integration_test"
+              ports: ["5433:5432"]
+              healthcheck:
+                test: "pg_isready -U postgres"
+                interval: "10s"
+                timeout: "5s"
+                retries: "5"
+          - test-redis:
+              image: redis:alpine
+              ports: ["6380:6379"]
+              healthcheck:
+                test: "redis-cli ping"
+                interval: "5s"
+        wait_for_health: true
+        cleanup: true  # Clean up services after test
+        timeout: 30
+    - run: "go test ./... -tags=integration -v"
+
+  # Legacy examples showing backward compatibility (deprecated)
+  legacy-test:
+    - start_services: ["redis", "postgres"]  # Shows deprecation warning
+    - run: "go test ./... -v"
+
+  # Advanced container configuration example
+  advanced-services:
+    - services:
+        containers:
+          - database:
+              image: postgres:15
+              environment:
+                POSTGRES_PASSWORD: "advanced_password"
+                POSTGRES_DB: "advanced_db"
+                POSTGRES_USER: "advanced_user"
+              ports: ["5432:5432"]
+              volumes: ["./data:/var/lib/postgresql/data"]
+              networks: ["dev-network"]
+              restart: "unless-stopped"
+              memory: "512m"
+              cpus: "0.5"
+              healthcheck:
+                test: "pg_isready -U advanced_user"
+                interval: "30s"
+                timeout: "10s"
+                retries: "3"
+          - cache:
+              image: redis:alpine
+              ports: ["6379:6379"]
+              memory: "128m"
+              restart: "unless-stopped"
+              healthcheck:
+                test: "redis-cli ping"
+                interval: "30s"
+        wait_for_health: true
+        timeout: 60
+    - run: "echo 'Advanced services started successfully'"
+
+  # Utility commands
+  logs:
+    - run: "tail -f activity.log"
+
   dev-logs:
     - run: "tail -n 50 activity.log"
 
+  # Test commands demonstrating various features
   test-daemon:
     - run: "echo toot && sleep 10"
       daemon: true
@@ -11,29 +130,6 @@ commands:
       - "echo command 1"
       - "echo command 2"
 
-  test-service:
-    - run: "sleep 2 && docker ps"
-    - start_services: [ "sleep" ]
-
-  alpine:
-    - run: "docker ps"
-    - start_services:
-        - box:
-            image: alpine
-            volumes: ["./:/data"]
-            ports: ["5432:127.0.0.1:5432"]
-
-  alpine-redis:
-    - run: "docker ps"
-    - start_services:
-        - box:
-            image: alpine
-            command: "sleep infinity"
-            volumes: ["./:/data"]
-            ports: ["5432:127.0.0.1:5432"]
-        - cache:
-            image: redis
-
   test-directory:
     - run: "pwd && ls -la"
       directory: "cmd"
@@ -42,6 +138,7 @@ commands:
     - run: "echo 'Running in:' && pwd && sleep 5"
       daemon: true
       directory: "cmd"
+
   test-realtime:
     - run: "echo Starting... && sleep 1 && echo Middle... && sleep 1 && echo Done!"
 
