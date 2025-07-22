@@ -105,6 +105,208 @@ func TestCleanupPidsCommand(t *testing.T) {
 	}
 }
 
+func TestStatusCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create test PID files
+	// Enhanced PID file for running daemon
+	enhancedPIDContent := fmt.Sprintf(`{"pid":%d,"command_name":"test-daemon","command":"sleep 300","start_time":"%s","restart_count":0}`,
+		os.Getpid(), "2023-01-01T12:00:00Z")
+	err := os.WriteFile(filepath.Join(tmpDir, ".enhanced.pid"), []byte(enhancedPIDContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create enhanced PID file: %v", err)
+	}
+
+	// Legacy PID file for running daemon
+	err = os.WriteFile(filepath.Join(tmpDir, ".legacy.pid"), []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create legacy PID file: %v", err)
+	}
+
+	// Stale PID file
+	err = os.WriteFile(filepath.Join(tmpDir, ".stale.pid"), []byte("999999"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create stale PID file: %v", err)
+	}
+
+	rootCmd := NewRootCommand()
+	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "status"})
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Errorf("status command should not error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "DAEMON STATUS") {
+		t.Errorf("status command should show daemon status header, got: %s", output)
+	}
+
+	if !strings.Contains(output, "test-daemon") {
+		t.Errorf("status command should show enhanced daemon info, got: %s", output)
+	}
+
+	if !strings.Contains(output, "Running") {
+		t.Errorf("status command should show running status, got: %s", output)
+	}
+
+	if !strings.Contains(output, "Stopped") {
+		t.Errorf("status command should show stopped status for stale daemon, got: %s", output)
+	}
+}
+
+func TestStatusCommandNoDaemons(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	rootCmd := NewRootCommand()
+	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "status"})
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Errorf("status command should not error with no daemons: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "No daemon processes found") {
+		t.Errorf("status command should show 'no daemons' message, got: %s", output)
+	}
+}
+
+func TestRestartCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldDir); err != nil {
+			t.Logf("Failed to restore directory: %v", err)
+		}
+	}()
+
+	// Create enhanced PID file for a stale daemon (using non-existent PID)
+	enhancedPIDContent := fmt.Sprintf(`{"pid":%d,"command_name":"test-daemon","command":"echo restarted","start_time":"%s","restart_count":0}`,
+		999999, "2023-01-01T12:00:00Z")
+	err := os.WriteFile(".enhanced.pid", []byte(enhancedPIDContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create enhanced PID file: %v", err)
+	}
+
+	rootCmd := NewRootCommand()
+	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "restart", "test-daemon"})
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Errorf("restart command should not error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Restarted daemon") {
+		t.Errorf("restart command should show restart success message, got: %s", output)
+	}
+
+	// Clean up any remaining PID files
+	files, _ := filepath.Glob("*.pid")
+	for _, file := range files {
+		_ = os.Remove(file)
+	}
+}
+
+func TestRestartCommandNonExistent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	rootCmd := NewRootCommand()
+	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "restart", "non-existent-daemon"})
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("restart command should error for non-existent daemon")
+	}
+
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("restart command should show 'not found' error, got: %v", err)
+	}
+}
+
+func TestStopCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldDir); err != nil {
+			t.Logf("Failed to restore directory: %v", err)
+		}
+	}()
+
+	// Create enhanced PID file for a stale daemon (using non-existent PID)
+	enhancedPIDContent := fmt.Sprintf(`{"pid":%d,"command_name":"test-daemon","command":"sleep 300","start_time":"%s","restart_count":0}`,
+		999999, "2023-01-01T12:00:00Z")
+	err := os.WriteFile(".enhanced.pid", []byte(enhancedPIDContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create enhanced PID file: %v", err)
+	}
+
+	rootCmd := NewRootCommand()
+	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "stop", "test-daemon"})
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Errorf("stop command should not error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Stopped daemon") {
+		t.Errorf("stop command should show stop success message, got: %s", output)
+	}
+
+	// Check that PID file was removed
+	if _, err := os.Stat(".enhanced.pid"); !os.IsNotExist(err) {
+		t.Error("PID file should be removed after stopping daemon")
+	}
+}
+
+func TestStopCommandNonExistent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	rootCmd := NewRootCommand()
+	rootCmd.SetArgs([]string{"--project-dir", tmpDir, "stop", "non-existent-daemon"})
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("stop command should error for non-existent daemon")
+	}
+
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("stop command should show 'not found' error, got: %v", err)
+	}
+}
+
 func TestCommandWithProjectDir(t *testing.T) {
 	tmpDir := t.TempDir()
 

@@ -52,7 +52,7 @@ Examples:
 	}
 
 	// Add built-in commands (avoid duplicates)
-	builtInCommands := []string{"logs", "cleanup-pids", "version"}
+	builtInCommands := []string{"logs", "cleanup-pids", "cleanup-all", "status", "restart", "stop", "version"}
 	for _, cmd := range builtInCommands {
 		if !commandSet[cmd] {
 			commands = append(commands, cmd)
@@ -105,7 +105,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.8.0"
+	rootCmd.Version = "0.9.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -226,6 +226,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return handleLogsCommand(cmd)
 	case "cleanup-pids":
 		return handleCleanupPidsCommand(cmd)
+	case "cleanup-all":
+		return handleCleanupAllCommand(cmd)
+	case "status":
+		return handleStatusCommand(cmd)
+	case "restart":
+		return handleRestartCommand(cmd, args)
+	case "stop":
+		return handleStopCommand(cmd, args)
 	case "version":
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
 		return nil
@@ -346,5 +354,128 @@ func handleCleanupPidsCommand(cmd *cobra.Command) error {
 	}
 
 	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+	return nil
+}
+
+func handleCleanupAllCommand(cmd *cobra.Command) error {
+	log.Print("Cleaning up all daemon processes and PID files")
+
+	result := executor.CleanupStalePIDFilesWithTermination(projectDir, true)
+	if !result.Success {
+		return fmt.Errorf("cleanup-all failed: %s", result.Stderr)
+	}
+
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+	return nil
+}
+
+func handleStatusCommand(cmd *cobra.Command) error {
+	log.Print("Displaying daemon process status")
+
+	daemons, err := executor.ListDaemonProcesses(projectDir)
+	if err != nil {
+		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to list daemon processes: %v", err)))
+	}
+
+	if len(daemons) == 0 {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("No daemon processes found in %s", projectDir)))
+		return nil
+	}
+
+	// Display header
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Highlight("DAEMON STATUS"))
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "")
+
+	// Display table header
+	header := fmt.Sprintf("%-20s %-10s %-8s %-12s %s",
+		"COMMAND NAME", "STATUS", "PID", "UPTIME", "COMMAND")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(header))
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
+
+	// Display each daemon
+	for _, daemon := range daemons {
+		var status, statusColor string
+		if daemon.IsRunning {
+			status = "Running"
+			statusColor = colors.Success(status)
+		} else {
+			status = "Stopped"
+			statusColor = colors.Warning(status)
+		}
+
+		commandName := daemon.CommandName
+		if commandName == "" {
+			commandName = "(legacy)"
+		}
+
+		uptime := daemon.Uptime
+		if uptime == "" {
+			uptime = "N/A"
+		}
+
+		command := daemon.Command
+		if command == "" {
+			command = "(unknown)"
+		}
+		if len(command) > 40 {
+			command = command[:37] + "..."
+		}
+
+		row := fmt.Sprintf("%-20s %-10s %-8d %-12s %s",
+			commandName,
+			statusColor,
+			daemon.PID,
+			uptime,
+			command)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), row)
+	}
+
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "")
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("Total: %d daemon process(es)\n", len(daemons))))
+
+	return nil
+}
+
+func handleRestartCommand(cmd *cobra.Command, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("%s", colors.Error("restart command requires a daemon name"))
+	}
+
+	daemonName := args[1]
+	log.Printf("Restarting daemon: %s", daemonName)
+
+	daemon, err := executor.FindDaemonByCommandName(projectDir, daemonName)
+	if err != nil {
+		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("daemon '%s' not found: %v", daemonName, err)))
+	}
+
+	err = executor.RestartDaemonProcess(projectDir, daemon)
+	if err != nil {
+		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to restart daemon '%s': %v", daemonName, err)))
+	}
+
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Restarted daemon '%s'", daemonName)))
+	return nil
+}
+
+func handleStopCommand(cmd *cobra.Command, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("%s", colors.Error("stop command requires a daemon name"))
+	}
+
+	daemonName := args[1]
+	log.Printf("Stopping daemon: %s", daemonName)
+
+	daemon, err := executor.FindDaemonByCommandName(projectDir, daemonName)
+	if err != nil {
+		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("daemon '%s' not found: %v", daemonName, err)))
+	}
+
+	err = executor.StopDaemonProcess(projectDir, daemon)
+	if err != nil {
+		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to stop daemon '%s': %v", daemonName, err)))
+	}
+
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Stopped daemon '%s'", daemonName)))
 	return nil
 }

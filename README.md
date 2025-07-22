@@ -66,6 +66,18 @@ dev-tools logs
 # Clean up stale daemon processes
 dev-tools cleanup-pids
 
+# Clean up all daemon processes (including running ones)
+dev-tools cleanup-all
+
+# View daemon status
+dev-tools status
+
+# Restart a specific daemon
+dev-tools restart <daemon-name>
+
+# Stop a specific daemon
+dev-tools stop <daemon-name>
+
 # Run with verbose logging
 dev-tools --verbose test
 

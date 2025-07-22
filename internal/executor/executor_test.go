@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,168 @@ func TestPIDFileOperations(t *testing.T) {
 	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
 		t.Error("PID file should be removed")
 	}
+}
+
+func TestEnhancedPIDFileOperations(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, ".test.pid")
+
+	// Test creating enhanced PID file with metadata
+	testPID := 12345
+	commandName := "test-daemon"
+	command := "sleep 300"
+	err := CreateEnhancedPIDFile(pidFile, testPID, commandName, command)
+	if err != nil {
+		t.Errorf("CreateEnhancedPIDFile() error = %v", err)
+	}
+
+	// Test reading enhanced PID file
+	pidInfo, err := ReadEnhancedPIDFile(pidFile)
+	if err != nil {
+		t.Errorf("ReadEnhancedPIDFile() error = %v", err)
+	}
+
+	if pidInfo.PID != testPID {
+		t.Errorf("ReadEnhancedPIDFile() PID = %d, want %d", pidInfo.PID, testPID)
+	}
+
+	if pidInfo.CommandName != commandName {
+		t.Errorf("ReadEnhancedPIDFile() CommandName = %q, want %q", pidInfo.CommandName, commandName)
+	}
+
+	if pidInfo.Command != command {
+		t.Errorf("ReadEnhancedPIDFile() Command = %q, want %q", pidInfo.Command, command)
+	}
+
+	if pidInfo.StartTime.IsZero() {
+		t.Error("ReadEnhancedPIDFile() StartTime should be set")
+	}
+
+	if pidInfo.RestartCount != 0 {
+		t.Errorf("ReadEnhancedPIDFile() RestartCount = %d, want %d", pidInfo.RestartCount, 0)
+	}
+
+	// Test removing enhanced PID file
+	err = RemovePIDFile(pidFile)
+	if err != nil {
+		t.Errorf("RemovePIDFile() error = %v", err)
+	}
+
+	// Verify file is gone
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Error("PID file should be removed")
+	}
+}
+
+func TestReadPIDFileBackwardCompatibility(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, ".legacy.pid")
+
+	// Create legacy PID file (just contains PID number)
+	testPID := 54321
+	err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", testPID)), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create legacy PID file: %v", err)
+	}
+
+	// Test reading legacy PID file with enhanced reader
+	pidInfo, err := ReadEnhancedPIDFile(pidFile)
+	if err != nil {
+		t.Errorf("ReadEnhancedPIDFile() should handle legacy format, error = %v", err)
+	}
+
+	if pidInfo.PID != testPID {
+		t.Errorf("ReadEnhancedPIDFile() PID = %d, want %d", pidInfo.PID, testPID)
+	}
+
+	// Legacy file should have empty command info but valid PID
+	if pidInfo.CommandName != "" {
+		t.Errorf("ReadEnhancedPIDFile() CommandName should be empty for legacy file, got %q", pidInfo.CommandName)
+	}
+
+	if pidInfo.Command != "" {
+		t.Errorf("ReadEnhancedPIDFile() Command should be empty for legacy file, got %q", pidInfo.Command)
+	}
+
+	// Test that legacy ReadPIDFile still works
+	legacyPID, err := ReadPIDFile(pidFile)
+	if err != nil {
+		t.Errorf("ReadPIDFile() should still work with legacy format, error = %v", err)
+	}
+
+	if legacyPID != testPID {
+		t.Errorf("ReadPIDFile() = %d, want %d", legacyPID, testPID)
+	}
+}
+
+func TestListDaemonProcesses(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldDir); err != nil {
+			t.Logf("Failed to restore directory: %v", err)
+		}
+	}()
+
+	// Create test PID files
+	pidFile1 := filepath.Join(tmpDir, ".daemon1.pid")
+	pidFile2 := filepath.Join(tmpDir, ".daemon2.pid")
+	pidFile3 := filepath.Join(tmpDir, ".stale.pid")
+
+	// Create enhanced PID file for running daemon
+	err := CreateEnhancedPIDFile(pidFile1, os.Getpid(), "daemon1", "sleep 300")
+	if err != nil {
+		t.Fatalf("Failed to create enhanced PID file: %v", err)
+	}
+
+	// Create legacy PID file for running daemon
+	err = CreatePIDFile(pidFile2, os.Getpid())
+	if err != nil {
+		t.Fatalf("Failed to create legacy PID file: %v", err)
+	}
+
+	// Create stale PID file
+	err = CreateEnhancedPIDFile(pidFile3, 999999, "stale-daemon", "old command")
+	if err != nil {
+		t.Fatalf("Failed to create stale PID file: %v", err)
+	}
+
+	// Test listing daemon processes
+	daemons, err := ListDaemonProcesses(tmpDir)
+	if err != nil {
+		t.Errorf("ListDaemonProcesses() error = %v", err)
+	}
+
+	if len(daemons) < 2 {
+		t.Errorf("ListDaemonProcesses() should find at least 2 daemons, got %d", len(daemons))
+	}
+
+	// Check that we found the running daemons
+	foundRunning := 0
+	foundStale := 0
+	for _, daemon := range daemons {
+		if daemon.IsRunning {
+			foundRunning++
+		} else {
+			foundStale++
+		}
+	}
+
+	if foundRunning != 2 {
+		t.Errorf("Should find 2 running daemons, got %d", foundRunning)
+	}
+
+	if foundStale != 1 {
+		t.Errorf("Should find 1 stale daemon, got %d", foundStale)
+	}
+
+	// Clean up
+	_ = RemovePIDFile(pidFile1)
+	_ = RemovePIDFile(pidFile2)
+	_ = RemovePIDFile(pidFile3)
 }
 
 func TestReadPIDFileNotExists(t *testing.T) {
