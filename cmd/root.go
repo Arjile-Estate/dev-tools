@@ -20,70 +20,6 @@ var (
 	noColor    bool
 )
 
-// generateDynamicHelp creates help text that includes available commands
-func generateDynamicHelp(dir string) string {
-	baseHelp := `dev-tools is a command runner that reads configuration from .dev-config.yaml
-and provides consistent commands across different project types.
-
-It automatically detects project types (Go, Python, Node.js, Rust) and provides
-sensible defaults, while allowing customization through configuration files.`
-
-	// Try to load configuration to show available commands
-	config, err := config.LoadConfigurationForProject(dir)
-	if err != nil {
-		return baseHelp + `
-
-Examples:
-  dev-tools test        # Run tests
-  dev-tools lint        # Run linting
-  dev-tools build       # Build project
-  dev-tools logs        # Show recent logs
-  dev-tools cleanup-pids # Clean up stale PID files`
-	}
-
-	// Add available commands
-	var commands []string
-	commandSet := make(map[string]bool)
-
-	// Add commands from config
-	for cmd := range config.Commands {
-		commands = append(commands, cmd)
-		commandSet[cmd] = true
-	}
-
-	// Add built-in commands (avoid duplicates)
-	builtInCommands := []string{"logs", "cleanup-pids", "cleanup-all", "status", "restart", "stop", "version"}
-	for _, cmd := range builtInCommands {
-		if !commandSet[cmd] {
-			commands = append(commands, cmd)
-		}
-	}
-
-	if len(commands) > 0 {
-		baseHelp += fmt.Sprintf(`
-
-Available commands: %s
-
-Examples:`, colors.Highlight(strings.Join(commands, ", ")))
-
-		// Show examples for first few commands
-		exampleCount := 0
-		for cmd := range config.Commands {
-			if exampleCount >= 3 {
-				break
-			}
-			baseHelp += fmt.Sprintf(`
-  dev-tools %s`, cmd)
-			exampleCount++
-		}
-		baseHelp += `
-  dev-tools logs        # Show recent logs
-  dev-tools --verbose test # Run with verbose logging`
-	}
-
-	return baseHelp
-}
-
 // NewRootCommand creates the root command for the CLI
 func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -95,7 +31,7 @@ and provides consistent commands across different project types.
 It automatically detects project types (Go, Python, Node.js, Rust) and provides
 sensible defaults, while allowing customization through configuration files.`,
 		Args:             cobra.MinimumNArgs(1),
-		PersistentPreRun: setupLogging,
+		PersistentPreRun: preRun,
 		RunE:             runCommand,
 		SilenceUsage:     false,
 		SilenceErrors:    false,
@@ -105,7 +41,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.9.0"
+	rootCmd.Version = "0.10.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -131,88 +67,36 @@ Flags:
 }
 
 // isRunningViaGoRun detects if the application is running via 'go run'
-func isRunningViaGoRun(executable string) bool {
-	// 'go run' creates temporary executables in paths like:
-	// /tmp/go-build123456789/b001/exe/main (Linux)
-	// /var/folders/xy/abcdef/T/go-build987654321/b001/exe/main (macOS)
-	return strings.Contains(executable, "go-build") &&
-		(strings.Contains(executable, "/tmp/") || strings.Contains(executable, "/T/"))
-}
-
-// getHomeDirectory returns the user's home directory
-func getHomeDirectory() (string, error) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		return "", fmt.Errorf("HOME environment variable not set")
-	}
-	return home, nil
-}
-
-// ensureLogDirectory creates the log directory if it doesn't exist
-func ensureLogDirectory(logFilePath string) error {
-	logDir := filepath.Dir(logFilePath)
-	return os.MkdirAll(logDir, 0755)
-}
-
-// getLogFilePath returns the appropriate log file path based on execution method
-func getLogFilePath(executable, homeDir, projectDir string) (string, bool) {
-	isGoRun := isRunningViaGoRun(executable)
-
-	if isGoRun {
-		// When running via 'go run', use project directory
-		return filepath.Join(projectDir, "activity.log"), true
-	} else {
-		// When running compiled binary, use ~/Library/Logs/dev-tools.log
-		return filepath.Join(homeDir, "Library", "Logs", "dev-tools.log"), false
-	}
-}
-
-func setupLogging(cmd *cobra.Command, args []string) {
-	// Initialize color support
+func preRun(cmd *cobra.Command, args []string) {
 	colors.InitializeColorSupport(noColor)
+	setupLogging(verbose, projectDir)
+}
 
-	// Setup basic logging
-	if verbose {
-		log.SetOutput(os.Stdout)
-	} else {
-		// Get executable path
-		executable, err := os.Executable()
-		if err != nil {
-			// Fallback to project directory if we can't determine executable
-			logFile := filepath.Join(projectDir, "activity.log")
-			if file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				log.SetOutput(file)
-			}
-			log.SetFlags(log.LstdFlags)
-			return
-		}
+type CommandFunc func(*cobra.Command, []string) error
 
-		// Get home directory
-		homeDir, err := getHomeDirectory()
-		if err != nil {
-			// Fallback to project directory if we can't get home directory
-			logFile := filepath.Join(projectDir, "activity.log")
-			if file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				log.SetOutput(file)
-			}
-			log.SetFlags(log.LstdFlags)
-			return
-		}
-
-		// Determine log file path based on execution method
-		logFile, _ := getLogFilePath(executable, homeDir, projectDir)
-
-		// Ensure log directory exists
-		if err := ensureLogDirectory(logFile); err != nil {
-			// Fallback to project directory if we can't create log directory
-			logFile = filepath.Join(projectDir, "activity.log")
-		}
-
-		if file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			log.SetOutput(file)
-		}
-	}
-	log.SetFlags(log.LstdFlags)
+var builtInCommands = map[string]CommandFunc{
+	"logs": func(cmd *cobra.Command, args []string) error {
+		return handleLogsCommand(cmd)
+	},
+	"cleanup-pids": func(cmd *cobra.Command, args []string) error {
+		return handleCleanupPidsCommand(cmd)
+	},
+	"cleanup-all": func(cmd *cobra.Command, args []string) error {
+		return handleCleanupAllCommand(cmd)
+	},
+	"status": func(cmd *cobra.Command, args []string) error {
+		return handleStatusCommand(cmd)
+	},
+	"restart": func(cmd *cobra.Command, args []string) error {
+		return handleRestartCommand(cmd, args)
+	},
+	"stop": func(cmd *cobra.Command, args []string) error {
+		return handleStopCommand(cmd, args)
+	},
+	"version": func(cmd *cobra.Command, args []string) error {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
+		return nil
+	},
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
@@ -221,22 +105,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	log.Printf("Starting dev-tools with command: %s", commandName)
 
 	// Handle special built-in commands
-	switch commandName {
-	case "logs":
-		return handleLogsCommand(cmd)
-	case "cleanup-pids":
-		return handleCleanupPidsCommand(cmd)
-	case "cleanup-all":
-		return handleCleanupAllCommand(cmd)
-	case "status":
-		return handleStatusCommand(cmd)
-	case "restart":
-		return handleRestartCommand(cmd, args)
-	case "stop":
-		return handleStopCommand(cmd, args)
-	case "version":
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
-		return nil
+	if commandFunc, exists := builtInCommands[commandName]; exists {
+		return commandFunc(cmd, args)
 	}
 
 	// Load environment variables
@@ -277,205 +147,5 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Print("Command completed successfully")
-	return nil
-}
-
-func handleLogsCommand(cmd *cobra.Command) error {
-	log.Print("Displaying recent activity logs")
-
-	// Get executable path
-	executable, err := os.Executable()
-	if err != nil {
-		// Fallback to project directory if we can't determine executable
-		logFile := filepath.Join(projectDir, "activity.log")
-		if _, err := os.Stat(logFile); os.IsNotExist(err) {
-			return fmt.Errorf("%s", colors.Error("no log file found at %s", logFile))
-		}
-
-		result := executor.ExecuteShellCommand(executor.ExecuteOptions{
-			Command:       fmt.Sprintf("tail -n 50 %s", logFile),
-			CaptureOutput: true,
-		})
-
-		if !result.Success {
-			return fmt.Errorf("%s", colors.Error("failed to read logs: %s", result.Stderr))
-		}
-
-		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
-		return nil
-	}
-
-	// Get home directory
-	homeDir, err := getHomeDirectory()
-	if err != nil {
-		// Fallback to project directory if we can't get home directory
-		logFile := filepath.Join(projectDir, "activity.log")
-		if _, err := os.Stat(logFile); os.IsNotExist(err) {
-			return fmt.Errorf("%s", colors.Error("no log file found at %s", logFile))
-		}
-
-		result := executor.ExecuteShellCommand(executor.ExecuteOptions{
-			Command:       fmt.Sprintf("tail -n 50 %s", logFile),
-			CaptureOutput: true,
-		})
-
-		if !result.Success {
-			return fmt.Errorf("%s", colors.Error("failed to read logs: %s", result.Stderr))
-		}
-
-		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
-		return nil
-	}
-
-	// Determine log file path based on execution method
-	logFile, _ := getLogFilePath(executable, homeDir, projectDir)
-
-	if _, err := os.Stat(logFile); os.IsNotExist(err) {
-		return fmt.Errorf("no log file found at %s", logFile)
-	}
-
-	result := executor.ExecuteShellCommand(executor.ExecuteOptions{
-		Command:       fmt.Sprintf("tail -n 50 %s", logFile),
-		CaptureOutput: true,
-	})
-
-	if !result.Success {
-		return fmt.Errorf("failed to read logs: %s", result.Stderr)
-	}
-
-	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
-	return nil
-}
-
-func handleCleanupPidsCommand(cmd *cobra.Command) error {
-	result := executor.CleanupStalePIDFiles(projectDir)
-	if !result.Success {
-		return fmt.Errorf("cleanup failed: %s", result.Stderr)
-	}
-
-	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
-	return nil
-}
-
-func handleCleanupAllCommand(cmd *cobra.Command) error {
-	log.Print("Cleaning up all daemon processes and PID files")
-
-	result := executor.CleanupStalePIDFilesWithTermination(projectDir, true)
-	if !result.Success {
-		return fmt.Errorf("cleanup-all failed: %s", result.Stderr)
-	}
-
-	_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
-	return nil
-}
-
-func handleStatusCommand(cmd *cobra.Command) error {
-	log.Print("Displaying daemon process status")
-
-	daemons, err := executor.ListDaemonProcesses(projectDir)
-	if err != nil {
-		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to list daemon processes: %v", err)))
-	}
-
-	if len(daemons) == 0 {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("No daemon processes found in %s", projectDir)))
-		return nil
-	}
-
-	// Display header
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Highlight("DAEMON STATUS"))
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "")
-
-	// Display table header
-	header := fmt.Sprintf("%-20s %-10s %-8s %-12s %s",
-		"COMMAND NAME", "STATUS", "PID", "UPTIME", "COMMAND")
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(header))
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
-
-	// Display each daemon
-	for _, daemon := range daemons {
-		var status, statusColor string
-		if daemon.IsRunning {
-			status = "Running"
-			statusColor = colors.Success(status)
-		} else {
-			status = "Stopped"
-			statusColor = colors.Warning(status)
-		}
-
-		commandName := daemon.CommandName
-		if commandName == "" {
-			commandName = "(legacy)"
-		}
-
-		uptime := daemon.Uptime
-		if uptime == "" {
-			uptime = "N/A"
-		}
-
-		command := daemon.Command
-		if command == "" {
-			command = "(unknown)"
-		}
-		if len(command) > 40 {
-			command = command[:37] + "..."
-		}
-
-		row := fmt.Sprintf("%-20s %-10s %-8d %-12s %s",
-			commandName,
-			statusColor,
-			daemon.PID,
-			uptime,
-			command)
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), row)
-	}
-
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "")
-	_, _ = fmt.Fprint(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("Total: %d daemon process(es)\n", len(daemons))))
-
-	return nil
-}
-
-func handleRestartCommand(cmd *cobra.Command, args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("%s", colors.Error("restart command requires a daemon name"))
-	}
-
-	daemonName := args[1]
-	log.Printf("Restarting daemon: %s", daemonName)
-
-	daemon, err := executor.FindDaemonByCommandName(projectDir, daemonName)
-	if err != nil {
-		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("daemon '%s' not found: %v", daemonName, err)))
-	}
-
-	err = executor.RestartDaemonProcess(projectDir, daemon)
-	if err != nil {
-		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to restart daemon '%s': %v", daemonName, err)))
-	}
-
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Restarted daemon '%s'", daemonName)))
-	return nil
-}
-
-func handleStopCommand(cmd *cobra.Command, args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("%s", colors.Error("stop command requires a daemon name"))
-	}
-
-	daemonName := args[1]
-	log.Printf("Stopping daemon: %s", daemonName)
-
-	daemon, err := executor.FindDaemonByCommandName(projectDir, daemonName)
-	if err != nil {
-		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("daemon '%s' not found: %v", daemonName, err)))
-	}
-
-	err = executor.StopDaemonProcess(projectDir, daemon)
-	if err != nil {
-		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to stop daemon '%s': %v", daemonName, err)))
-	}
-
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Stopped daemon '%s'", daemonName)))
 	return nil
 }
