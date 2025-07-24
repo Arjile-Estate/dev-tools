@@ -2,15 +2,32 @@ package executor
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dev-tools/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMain sets up the test environment
+func TestMain(m *testing.M) {
+	// Disable log output during tests to keep them quiet
+	log.SetOutput(io.Discard)
+
+	// Run tests
+	code := m.Run()
+
+	// Restore log output after tests
+	log.SetOutput(os.Stderr)
+
+	os.Exit(code)
+}
 
 func TestExecuteShellCommand(t *testing.T) {
 	tests := []struct {
@@ -857,4 +874,952 @@ services:
 			t.Logf("Service configuration test: %s", tt.description)
 		})
 	}
+}
+
+func TestFindDaemonByCommandName(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(oldDir))
+	}()
+
+	tests := []struct {
+		name          string
+		setupDaemons  func() error
+		commandName   string
+		expectFound   bool
+		expectedPID   int
+		expectedError bool
+	}{
+		{
+			name: "find existing daemon",
+			setupDaemons: func() error {
+				pidFile := GeneratePIDFilename("test-daemon", "sleep 300")
+				return CreateEnhancedPIDFile(pidFile, os.Getpid(), "test-daemon", "sleep 300")
+			},
+			commandName: "test-daemon",
+			expectFound: true,
+			expectedPID: os.Getpid(),
+		},
+		{
+			name: "daemon not found",
+			setupDaemons: func() error {
+				pidFile := GeneratePIDFilename("other-daemon", "sleep 300")
+				return CreateEnhancedPIDFile(pidFile, os.Getpid(), "other-daemon", "sleep 300")
+			},
+			commandName: "nonexistent-daemon",
+			expectFound: false,
+		},
+		{
+			name: "empty command name",
+			setupDaemons: func() error {
+				return nil
+			},
+			commandName: "",
+			expectFound: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, tt.setupDaemons())
+
+			daemon, err := FindDaemonByCommandName(tmpDir, tt.commandName)
+
+			if tt.expectFound {
+				assert.NoError(t, err)
+				assert.NotNil(t, daemon)
+				assert.Equal(t, tt.expectedPID, daemon.PID)
+				assert.Equal(t, tt.commandName, daemon.CommandName)
+			} else {
+				assert.Error(t, err)
+				assert.Nil(t, daemon)
+			}
+
+			// Cleanup
+			if tt.expectFound {
+				pidFile := GeneratePIDFilename(tt.commandName, "sleep 300")
+				_ = RemovePIDFile(pidFile)
+			}
+		})
+	}
+}
+
+func TestStopDaemonProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(oldDir))
+	}()
+
+	t.Run("stop with stale PID file", func(t *testing.T) {
+		// Create a PID file with a definitely non-existent PID
+		pidFile := GeneratePIDFilename("stale-daemon", "old command")
+		err := CreateEnhancedPIDFile(pidFile, 999999, "stale-daemon", "old command")
+		require.NoError(t, err)
+
+		// Create daemon info for the stale process
+		daemon := &DaemonInfo{
+			PIDFileInfo: PIDFileInfo{
+				PID:         999999,
+				CommandName: "stale-daemon",
+				Command:     "old command",
+				StartTime:   time.Now(),
+			},
+			PIDFile:   filepath.Base(pidFile),
+			IsRunning: false,
+		}
+
+		err = StopDaemonProcess(tmpDir, daemon)
+
+		assert.NoError(t, err)
+
+		// Verify PID file was removed
+		_, err = os.Stat(pidFile)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("daemon not found", func(t *testing.T) {
+		daemon, err := FindDaemonByCommandName(tmpDir, "nonexistent-daemon")
+
+		assert.Error(t, err)
+		assert.Nil(t, daemon)
+		assert.Contains(t, err.Error(), "daemon with command name 'nonexistent-daemon' not found")
+	})
+}
+
+func TestRestartDaemonProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(oldDir))
+	}()
+
+	t.Run("restart daemon with stale PID", func(t *testing.T) {
+		// Create a stale PID file
+		pidFile := GeneratePIDFilename("restart-daemon", "echo test")
+		err := CreateEnhancedPIDFile(pidFile, 999999, "restart-daemon", "echo test")
+		require.NoError(t, err)
+
+		// Create daemon info for the stale process
+		daemon := &DaemonInfo{
+			PIDFileInfo: PIDFileInfo{
+				PID:         999999,
+				CommandName: "restart-daemon",
+				Command:     "echo test",
+				StartTime:   time.Now(),
+			},
+			PIDFile:   filepath.Base(pidFile),
+			IsRunning: false,
+		}
+
+		err = RestartDaemonProcess(tmpDir, daemon)
+
+		// Should succeed because it's a valid command
+		assert.NoError(t, err)
+
+		// Cleanup
+		_ = RemovePIDFile(pidFile)
+	})
+
+	t.Run("restart daemon with legacy PID file", func(t *testing.T) {
+		// Create daemon info without command (simulating legacy PID file)
+		daemon := &DaemonInfo{
+			PIDFileInfo: PIDFileInfo{
+				PID:         999999,
+				CommandName: "legacy-daemon",
+				Command:     "", // Empty command simulates legacy PID file
+				StartTime:   time.Now(),
+			},
+			PIDFile:   ".legacy.pid",
+			IsRunning: false,
+		}
+
+		err := RestartDaemonProcess(tmpDir, daemon)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot restart daemon legacy-daemon: no command information available")
+	})
+
+	t.Run("daemon not found", func(t *testing.T) {
+		daemon, err := FindDaemonByCommandName(tmpDir, "nonexistent-daemon")
+
+		assert.Error(t, err)
+		assert.Nil(t, daemon)
+		assert.Contains(t, err.Error(), "daemon with command name 'nonexistent-daemon' not found")
+	})
+}
+
+func TestCleanupStalePIDFilesWithTermination(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(oldDir))
+	}()
+
+	t.Run("cleanup with termination disabled", func(t *testing.T) {
+		// Create stale PID file
+		stalePIDFile := GeneratePIDFilename("stale-daemon", "old command")
+		err := CreateEnhancedPIDFile(stalePIDFile, 999999, "stale-daemon", "old command")
+		require.NoError(t, err)
+
+		// Create running PID file
+		runningPIDFile := GeneratePIDFilename("running-daemon", "current command")
+		err = CreateEnhancedPIDFile(runningPIDFile, os.Getpid(), "running-daemon", "current command")
+		require.NoError(t, err)
+
+		result := CleanupStalePIDFilesWithTermination(tmpDir, false)
+
+		assert.True(t, result.Success)
+		assert.Contains(t, result.Stdout, "Cleaned up 1 stale PID file")
+
+		// Stale file should be removed
+		_, err = os.Stat(stalePIDFile)
+		assert.True(t, os.IsNotExist(err))
+
+		// Running file should remain
+		_, err = os.Stat(runningPIDFile)
+		assert.False(t, os.IsNotExist(err))
+
+		// Cleanup
+		_ = RemovePIDFile(runningPIDFile)
+	})
+
+	t.Run("cleanup with termination enabled", func(t *testing.T) {
+		// Create stale PID file
+		stalePIDFile := GeneratePIDFilename("stale-daemon2", "old command")
+		err := CreateEnhancedPIDFile(stalePIDFile, 999999, "stale-daemon2", "old command")
+		require.NoError(t, err)
+
+		result := CleanupStalePIDFilesWithTermination(tmpDir, true)
+
+		assert.True(t, result.Success)
+		assert.Contains(t, result.Stdout, "Cleaned up 1 stale PID file")
+
+		// Stale file should be removed
+		_, err = os.Stat(stalePIDFile)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("no PID files to cleanup", func(t *testing.T) {
+		result := CleanupStalePIDFilesWithTermination(tmpDir, false)
+
+		assert.True(t, result.Success)
+		assert.Contains(t, result.Stdout, "No PID files found to clean up")
+	})
+}
+
+func TestWaitForServiceHealth(t *testing.T) {
+	tests := []struct {
+		name        string
+		service     interface{}
+		timeout     int
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "invalid service type",
+			service:     123,
+			timeout:     5,
+			expectError: true,
+			errorMsg:    "Service must be a string or object",
+		},
+		{
+			name:        "string service name",
+			service:     "test-service",
+			timeout:     1,
+			expectError: true, // Will fail because container doesn't exist
+		},
+		{
+			name: "complex service configuration",
+			service: map[string]interface{}{
+				"test-service": map[string]interface{}{
+					"image": "alpine:latest",
+				},
+			},
+			timeout:     1,
+			expectError: true, // Will fail because container doesn't exist
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := WaitForServiceHealth(tt.service, tt.timeout)
+
+			if tt.expectError {
+				assert.False(t, result.Success)
+				if tt.errorMsg != "" {
+					assert.Contains(t, result.Stderr, tt.errorMsg)
+				}
+			} else {
+				assert.True(t, result.Success)
+			}
+		})
+	}
+}
+
+func TestExecuteShellCommand_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name         string
+		opts         ExecuteOptions
+		expectError  bool
+		testType     string
+	}{
+		{
+			name: "background command - may succeed but process fails later",
+			opts: ExecuteOptions{
+				Command:    "/nonexistent/command",
+				Background: true,
+			},
+			expectError: false, // Background commands return success if process starts
+			testType:    "background_command",
+		},
+		{
+			name: "daemon command - may succeed but process fails later",
+			opts: ExecuteOptions{
+				Command:     "/nonexistent/command",
+				Daemon:      true,
+				CommandName: "test-daemon",
+			},
+			expectError: false, // Daemon commands return success if process starts
+			testType:    "daemon_command",
+		},
+		{
+			name: "invalid working directory",
+			opts: ExecuteOptions{
+				Command:       "echo hello",
+				CaptureOutput: true,
+				WorkingDir:    "/nonexistent/directory",
+			},
+			expectError: true, // This should fail immediately
+			testType:    "workdir_failure",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteShellCommand(tt.opts)
+
+			if tt.expectError {
+				assert.False(t, result.Success)
+				assert.NotEmpty(t, result.Stderr)
+			} else {
+				// For background/daemon commands, we just verify they don't panic
+				// The actual command failure happens asynchronously
+				t.Logf("Command execution result: success=%v, stderr=%s", result.Success, result.Stderr)
+			}
+
+			// Cleanup any daemon PID files if created
+			if tt.opts.Daemon && tt.opts.CommandName != "" && result.Success {
+				t.Cleanup(func() {
+					// Clean up any PID files that might have been created
+					pidFile := GeneratePIDFilename(tt.opts.CommandName, tt.opts.Command)
+					_ = RemovePIDFile(pidFile)
+				})
+			}
+		})
+	}
+}
+
+func TestExecuteCommandStep_ErrorHandling(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		step        config.CommandStep
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "invalid directory",
+			step: config.CommandStep{
+				Run:       config.RunCommand{"echo hello"},
+				Directory: "/nonexistent/directory",
+			},
+			expectError: true,
+			errorMsg:    "does not exist",
+		},
+		{
+			name: "directory is a file",
+			step: config.CommandStep{
+				Run:       config.RunCommand{"echo hello"},
+				Directory: filepath.Join(tmpDir, "notadir"),
+			},
+			expectError: true,
+			errorMsg:    "is not a directory",
+		},
+	}
+
+	// Create a file (not directory) for one test
+	notADir := filepath.Join(tmpDir, "notadir")
+	err := os.WriteFile(notADir, []byte("test"), 0644)
+	require.NoError(t, err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteCommandStep(tt.step, "test-command", tmpDir)
+
+			if tt.expectError {
+				assert.False(t, result.Success)
+				if tt.errorMsg != "" {
+					assert.Contains(t, result.Stderr, tt.errorMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestStartDockerService_ComplexConfiguration(t *testing.T) {
+	tests := []struct {
+		name        string
+		service     interface{}
+		expectError bool
+		description string
+	}{
+		{
+			name: "service with all configuration options",
+			service: map[string]interface{}{
+				"complex-service": map[string]interface{}{
+					"image": "alpine:latest",
+					"environment": []interface{}{
+						"VAR1=value1",
+						"VAR2=value2",
+					},
+					"volumes": []interface{}{
+						"./data:/app/data",
+						"/tmp:/app/tmp",
+					},
+					"ports": []interface{}{
+						"8080:80",
+						"9090:90",
+					},
+					"networks": []interface{}{
+						"custom-network",
+					},
+					"restart": "unless-stopped",
+					"memory":  "512m",
+					"cpus":    "0.5",
+					"healthcheck": map[string]interface{}{
+						"test":     []interface{}{"CMD", "curl", "-f", "http://localhost/health"},
+						"interval": "30s",
+						"timeout":  "10s",
+						"retries":  3,
+					},
+				},
+			},
+			expectError: false,
+			description: "should handle complex service with all options",
+		},
+		{
+			name: "service with environment as map",
+			service: map[string]interface{}{
+				"env-service": map[string]interface{}{
+					"image": "alpine:latest",
+					"environment": map[string]interface{}{
+						"KEY1": "value1",
+						"KEY2": "value2",
+					},
+				},
+			},
+			expectError: false,
+			description: "should handle environment as map",
+		},
+		{
+			name: "service with invalid healthcheck",
+			service: map[string]interface{}{
+				"bad-health-service": map[string]interface{}{
+					"image":       "alpine:latest",
+					"healthcheck": "invalid-healthcheck",
+				},
+			},
+			expectError: false, // Should handle gracefully
+			description: "should handle invalid healthcheck configuration",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StartDockerService(tt.service)
+
+			if result.Success {
+				t.Cleanup(func() {
+					_ = StopDockerService(tt.service)
+				})
+			}
+
+			t.Logf("Docker service test: %s (result: %v)", tt.description, result.Success)
+			// Don't assert success/failure since Docker may not be available
+		})
+	}
+}
+
+func TestExecuteCommandStep_ServicesConfiguration(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		step        config.CommandStep
+		description string
+	}{
+		{
+			name: "deprecated start_services",
+			step: config.CommandStep{
+				Run:           config.RunCommand{"echo hello"},
+				StartServices: []interface{}{"redis", "postgres"},
+			},
+			description: "should handle deprecated start_services configuration",
+		},
+		{
+			name: "new services configuration",
+			step: config.CommandStep{
+				Run: config.RunCommand{"echo hello"},
+				Services: config.ServicesConfig{
+					Containers:    []interface{}{"redis"},
+					WaitForHealth: false,
+				},
+			},
+			description: "should handle new services configuration",
+		},
+		{
+			name: "services with compose",
+			step: config.CommandStep{
+				Run: config.RunCommand{"echo hello"},
+				Services: config.ServicesConfig{
+					Compose: &config.ComposeConfig{
+						File: filepath.Join(tmpDir, "docker-compose.yml"),
+					},
+					WaitForHealth: false,
+				},
+			},
+			description: "should handle services with compose configuration",
+		},
+	}
+
+	// Create a basic compose file for testing
+	composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest`
+	composeFile := filepath.Join(tmpDir, "docker-compose.yml")
+	err := os.WriteFile(composeFile, []byte(composeContent), 0644)
+	require.NoError(t, err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteCommandStep(tt.step, "test-command", tmpDir)
+
+			t.Logf("Services configuration test: %s (success: %v)", tt.description, result.Success)
+			// Don't assert specific success/failure since Docker may not be available
+			// The important thing is that the code doesn't panic and handles the configuration
+		})
+	}
+}
+
+func TestHandleServicesConfiguration(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name          string
+		services      config.ServicesConfig
+		setupFiles    func() error
+		expectSuccess bool
+		description   string
+	}{
+		{
+			name: "services with containers only",
+			services: config.ServicesConfig{
+				Containers:    []interface{}{"redis", "postgres"},
+				WaitForHealth: false,
+			},
+			setupFiles:    func() error { return nil },
+			expectSuccess: true,
+			description:   "should handle container services",
+		},
+		{
+			name: "services with compose only",
+			services: config.ServicesConfig{
+				Compose: &config.ComposeConfig{
+					File: filepath.Join(tmpDir, "docker-compose.yml"),
+				},
+				WaitForHealth: false,
+			},
+			setupFiles: func() error {
+				composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"`
+				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
+			},
+			expectSuccess: true,
+			description:   "should handle compose services",
+		},
+		{
+			name: "services with both containers and compose",
+			services: config.ServicesConfig{
+				Containers: []interface{}{"postgres"},
+				Compose: &config.ComposeConfig{
+					File: filepath.Join(tmpDir, "docker-compose.yml"),
+				},
+				WaitForHealth: false,
+			},
+			setupFiles: func() error {
+				composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest`
+				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
+			},
+			expectSuccess: true,
+			description:   "should handle mixed services configuration",
+		},
+		{
+			name: "empty services configuration",
+			services: config.ServicesConfig{
+				WaitForHealth: false,
+			},
+			setupFiles:    func() error { return nil },
+			expectSuccess: true,
+			description:   "should handle empty services configuration",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, tt.setupFiles())
+
+			result := HandleServicesConfiguration(tt.services)
+
+			t.Logf("Services configuration test: %s (success: %v)", tt.description, result.Success)
+
+			if result.Success {
+				t.Cleanup(func() {
+					_ = StopServices(tt.services)
+				})
+			}
+		})
+	}
+}
+
+func TestStopDockerService(t *testing.T) {
+	tests := []struct {
+		name        string
+		service     interface{}
+		description string
+	}{
+		{
+			name:        "stop simple string service",
+			service:     "test-service",
+			description: "should handle stopping simple service",
+		},
+		{
+			name: "stop complex service configuration",
+			service: map[string]interface{}{
+				"complex-service": map[string]interface{}{
+					"image": "alpine:latest",
+					"ports": []interface{}{"8080:80"},
+				},
+			},
+			description: "should handle stopping complex service",
+		},
+		{
+			name:        "invalid service type",
+			service:     123,
+			description: "should handle invalid service type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StopDockerService(tt.service)
+
+			t.Logf("Stop Docker service test: %s (success: %v)", tt.description, result.Success)
+			// Don't assert specific success/failure since Docker may not be available
+		})
+	}
+}
+
+func TestStopServices(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		services    config.ServicesConfig
+		setupFiles  func() error
+		description string
+	}{
+		{
+			name: "stop container services",
+			services: config.ServicesConfig{
+				Containers:    []interface{}{"redis"},
+				WaitForHealth: false,
+			},
+			setupFiles:  func() error { return nil },
+			description: "should handle stopping container services",
+		},
+		{
+			name: "stop compose services",
+			services: config.ServicesConfig{
+				Compose: &config.ComposeConfig{
+					File: filepath.Join(tmpDir, "docker-compose.yml"),
+				},
+				WaitForHealth: false,
+			},
+			setupFiles: func() error {
+				composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest`
+				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
+			},
+			description: "should handle stopping compose services",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, tt.setupFiles())
+
+			result := StopServices(tt.services)
+
+			t.Logf("Stop services test: %s (success: %v)", tt.description, result.Success)
+		})
+	}
+}
+
+func TestStopDockerCompose(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name          string
+		compose       config.ComposeConfig
+		createFile    bool
+		expectSuccess bool
+		description   string
+	}{
+		{
+			name: "stop compose with valid file",
+			compose: config.ComposeConfig{
+				File: filepath.Join(tmpDir, "docker-compose.yml"),
+			},
+			createFile:    true,
+			expectSuccess: true,
+			description:   "should handle stopping compose with valid file",
+		},
+		{
+			name: "stop compose with services specified",
+			compose: config.ComposeConfig{
+				File:     filepath.Join(tmpDir, "docker-compose.yml"),
+				Services: []string{"redis", "postgres"},
+			},
+			createFile:    true,
+			expectSuccess: true,
+			description:   "should handle stopping specific compose services",
+		},
+		{
+			name: "stop compose with nonexistent file",
+			compose: config.ComposeConfig{
+				File: "/nonexistent/docker-compose.yml",
+			},
+			createFile:    false,
+			expectSuccess: false,
+			description:   "should handle nonexistent compose file",
+		},
+	}
+
+	composeContent := `version: '3.8'
+services:
+  redis:
+    image: redis:latest
+  postgres:
+    image: postgres:13`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.createFile {
+				err := os.WriteFile(tt.compose.File, []byte(composeContent), 0644)
+				require.NoError(t, err)
+			}
+
+			result := StopDockerCompose(tt.compose)
+
+			t.Logf("Stop Docker compose test: %s (success: %v)", tt.description, result.Success)
+
+			if tt.expectSuccess {
+				// May fail if Docker isn't available, but that's ok
+			} else {
+				// Should fail for nonexistent file
+				if !result.Success {
+					assert.Contains(t, result.Stderr, "does not exist")
+				}
+			}
+		})
+	}
+}
+
+func TestReadEnhancedPIDFile_LegacyFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		fileContent string
+		expectError bool
+		expectedPID int
+	}{
+		{
+			name:        "legacy format - plain PID number",
+			fileContent: "12345",
+			expectError: false,
+			expectedPID: 12345,
+		},
+		{
+			name:        "legacy format - PID with whitespace",
+			fileContent: "  54321  \n",
+			expectError: false,
+			expectedPID: 54321,
+		},
+		{
+			name:        "invalid PID format",
+			fileContent: "not-a-number",
+			expectError: true,
+		},
+		{
+			name:        "empty file",
+			fileContent: "",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pidFile := filepath.Join(tmpDir, fmt.Sprintf(".test-%s.pid", strings.ReplaceAll(tt.name, " ", "-")))
+
+			err := os.WriteFile(pidFile, []byte(tt.fileContent), 0644)
+			require.NoError(t, err)
+
+			pidInfo, err := ReadEnhancedPIDFile(pidFile)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedPID, pidInfo.PID)
+				assert.Empty(t, pidInfo.CommandName) // Legacy format has no command name
+				assert.Empty(t, pidInfo.Command)     // Legacy format has no command
+			}
+
+			// Cleanup
+			_ = os.Remove(pidFile)
+		})
+	}
+}
+
+func TestStartDockerService_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name        string
+		service     interface{}
+		expectError bool
+		errorMsg    string
+		description string
+	}{
+		{
+			name: "service without image field",
+			service: map[string]interface{}{
+				"bad-service": map[string]interface{}{
+					"ports": []interface{}{"8080:80"},
+					// Missing required "image" field
+				},
+			},
+			expectError: true,
+			errorMsg:    "Service bad-service must have an 'image' field",
+			description: "should fail when service lacks required image field",
+		},
+		{
+			name:        "invalid service type - number",
+			service:     12345,
+			expectError: true,
+			errorMsg:    "Service must be a string or object",
+			description: "should fail with invalid service type",
+		},
+		{
+			name:        "invalid service type - array",
+			service:     []string{"invalid"},
+			expectError: true,
+			errorMsg:    "Service must be a string or object",
+			description: "should fail with array service type",
+		},
+		{
+			name: "service with invalid environment format",
+			service: map[string]interface{}{
+				"env-service": map[string]interface{}{
+					"image":       "alpine:latest",
+					"environment": 123, // Invalid type
+				},
+			},
+			expectError: false, // Should handle gracefully
+			description: "should handle invalid environment format gracefully",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StartDockerService(tt.service)
+
+			if tt.expectError && tt.errorMsg != "" {
+				assert.False(t, result.Success)
+				assert.Contains(t, result.Stderr, tt.errorMsg)
+			}
+
+			t.Logf("Docker service error test: %s (success: %v)", tt.description, result.Success)
+
+			if result.Success {
+				t.Cleanup(func() {
+					_ = StopDockerService(tt.service)
+				})
+			}
+		})
+	}
+}
+
+func TestPIDFileOperations_ErrorHandling(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("create PID file in nonexistent directory", func(t *testing.T) {
+		pidFile := filepath.Join("/nonexistent/directory", ".test.pid")
+
+		err := CreatePIDFile(pidFile, 12345)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no such file or directory")
+	})
+
+	t.Run("read PID file with invalid JSON", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, ".invalid.pid")
+		invalidJSON := `{"pid": 123, "command_name": "test", invalid_json}`
+
+		err := os.WriteFile(pidFile, []byte(invalidJSON), 0644)
+		require.NoError(t, err)
+
+		_, err = ReadEnhancedPIDFile(pidFile)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid syntax")
+
+		// Cleanup
+		_ = os.Remove(pidFile)
+	})
+
+	t.Run("remove nonexistent PID file", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, ".nonexistent.pid")
+
+		err := RemovePIDFile(pidFile)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no such file or directory")
+	})
 }
