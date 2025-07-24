@@ -85,6 +85,121 @@ dev-tools --verbose test
 dev-tools --project-dir /path/to/project test
 ```
 
+## Shell Completion
+
+Dev Tools supports automatic command completion for popular shells, making it faster and easier to use commands.
+
+### Installation
+
+#### Bash
+
+**Option 1: System-wide installation (recommended)**
+```bash
+# Generate and install completion script
+dev-tools completion bash | sudo tee /etc/bash_completion.d/dev-tools
+
+# Restart your shell or source the file
+source /etc/bash_completion.d/dev-tools
+```
+
+**Option 2: User-specific installation**
+```bash
+# Generate and save completion script
+dev-tools completion bash > ~/.dev-tools-completion.bash
+
+# Add to your .bashrc or .bash_profile
+echo 'source ~/.dev-tools-completion.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Zsh
+
+**Option 1: Using fpath (recommended)**
+```bash
+# Create completions directory if it doesn't exist
+mkdir -p ~/.zsh/completions
+
+# Generate completion script
+dev-tools completion zsh > ~/.zsh/completions/_dev-tools
+
+# Add to your .zshrc if not already present
+echo 'fpath=(~/.zsh/completions $fpath)' >> ~/.zshrc
+echo 'autoload -U compinit && compinit' >> ~/.zshrc
+
+# Restart your shell
+exec zsh
+```
+
+**Option 2: Direct sourcing**
+```bash
+# Generate and source completion
+dev-tools completion zsh > ~/.dev-tools-completion.zsh
+echo 'source ~/.dev-tools-completion.zsh' >> ~/.zshrc
+source ~/.zshrc
+```
+
+#### Fish
+
+```bash
+# Create fish completions directory if it doesn't exist
+mkdir -p ~/.config/fish/completions
+
+# Generate completion script
+dev-tools completion fish > ~/.config/fish/completions/dev-tools.fish
+
+# Restart your fish shell or reload completions
+exec fish
+```
+
+### Features
+
+Shell completion provides intelligent suggestions for:
+
+- **Commands**: All available commands from both built-in and your `.dev-config.yaml`
+- **Daemon Names**: For `restart` and `stop` commands, shows currently running daemons
+- **Flags**: Global flags like `--verbose`, `--project-dir`, `--no-color`
+- **Shell Types**: For `completion` command, suggests `bash`, `zsh`, `fish`
+
+### Dynamic Command Discovery
+
+The completion system automatically discovers commands from:
+
+1. **Built-in commands**: `logs`, `status`, `version`, `completion`, etc.
+2. **Project defaults**: Based on detected project type (Go, Python, Node.js, Rust)
+3. **Custom commands**: From your project's `.dev-config.yaml`
+
+### Examples
+
+```bash
+# Complete available commands
+dev-tools <TAB>
+# Shows: build test lint dev logs status version completion ...
+
+# Complete daemon names for restart
+dev-tools restart <TAB>  
+# Shows: web-server worker api-daemon ...
+
+# Complete flags
+dev-tools --<TAB>
+# Shows: --verbose --project-dir --no-color --version
+
+# Complete partial commands
+dev-tools cus<TAB>
+# Shows: custom-build custom-test (if defined in config)
+```
+
+### Troubleshooting
+
+**Completion not working:**
+1. Verify the completion script is properly installed
+2. Restart your shell completely
+3. Check that dev-tools is in your PATH
+4. Test with `dev-tools completion bash` to ensure it generates output
+
+**Completions not updating:**
+- Completions are cached for 5 seconds for performance
+- They automatically update when you change directories or modify `.dev-config.yaml`
+
 ### Project Types & Default Commands
 
 #### Go Projects

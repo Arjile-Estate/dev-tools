@@ -41,7 +41,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.10.0"
+	rootCmd.Version = "0.11.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -96,6 +96,12 @@ var builtInCommands = map[string]CommandFunc{
 	"version": func(cmd *cobra.Command, args []string) error {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
 		return nil
+	},
+	"completion": func(cmd *cobra.Command, args []string) error {
+		return handleCompletionCommand(cmd, args)
+	},
+	"__dev_complete": func(cmd *cobra.Command, args []string) error {
+		return handleCompleteCommand(cmd, args)
 	},
 }
 
