@@ -1,4 +1,4 @@
-package cmd
+package commands
 
 import (
 	"fmt"
@@ -21,8 +21,8 @@ var (
 	completionCacheTTL      = 5 * time.Second
 )
 
-// handleCompletionCommand generates shell completion scripts
-func handleCompletionCommand(cmd *cobra.Command, args []string) error {
+// HandleCompletionCommand generates shell completion scripts
+func HandleCompletionCommand(cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("completion command requires a shell type (bash, zsh, fish)")
 	}
@@ -90,13 +90,13 @@ _dev_tools() {
 
 _dev_tools_commands() {
     local completions
-    completions=(${(f)"$(dev-tools __dev_complete "dev-tools " 2>/dev/null)"})
+    completions=(${(f)"$(dev-tools __dev_complete "dev-tools " 2>/dev/null)"}) 
     _describe 'commands' completions
 }
 
 _dev_tools_daemon_names() {
     local completions
-    completions=(${(f)"$(dev-tools __dev_complete "dev-tools ${words[1]} " 2>/dev/null)"})
+    completions=(${(f)"$(dev-tools __dev_complete "dev-tools ${words[1]} " 2>/dev/null)"}) 
     _describe 'daemon names' completions
 }
 
@@ -132,8 +132,8 @@ complete -c dev-tools -l version -d 'Show version'
 	return nil
 }
 
-// handleCompleteCommand provides dynamic completions for shell completion
-func handleCompleteCommand(cmd *cobra.Command, args []string) error {
+// HandleCompleteCommand provides dynamic completions for shell completion
+func HandleCompleteCommand(cmd *cobra.Command, args []string, projectDir string) error {
 	if len(args) < 2 {
 		return nil // No command line to complete
 	}
@@ -143,7 +143,7 @@ func handleCompleteCommand(cmd *cobra.Command, args []string) error {
 	log.Printf("Args received: %v", args)
 
 	// Parse completion context
-	ctx := parseCompletionContext(commandLine)
+	ctx := parseCompletionContext(commandLine, projectDir)
 	if ctx == nil {
 		log.Printf("No completion context generated")
 		return nil // Invalid context
@@ -187,7 +187,7 @@ type CompletionContext struct {
 }
 
 // parseCompletionContext parses the command line to understand completion context
-func parseCompletionContext(commandLine string) *CompletionContext {
+func parseCompletionContext(commandLine string, projectDir string) *CompletionContext {
 	// Remove trailing space and split
 	line := strings.TrimRight(commandLine, " ")
 	words := strings.Fields(line)
@@ -231,12 +231,12 @@ func parseCompletionContext(commandLine string) *CompletionContext {
 }
 
 // loadConfigForCompletion loads configuration for completion
-func loadConfigForCompletion(projectDir string) (*config.DevConfig, error) {
+func loadConfigForCompletion(projectDir string) (*config.Config, error) {
 	return config.LoadConfigurationForProject(projectDir)
 }
 
 // generateCompletions generates appropriate completions based on context
-func generateCompletions(ctx *CompletionContext, config *config.DevConfig) []string {
+func generateCompletions(ctx *CompletionContext, config *config.Config) []string {
 	var completions []string
 
 	if ctx.IsFlag {
@@ -272,7 +272,7 @@ func generateCompletions(ctx *CompletionContext, config *config.DevConfig) []str
 }
 
 // getAllAvailableCommands returns all available commands (built-in + config + defaults)
-func getAllAvailableCommands(config *config.DevConfig) []string {
+func getAllAvailableCommands(config *config.Config) []string {
 	commandSet := make(map[string]bool)
 
 	// Add built-in commands (hardcoded list to avoid circular dependency)

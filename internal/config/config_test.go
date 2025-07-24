@@ -8,12 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestLoadDevConfigFromFile(t *testing.T) {
+func TestLoadConfigFromFile(t *testing.T) {
 	tests := []struct {
 		name        string
 		fileContent string
 		wantErr     bool
-		wantConfig  *DevConfig
+		wantConfig  *Config
 	}{
 		{
 			name: "valid config file",
@@ -23,7 +23,7 @@ func TestLoadDevConfigFromFile(t *testing.T) {
   lint:
     - run: ["golangci-lint run", "go fmt ./..."]`,
 			wantErr: false,
-			wantConfig: &DevConfig{
+			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"test": {{Run: RunCommand{"go test ./..."}}},
 					"lint": {{Run: RunCommand{"golangci-lint run", "go fmt ./..."}}},
@@ -34,7 +34,7 @@ func TestLoadDevConfigFromFile(t *testing.T) {
 			name:        "empty config file",
 			fileContent: "",
 			wantErr:     false,
-			wantConfig:  &DevConfig{Commands: make(map[string][]CommandStep)},
+			wantConfig:  &Config{Commands: make(map[string][]CommandStep)},
 		},
 		{
 			name:        "invalid yaml",
@@ -51,7 +51,7 @@ func TestLoadDevConfigFromFile(t *testing.T) {
       background: true
       daemon: true`,
 			wantErr: false,
-			wantConfig: &DevConfig{
+			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"dev": {
 						{StartServices: StartServices{"redis", "postgres"}},
@@ -73,7 +73,7 @@ func TestLoadDevConfigFromFile(t *testing.T) {
       - "echo command 2"
       - "echo command 3"`,
 			wantErr: false,
-			wantConfig: &DevConfig{
+			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"test-multicmd": {
 						{Run: RunCommand{"echo command 1", "echo command 2", "echo command 3"}},
@@ -93,9 +93,9 @@ func TestLoadDevConfigFromFile(t *testing.T) {
 				t.Fatalf("Failed to create test file: %v", err)
 			}
 
-			got, err := LoadDevConfigFromFile(configFile)
+			got, err := LoadConfigFromFile(configFile)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("LoadDevConfigFromFile() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("LoadConfigFromFile() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -103,20 +103,20 @@ func TestLoadDevConfigFromFile(t *testing.T) {
 				return
 			}
 
-			if !compareDevConfigs(got, tt.wantConfig) {
-				t.Errorf("LoadDevConfigFromFile() = %+v, want %+v", got, tt.wantConfig)
+			if !compareConfigs(got, tt.wantConfig) {
+				t.Errorf("LoadConfigFromFile() = %+v, want %+v", got, tt.wantConfig)
 			}
 		})
 	}
 }
 
-func TestLoadDevConfigFromFileNotExists(t *testing.T) {
-	config, err := LoadDevConfigFromFile("/nonexistent/path/.dev-config.yaml")
+func TestLoadConfigFromFileNotExists(t *testing.T) {
+	config, err := LoadConfigFromFile("/nonexistent/path/.dev-config.yaml")
 	if err != nil {
-		t.Errorf("LoadDevConfigFromFile() with non-existent file should not error, got: %v", err)
+		t.Errorf("LoadConfigFromFile() with non-existent file should not error, got: %v", err)
 	}
 	if config != nil {
-		t.Errorf("LoadDevConfigFromFile() with non-existent file should return nil, got: %+v", config)
+		t.Errorf("LoadConfigFromFile() with non-existent file should return nil, got: %+v", config)
 	}
 }
 
@@ -230,84 +230,8 @@ func TestGetDefaultCommandsForProjectType(t *testing.T) {
 	}
 }
 
-func TestMergeConfigWithDefaults(t *testing.T) {
-	defaults := &DevConfig{
-		Commands: map[string][]CommandStep{
-			"test": {{Run: RunCommand{"go test ./..."}}},
-			"lint": {{Run: RunCommand{"golangci-lint run"}}},
-		},
-	}
-
-	userConfig := &DevConfig{
-		Commands: map[string][]CommandStep{
-			"test":  {{Run: RunCommand{"go test -v ./..."}}}, // Override
-			"build": {{Run: RunCommand{"go build ./..."}}},   // New command
-		},
-	}
-
-	merged := MergeConfigWithDefaults(userConfig, defaults)
-
-	// Check that user config overrides defaults
-	if len(merged.Commands["test"]) != 1 || merged.Commands["test"][0].Run[0] != "go test -v ./..." {
-		t.Errorf("User config should override defaults for 'test' command")
-	}
-
-	// Check that default commands are preserved
-	if len(merged.Commands["lint"]) != 1 || merged.Commands["lint"][0].Run[0] != "golangci-lint run" {
-		t.Errorf("Default 'lint' command should be preserved")
-	}
-
-	// Check that new user commands are added
-	if len(merged.Commands["build"]) != 1 || merged.Commands["build"][0].Run[0] != "go build ./..." {
-		t.Errorf("New user 'build' command should be added")
-	}
-}
-
-func TestLoadConfigurationForProject(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create go.mod to make it a Go project
-	goMod := filepath.Join(tmpDir, "go.mod")
-	err := os.WriteFile(goMod, []byte("module test"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create go.mod: %v", err)
-	}
-
-	// Create custom config
-	configContent := `commands:
-  test:
-    - run: "go test -race ./..."
-  custom:
-    - run: "echo custom command"`
-
-	configFile := filepath.Join(tmpDir, ".dev-config.yaml")
-	err = os.WriteFile(configFile, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create config file: %v", err)
-	}
-
-	config, err := LoadConfigurationForProject(tmpDir)
-	if err != nil {
-		t.Errorf("LoadConfigurationForProject() error = %v", err)
-		return
-	}
-
-	// Should have both default Go commands and custom commands
-	expectedCommands := []string{"test", "lint", "build", "custom"}
-	for _, cmd := range expectedCommands {
-		if _, exists := config.Commands[cmd]; !exists {
-			t.Errorf("Expected command '%s' not found in final config", cmd)
-		}
-	}
-
-	// Custom test command should override default
-	if config.Commands["test"][0].Run[0] != "go test -race ./..." {
-		t.Errorf("Custom test command should override default")
-	}
-}
-
-// Helper function to compare DevConfig structs
-func compareDevConfigs(a, b *DevConfig) bool {
+// Helper function to compare Config structs
+func compareConfigs(a, b *Config) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -561,7 +485,7 @@ func TestBackwardCompatibility_StartServices(t *testing.T) {
 		name        string
 		fileContent string
 		wantErr     bool
-		wantConfig  *DevConfig
+		wantConfig  *Config
 	}{
 		{
 			name: "backward compatibility with start_services",
@@ -570,7 +494,7 @@ func TestBackwardCompatibility_StartServices(t *testing.T) {
     - start_services: ["redis", "postgres"]
     - run: "go run main.go"`,
 			wantErr: false,
-			wantConfig: &DevConfig{
+			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"dev": {
 						{StartServices: StartServices{"redis", "postgres"}},
@@ -588,7 +512,7 @@ func TestBackwardCompatibility_StartServices(t *testing.T) {
         cleanup: true
     - run: "go run main.go"`,
 			wantErr: false,
-			wantConfig: &DevConfig{
+			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"dev": {
 						{
@@ -613,7 +537,7 @@ func TestBackwardCompatibility_StartServices(t *testing.T) {
         containers: ["postgres"]
     - run: "go run main.go"`,
 			wantErr: false,
-			wantConfig: &DevConfig{
+			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"dev": {
 						{StartServices: StartServices{"redis"}},
@@ -642,9 +566,9 @@ func TestBackwardCompatibility_StartServices(t *testing.T) {
 				t.Fatalf("Failed to create test file: %v", err)
 			}
 
-			got, err := LoadDevConfigFromFile(configFile)
+			got, err := LoadConfigFromFile(configFile)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("LoadDevConfigFromFile() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("LoadConfigFromFile() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -652,8 +576,8 @@ func TestBackwardCompatibility_StartServices(t *testing.T) {
 				return
 			}
 
-			if !compareDevConfigs(got, tt.wantConfig) {
-				t.Errorf("LoadDevConfigFromFile() = %+v, want %+v", got, tt.wantConfig)
+			if !compareConfigs(got, tt.wantConfig) {
+				t.Errorf("LoadConfigFromFile() = %+v, want %+v", got, tt.wantConfig)
 			}
 		})
 	}

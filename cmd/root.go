@@ -10,14 +10,17 @@ import (
 	"github.com/spf13/cobra"
 
 	"dev-tools/internal/colors"
+	"dev-tools/internal/commands"
 	"dev-tools/internal/config"
 	"dev-tools/internal/executor"
 )
 
 var (
-	verbose    bool
-	projectDir string
-	noColor    bool
+	verbose      bool
+	projectDir   string
+	noColor      bool
+	configLoader config.ConfigLoader
+	exec         executor.Executor
 )
 
 // NewRootCommand creates the root command for the CLI
@@ -41,7 +44,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.11.0"
+	rootCmd.Version = "0.12.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -76,32 +79,32 @@ type CommandFunc func(*cobra.Command, []string) error
 
 var builtInCommands = map[string]CommandFunc{
 	"logs": func(cmd *cobra.Command, args []string) error {
-		return handleLogsCommand(cmd)
+		return commands.HandleLogsCommand(cmd, projectDir)
 	},
 	"cleanup-pids": func(cmd *cobra.Command, args []string) error {
-		return handleCleanupPidsCommand(cmd)
+		return commands.HandleCleanupPidsCommand(cmd, projectDir)
 	},
 	"cleanup-all": func(cmd *cobra.Command, args []string) error {
-		return handleCleanupAllCommand(cmd)
+		return commands.HandleCleanupAllCommand(cmd, projectDir)
 	},
 	"status": func(cmd *cobra.Command, args []string) error {
-		return handleStatusCommand(cmd)
+		return commands.HandleStatusCommand(cmd, projectDir)
 	},
 	"restart": func(cmd *cobra.Command, args []string) error {
-		return handleRestartCommand(cmd, args)
+		return commands.HandleRestartCommand(cmd, args, projectDir)
 	},
 	"stop": func(cmd *cobra.Command, args []string) error {
-		return handleStopCommand(cmd, args)
+		return commands.HandleStopCommand(cmd, args, projectDir)
 	},
 	"version": func(cmd *cobra.Command, args []string) error {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
 		return nil
 	},
 	"completion": func(cmd *cobra.Command, args []string) error {
-		return handleCompletionCommand(cmd, args)
+		return commands.HandleCompletionCommand(cmd, args)
 	},
 	"__dev_complete": func(cmd *cobra.Command, args []string) error {
-		return handleCompleteCommand(cmd, args)
+		return commands.HandleCompleteCommand(cmd, args, projectDir)
 	},
 }
 
@@ -117,21 +120,33 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Load environment variables
 	envFile := filepath.Join(projectDir, ".env")
-	if err := executor.LoadEnvironmentVariables(envFile); err != nil {
-		return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
+	if exec != nil {
+		if err := exec.LoadEnvironmentVariables(envFile); err != nil {
+			return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
+		}
+	} else {
+		if err := executor.LoadEnvironmentVariables(envFile); err != nil {
+			return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
+		}
 	}
 
 	// Load configuration
-	config, err := config.LoadConfigurationForProject(projectDir)
+	var cfg *config.Config
+	var err error
+	if configLoader != nil {
+		cfg, err = configLoader.LoadConfig(projectDir)
+	} else {
+		cfg, err = config.LoadConfigurationForProject(projectDir)
+	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", colors.Error("failed to load configuration"), err)
 	}
 
 	// Check if command exists
-	steps, exists := config.Commands[commandName]
+	steps, exists := cfg.Commands[commandName]
 	if !exists {
 		var availableCommands []string
-		for cmd := range config.Commands {
+		for cmd := range cfg.Commands {
 			availableCommands = append(availableCommands, cmd)
 		}
 		return fmt.Errorf("%s", colors.Error("unknown command '%s'. Available commands: %s",
@@ -139,7 +154,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute command
-	result := executor.ExecuteCommandWithSteps(commandName, steps, projectDir)
+	var result executor.ExecutionResult
+	if exec != nil {
+		result = exec.ExecuteCommandWithSteps(commandName, steps, projectDir)
+	} else {
+		result = executor.ExecuteCommandWithSteps(commandName, steps, projectDir)
+	}
 
 	// For most commands, we want to show output and return the exit code
 	// rather than treating non-zero exit codes as errors
@@ -154,4 +174,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	log.Print("Command completed successfully")
 	return nil
+}
+
+// SetConfigLoader sets the config loader for the root command.
+func SetConfigLoader(loader config.ConfigLoader) {
+	configLoader = loader
+}
+
+// SetExecutor sets the exec for the root command.
+func SetExecutor(e executor.Executor) {
+	exec = e
 }

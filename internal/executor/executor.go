@@ -18,15 +18,6 @@ import (
 	"dev-tools/internal/config"
 )
 
-// CommandResult represents the result of command execution
-type CommandResult struct {
-	Success    bool
-	Stdout     string
-	Stderr     string
-	ReturnCode int
-	PID        int
-}
-
 // ExecuteOptions contains options for command execution
 type ExecuteOptions struct {
 	Command       string
@@ -38,7 +29,7 @@ type ExecuteOptions struct {
 }
 
 // ExecuteShellCommand executes a shell command with the given options
-func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
+func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 	cmd := exec.Command("sh", "-c", opts.Command)
 
 	if opts.WorkingDir != "" {
@@ -53,14 +44,14 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 		err := cmd.Start()
 		if err != nil {
 			log.Printf("Failed to start background command: %v", err)
-			return CommandResult{
+			return ExecutionResult{
 				Success: false,
 				Stderr:  err.Error(),
 			}
 		}
 
 		log.Printf("Started background process with PID %d", cmd.Process.Pid)
-		return CommandResult{
+		return ExecutionResult{
 			Success: true,
 			PID:     cmd.Process.Pid,
 		}
@@ -81,7 +72,7 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 			stderr = err.Error()
 		}
 
-		return CommandResult{
+		return ExecutionResult{
 			Success:    success,
 			Stdout:     string(output),
 			Stderr:     stderr,
@@ -98,7 +89,7 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 		err := cmd.Start()
 		if err != nil {
 			log.Printf("Failed to start daemon command: %v", err)
-			return CommandResult{
+			return ExecutionResult{
 				Success: false,
 				Stderr:  err.Error(),
 			}
@@ -166,7 +157,7 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 			log.Printf("Removed PID file %s after daemon completion", pidFile)
 		}
 
-		return CommandResult{
+		return ExecutionResult{
 			Success:    success,
 			ReturnCode: returnCode,
 			PID:        cmd.Process.Pid,
@@ -185,7 +176,7 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 	err := cmd.Start()
 	if err != nil {
 		log.Printf("Failed to start command: %v", err)
-		return CommandResult{
+		return ExecutionResult{
 			Success:    false,
 			Stderr:     err.Error(),
 			ReturnCode: -1,
@@ -231,7 +222,7 @@ func ExecuteShellCommand(opts ExecuteOptions) CommandResult {
 		log.Print("Command completed successfully")
 	}
 
-	return CommandResult{
+	return ExecutionResult{
 		Success:    success,
 		ReturnCode: returnCode,
 	}
@@ -490,12 +481,12 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 }
 
 // CleanupStalePIDFilesWithTermination cleans up PID files and optionally terminates running processes
-func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning bool) CommandResult {
+func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning bool) ExecutionResult {
 	log.Print("Starting PID file cleanup")
 
 	pidFiles, err := filepath.Glob(filepath.Join(projectDir, "*.pid"))
 	if err != nil {
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  fmt.Sprintf("Failed to find PID files: %v", err),
 		}
@@ -504,7 +495,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 	if len(pidFiles) == 0 {
 		message := "No PID files found to clean up"
 		log.Print(message)
-		return CommandResult{
+		return ExecutionResult{
 			Success: true,
 			Stdout:  message,
 		}
@@ -512,7 +503,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 
 	daemons, err := ListDaemonProcesses(projectDir)
 	if err != nil {
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  fmt.Sprintf("Failed to list daemon processes: %v", err),
 		}
@@ -601,7 +592,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 	// Return success if we cleaned files or terminated processes, error only if all operations failed
 	success := len(errors) == 0 || len(cleanedFiles) > 0 || len(terminatedProcesses) > 0 || len(activeProcesses) > 0
 
-	return CommandResult{
+	return ExecutionResult{
 		Success: success,
 		Stdout:  summary.String(),
 		Stderr:  strings.Join(errors, "\n"),
@@ -609,12 +600,12 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 }
 
 // CleanupStalePIDFiles cleans up stale PID files for processes that are no longer running
-func CleanupStalePIDFiles(projectDir string) CommandResult {
+func CleanupStalePIDFiles(projectDir string) ExecutionResult {
 	log.Print("Starting PID file cleanup")
 
 	pidFiles, err := filepath.Glob(filepath.Join(projectDir, "*.pid"))
 	if err != nil {
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  fmt.Sprintf("Failed to find PID files: %v", err),
 		}
@@ -623,7 +614,7 @@ func CleanupStalePIDFiles(projectDir string) CommandResult {
 	if len(pidFiles) == 0 {
 		message := "No PID files found to clean up"
 		log.Print(message)
-		return CommandResult{
+		return ExecutionResult{
 			Success: true,
 			Stdout:  message,
 		}
@@ -696,7 +687,7 @@ func CleanupStalePIDFiles(projectDir string) CommandResult {
 	// Return success if we cleaned files or found active processes, error only if all operations failed
 	success := len(errors) == 0 || len(cleanedFiles) > 0 || len(activeProcesses) > 0
 
-	return CommandResult{
+	return ExecutionResult{
 		Success: success,
 		Stdout:  summary.String(),
 		Stderr:  strings.Join(errors, "\n"),
@@ -704,7 +695,7 @@ func CleanupStalePIDFiles(projectDir string) CommandResult {
 }
 
 // ExecuteCommandStep executes a single command step with all its components
-func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string) CommandResult {
+func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string) ExecutionResult {
 	log.Printf("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Handle directory option
@@ -720,23 +711,23 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 			if os.IsNotExist(err) {
 				errorMsg := fmt.Sprintf("Directory '%s' does not exist", stepDir)
 				log.Print(errorMsg)
-				return CommandResult{Success: false, Stderr: errorMsg}
+				return ExecutionResult{Success: false, Stderr: errorMsg}
 			} else {
 				errorMsg := fmt.Sprintf("Directory '%s' is not accessible: %v", stepDir, err)
 				log.Print(errorMsg)
-				return CommandResult{Success: false, Stderr: errorMsg}
+				return ExecutionResult{Success: false, Stderr: errorMsg}
 			}
 		} else if !info.IsDir() {
 			errorMsg := fmt.Sprintf("Path '%s' is not a directory", stepDir)
 			log.Print(errorMsg)
-			return CommandResult{Success: false, Stderr: errorMsg}
+			return ExecutionResult{Success: false, Stderr: errorMsg}
 		}
 
 		// Test directory accessibility
 		if _, err := os.ReadDir(stepDir); err != nil {
 			errorMsg := fmt.Sprintf("Directory '%s' is not accessible: %v", stepDir, err)
 			log.Print(errorMsg)
-			return CommandResult{Success: false, Stderr: errorMsg}
+			return ExecutionResult{Success: false, Stderr: errorMsg}
 		}
 
 		executionDir = stepDir
@@ -779,7 +770,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 						errorMsg := fmt.Sprintf("Daemon process already running with PID %d (pid file: %s)",
 							existingPID, pidFile)
 						log.Print(errorMsg)
-						return CommandResult{Success: false, Stderr: errorMsg}
+						return ExecutionResult{Success: false, Stderr: errorMsg}
 					} else {
 						// Clean up stale PID file
 						log.Printf("Removing stale PID file %s", pidFile)
@@ -821,11 +812,11 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 		}
 	}
 
-	return CommandResult{Success: true}
+	return ExecutionResult{Success: true}
 }
 
 // ExecuteCommandWithSteps executes a command consisting of multiple steps
-func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string) CommandResult {
+func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string) ExecutionResult {
 	log.Printf("Executing command '%s' with %d steps", commandName, len(steps))
 
 	for i, step := range steps {
@@ -838,11 +829,11 @@ func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, wor
 	}
 
 	log.Printf("Command '%s' completed successfully", commandName)
-	return CommandResult{Success: true}
+	return ExecutionResult{Success: true}
 }
 
 // StartDockerService starts a Docker service container
-func StartDockerService(service interface{}) CommandResult {
+func StartDockerService(service interface{}) ExecutionResult {
 	log.Printf("Starting Docker service: %v", service)
 
 	var containerName string
@@ -871,7 +862,7 @@ func StartDockerService(service interface{}) CommandResult {
 			containerName = name
 			configMap, ok := config.(map[string]interface{})
 			if !ok {
-				return CommandResult{
+				return ExecutionResult{
 					Success: false,
 					Stderr:  fmt.Sprintf("Invalid service configuration for %s", name),
 				}
@@ -879,7 +870,7 @@ func StartDockerService(service interface{}) CommandResult {
 
 			image, ok := configMap["image"].(string)
 			if !ok {
-				return CommandResult{
+				return ExecutionResult{
 					Success: false,
 					Stderr:  fmt.Sprintf("Service %s must have an 'image' field", name),
 				}
@@ -968,7 +959,7 @@ func StartDockerService(service interface{}) CommandResult {
 		}
 
 	default:
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  "Service must be a string or object",
 		}
@@ -993,7 +984,7 @@ func StartDockerService(service interface{}) CommandResult {
 
 		if statusResult.Success && strings.Contains(statusResult.Stdout, containerName) {
 			log.Printf("Container %s is already running", containerName)
-			return CommandResult{Success: true, Stdout: "Container already running"}
+			return ExecutionResult{Success: true, Stdout: "Container already running"}
 		} else {
 			// Container exists but is stopped, start it
 			startCmd := fmt.Sprintf("docker start %s", containerName)
@@ -1056,7 +1047,7 @@ func LoadEnvironmentVariables(envFile string) error {
 }
 
 // HandleServicesConfiguration handles the new services configuration
-func HandleServicesConfiguration(services config.ServicesConfig) CommandResult {
+func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult {
 	log.Printf("Handling services configuration (compose: %v, containers: %d)",
 		services.Compose != nil, len(services.Containers))
 
@@ -1098,18 +1089,18 @@ func HandleServicesConfiguration(services config.ServicesConfig) CommandResult {
 		log.Printf("Cleanup enabled for services - tracking for future cleanup")
 	}
 
-	return CommandResult{Success: true}
+	return ExecutionResult{Success: true}
 }
 
 // StartDockerCompose starts services using Docker Compose
-func StartDockerCompose(compose config.ComposeConfig) CommandResult {
+func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	log.Printf("Starting Docker Compose services from file: %s", compose.File)
 
 	// Check if compose file exists
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
 		log.Print(errorMsg)
-		return CommandResult{Success: false, Stderr: errorMsg}
+		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
 	// Determine which docker compose command to use
@@ -1162,7 +1153,7 @@ func StartDockerCompose(compose config.ComposeConfig) CommandResult {
 }
 
 // StopServices stops and cleans up services based on configuration
-func StopServices(services config.ServicesConfig) CommandResult {
+func StopServices(services config.ServicesConfig) ExecutionResult {
 	log.Printf("Stopping services (compose: %v, containers: %d)",
 		services.Compose != nil, len(services.Containers))
 
@@ -1187,25 +1178,25 @@ func StopServices(services config.ServicesConfig) CommandResult {
 	if len(errors) > 0 {
 		errorMsg := strings.Join(errors, "; ")
 		log.Printf("Service cleanup completed with errors: %s", errorMsg)
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  errorMsg,
 		}
 	}
 
 	log.Print("Service cleanup completed successfully")
-	return CommandResult{Success: true}
+	return ExecutionResult{Success: true}
 }
 
 // StopDockerCompose stops services using Docker Compose
-func StopDockerCompose(compose config.ComposeConfig) CommandResult {
+func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	log.Printf("Stopping Docker Compose services from file: %s", compose.File)
 
 	// Check if compose file exists
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
 		log.Print(errorMsg)
-		return CommandResult{Success: false, Stderr: errorMsg}
+		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
 	// Determine which docker compose command to use
@@ -1258,7 +1249,7 @@ func StopDockerCompose(compose config.ComposeConfig) CommandResult {
 }
 
 // StopDockerService stops a Docker service container
-func StopDockerService(service interface{}) CommandResult {
+func StopDockerService(service interface{}) ExecutionResult {
 	log.Printf("Stopping Docker service: %v", service)
 
 	var containerName string
@@ -1273,7 +1264,7 @@ func StopDockerService(service interface{}) CommandResult {
 			break
 		}
 	default:
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  "Service must be a string or object",
 		}
@@ -1289,7 +1280,7 @@ func StopDockerService(service interface{}) CommandResult {
 
 	if !checkResult.Success || !strings.Contains(checkResult.Stdout, containerName) {
 		log.Printf("Container %s is not running", containerName)
-		return CommandResult{Success: true, Stdout: "Container not running"}
+		return ExecutionResult{Success: true, Stdout: "Container not running"}
 	}
 
 	// Stop the container
@@ -1306,11 +1297,11 @@ func StopDockerService(service interface{}) CommandResult {
 	}
 
 	log.Printf("Container %s stopped successfully", containerName)
-	return CommandResult{Success: true}
+	return ExecutionResult{Success: true}
 }
 
 // WaitForServiceHealth waits for a service to become healthy
-func WaitForServiceHealth(service interface{}, timeout int) CommandResult {
+func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
 	log.Printf("Waiting for service health check: %v (timeout: %d seconds)", service, timeout)
 
 	var containerName string
@@ -1325,7 +1316,7 @@ func WaitForServiceHealth(service interface{}, timeout int) CommandResult {
 			break
 		}
 	default:
-		return CommandResult{
+		return ExecutionResult{
 			Success: false,
 			Stderr:  "Service must be a string or object",
 		}
@@ -1343,9 +1334,9 @@ func WaitForServiceHealth(service interface{}, timeout int) CommandResult {
 	if !result.Success {
 		errorMsg := fmt.Sprintf("Health check failed for container %s: %s", containerName, result.Stderr)
 		log.Print(errorMsg)
-		return CommandResult{Success: false, Stderr: errorMsg}
+		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
 	log.Printf("Container %s is healthy", containerName)
-	return CommandResult{Success: true}
+	return ExecutionResult{Success: true}
 }

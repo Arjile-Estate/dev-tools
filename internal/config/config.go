@@ -114,23 +114,10 @@ func (s *ServicesConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// CommandStep represents a single step in a command execution
-type CommandStep struct {
-	Run           RunCommand     `yaml:"run,omitempty"`
-	StartServices StartServices  `yaml:"start_services,omitempty"`
-	Services      ServicesConfig `yaml:"services,omitempty"`
-	Background    bool           `yaml:"background,omitempty"`
-	Daemon        bool           `yaml:"daemon,omitempty"`
-	Directory     string         `yaml:"directory,omitempty"`
-}
+// Config represents the complete development configuration
 
-// DevConfig represents the complete development configuration
-type DevConfig struct {
-	Commands map[string][]CommandStep `yaml:"commands"`
-}
-
-// LoadDevConfigFromFile loads configuration from a .dev-config.yaml file
-func LoadDevConfigFromFile(configPath string) (*DevConfig, error) {
+// LoadConfigFromFile loads configuration from a .dev-config.yaml file
+func LoadConfigFromFile(configPath string) (*Config, error) {
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, nil // File doesn't exist, return nil without error
 	}
@@ -140,7 +127,7 @@ func LoadDevConfigFromFile(configPath string) (*DevConfig, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", configPath, err)
 	}
 
-	var config DevConfig
+	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML config %s: %w", configPath, err)
 	}
@@ -177,8 +164,8 @@ func DetectProjectType(projectDir string) ProjectType {
 }
 
 // GetDefaultCommandsForProjectType returns default commands based on project type
-func GetDefaultCommandsForProjectType(projectType ProjectType) *DevConfig {
-	defaults := map[ProjectType]*DevConfig{
+func GetDefaultCommandsForProjectType(projectType ProjectType) *Config {
+	defaults := map[ProjectType]*Config{
 		ProjectTypeGo: {
 			Commands: map[string][]CommandStep{
 				"test":  {{Run: RunCommand{"go test ./..."}}},
@@ -219,7 +206,7 @@ func GetDefaultCommandsForProjectType(projectType ProjectType) *DevConfig {
 }
 
 // MergeConfigWithDefaults merges user configuration with defaults
-func MergeConfigWithDefaults(userConfig, defaults *DevConfig) *DevConfig {
+func MergeConfigWithDefaults(userConfig, defaults *Config) *Config {
 	if userConfig == nil {
 		return defaults
 	}
@@ -227,7 +214,7 @@ func MergeConfigWithDefaults(userConfig, defaults *DevConfig) *DevConfig {
 		return userConfig
 	}
 
-	merged := &DevConfig{
+	merged := &Config{
 		Commands: make(map[string][]CommandStep),
 	}
 
@@ -245,9 +232,9 @@ func MergeConfigWithDefaults(userConfig, defaults *DevConfig) *DevConfig {
 }
 
 // LoadConfigurationForProject loads complete configuration for a project
-func LoadConfigurationForProject(projectDir string) (*DevConfig, error) {
+func LoadConfigurationForProject(projectDir string) (*Config, error) {
 	configPath := filepath.Join(projectDir, ".dev-config.yaml")
-	userConfig, err := LoadDevConfigFromFile(configPath)
+	userConfig, err := LoadConfigFromFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load user config: %w", err)
 	}

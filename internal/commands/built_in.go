@@ -1,10 +1,10 @@
-package cmd
+package commands
 
 import (
 	"fmt"
 	"log"
 	"os"
-
+	"path/filepath"
 	"strings"
 
 	"dev-tools/internal/colors"
@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func handleLogsCommand(cmd *cobra.Command) error {
+func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 	log.Print("Displaying recent activity logs")
 
 	logFile, err := getLogFilePath(projectDir)
@@ -37,7 +37,7 @@ func handleLogsCommand(cmd *cobra.Command) error {
 	return nil
 }
 
-func handleCleanupPidsCommand(cmd *cobra.Command) error {
+func HandleCleanupPidsCommand(cmd *cobra.Command, projectDir string) error {
 	result := executor.CleanupStalePIDFiles(projectDir)
 	if !result.Success {
 		return fmt.Errorf("cleanup failed: %s", result.Stderr)
@@ -47,7 +47,7 @@ func handleCleanupPidsCommand(cmd *cobra.Command) error {
 	return nil
 }
 
-func handleCleanupAllCommand(cmd *cobra.Command) error {
+func HandleCleanupAllCommand(cmd *cobra.Command, projectDir string) error {
 	log.Print("Cleaning up all daemon processes and PID files")
 
 	result := executor.CleanupStalePIDFilesWithTermination(projectDir, true)
@@ -59,7 +59,7 @@ func handleCleanupAllCommand(cmd *cobra.Command) error {
 	return nil
 }
 
-func handleStatusCommand(cmd *cobra.Command) error {
+func HandleStatusCommand(cmd *cobra.Command, projectDir string) error {
 	log.Print("Displaying daemon process status")
 
 	daemons, err := executor.ListDaemonProcesses(projectDir)
@@ -126,7 +126,7 @@ func handleStatusCommand(cmd *cobra.Command) error {
 	return nil
 }
 
-func handleRestartCommand(cmd *cobra.Command, args []string) error {
+func HandleRestartCommand(cmd *cobra.Command, args []string, projectDir string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("%s", colors.Error("restart command requires a daemon name"))
 	}
@@ -148,7 +148,7 @@ func handleRestartCommand(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func handleStopCommand(cmd *cobra.Command, args []string) error {
+func HandleStopCommand(cmd *cobra.Command, args []string, projectDir string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("%s", colors.Error("stop command requires a daemon name"))
 	}
@@ -168,4 +168,11 @@ func handleStopCommand(cmd *cobra.Command, args []string) error {
 
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Stopped daemon '%s'", daemonName)))
 	return nil
+}
+
+// getLogFilePath determines the path to the log file.
+func getLogFilePath(projectDir string) (string, error) {
+	// This function is not exported, so it's a private helper.
+	// It needs to be moved along with the functions that use it.
+	return filepath.Join(projectDir, "activity.log"), nil
 }
