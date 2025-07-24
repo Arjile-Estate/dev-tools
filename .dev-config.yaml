@@ -3,6 +3,9 @@ commands:
   test:
     - run: "go test ./... -v"
 
+  test:coverage:
+    - run: "go test -cover ./..."
+
   # Example using Docker Compose
   test-compose:
     - services:
