@@ -458,6 +458,12 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 		}
 		// Wait a moment for the process to fully terminate
 		time.Sleep(100 * time.Millisecond)
+	} else {
+		// If the process is not running, just remove the stale PID file
+		pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
+		if err := RemovePIDFile(pidFilePath); err != nil {
+			log.Printf("Failed to remove stale PID file %s: %v", pidFilePath, err)
+		}
 	}
 
 	// Start the daemon again with the same command
@@ -474,6 +480,14 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 
 	if !result.Success {
 		return fmt.Errorf("failed to restart daemon %s: %s", daemon.CommandName, result.Stderr)
+	}
+
+	// Create a new PID file for the restarted process
+	pidFile := GeneratePIDFilename(daemon.CommandName, daemon.Command)
+	pidFilePath := filepath.Join(projectDir, pidFile)
+	if err := CreateEnhancedPIDFile(pidFilePath, result.PID, daemon.CommandName, daemon.Command); err != nil {
+		log.Printf("Failed to create enhanced PID file for restarted daemon: %v", err)
+		// Don't return an error, as the process is running, but log it.
 	}
 
 	log.Printf("Daemon %s restarted successfully with PID %d", daemon.CommandName, result.PID)

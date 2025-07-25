@@ -742,13 +742,8 @@ func TestDockerComposeOperations(t *testing.T) {
 			compose: config.ComposeConfig{
 				File: filepath.Join(tmpDir, "docker-compose.yml"),
 			},
-			createFile: true,
-			fileContent: `version: '3.8'
-services:
-  redis:
-    image: redis:latest
-    ports:
-      - "6379:6379"`,
+			createFile:  true,
+			fileContent: `version: '3.8'\nservices:\n  redis:\n    image: redis:latest\n    ports:\n      - "6379:6379"`,
 			expectError: false,
 		},
 		{
@@ -757,13 +752,8 @@ services:
 				File:     filepath.Join(tmpDir, "docker-compose.yml"),
 				Services: []string{"redis", "postgres"},
 			},
-			createFile: true,
-			fileContent: `version: '3.8'
-services:
-  redis:
-    image: redis:latest
-  postgres:
-    image: postgres:13`,
+			createFile:  true,
+			fileContent: `version: '3.8'\nservices:\n  redis:\n    image: redis:latest\n  postgres:\n    image: postgres:13`,
 			expectError: false,
 		},
 		{
@@ -822,10 +812,7 @@ func TestServicesConfiguration(t *testing.T) {
 				WaitForHealth: false,
 			},
 			setupFiles: func() error {
-				composeContent := `version: '3.8'
-services:
-  redis:
-    image: redis:latest`
+				composeContent := `version: '3.8'\nservices:\n  redis:\n    image: redis:latest`
 				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
 			},
 			expectError: false,
@@ -1039,7 +1026,6 @@ func TestRestartDaemonProcess(t *testing.T) {
 		}
 
 		err := RestartDaemonProcess(tmpDir, daemon)
-
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot restart daemon legacy-daemon: no command information available")
 	})
@@ -1050,6 +1036,49 @@ func TestRestartDaemonProcess(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, daemon)
 		assert.Contains(t, err.Error(), "daemon with command name 'nonexistent-daemon' not found")
+	})
+
+	t.Run("restarted daemon has a new pid file", func(t *testing.T) {
+		// Create a daemon that can be restarted
+		command := "sleep 300" // A command that runs for a while
+		daemonName := "restart-pid-test"
+		pidFile := GeneratePIDFilename(daemonName, command)
+		err := CreateEnhancedPIDFile(pidFile, 999999, daemonName, command) // Stale PID
+		require.NoError(t, err)
+
+		daemon := &DaemonInfo{
+			PIDFileInfo: PIDFileInfo{
+				PID:         999999,
+				CommandName: daemonName,
+				Command:     command,
+				StartTime:   time.Now(),
+			},
+			PIDFile:   filepath.Base(pidFile),
+			IsRunning: false,
+		}
+
+		// Restart the daemon
+		err = RestartDaemonProcess(tmpDir, daemon)
+		require.NoError(t, err)
+
+		// Check that a new PID file is created
+		daemons, err := ListDaemonProcesses(tmpDir)
+		require.NoError(t, err)
+
+		var restartedDaemon *DaemonInfo
+		for i := range daemons {
+			if daemons[i].CommandName == daemonName {
+				restartedDaemon = &daemons[i]
+				break
+			}
+		}
+
+		require.NotNil(t, restartedDaemon, "restarted daemon should be found")
+		assert.True(t, restartedDaemon.IsRunning, "restarted daemon should be running")
+
+		// Clean up the running process and its PID file
+		err = StopDaemonProcess(tmpDir, restartedDaemon)
+		assert.NoError(t, err)
 	})
 }
 
@@ -1164,10 +1193,10 @@ func TestWaitForServiceHealth(t *testing.T) {
 
 func TestExecuteShellCommand_ErrorHandling(t *testing.T) {
 	tests := []struct {
-		name         string
-		opts         ExecuteOptions
-		expectError  bool
-		testType     string
+		name        string
+		opts        ExecuteOptions
+		expectError bool
+		testType    string
 	}{
 		{
 			name: "background command - may succeed but process fails later",
@@ -1400,10 +1429,7 @@ func TestExecuteCommandStep_ServicesConfiguration(t *testing.T) {
 	}
 
 	// Create a basic compose file for testing
-	composeContent := `version: '3.8'
-services:
-  redis:
-    image: redis:latest`
+	composeContent := `version: '3.8'\nservices:\n  redis:\n    image: redis:latest`
 	composeFile := filepath.Join(tmpDir, "docker-compose.yml")
 	err := os.WriteFile(composeFile, []byte(composeContent), 0644)
 	require.NoError(t, err)
@@ -1448,12 +1474,7 @@ func TestHandleServicesConfiguration(t *testing.T) {
 				WaitForHealth: false,
 			},
 			setupFiles: func() error {
-				composeContent := `version: '3.8'
-services:
-  redis:
-    image: redis:latest
-    ports:
-      - "6379:6379"`
+				composeContent := `version: '3.8'\nservices:\n  redis:\n    image: redis:latest\n    ports:\n      - "6379:6379"`
 				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
 			},
 			expectSuccess: true,
@@ -1469,10 +1490,7 @@ services:
 				WaitForHealth: false,
 			},
 			setupFiles: func() error {
-				composeContent := `version: '3.8'
-services:
-  redis:
-    image: redis:latest`
+				composeContent := `version: '3.8'\nservices:\n  redis:\n    image: redis:latest`
 				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
 			},
 			expectSuccess: true,
@@ -1571,10 +1589,7 @@ func TestStopServices(t *testing.T) {
 				WaitForHealth: false,
 			},
 			setupFiles: func() error {
-				composeContent := `version: '3.8'
-services:
-  redis:
-    image: redis:latest`
+				composeContent := `version: '3.8'\nservices:\n  redis:\n    image: redis:latest`
 				return os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte(composeContent), 0644)
 			},
 			description: "should handle stopping compose services",
@@ -1632,12 +1647,7 @@ func TestStopDockerCompose(t *testing.T) {
 		},
 	}
 
-	composeContent := `version: '3.8'
-services:
-  redis:
-    image: redis:latest
-  postgres:
-    image: postgres:13`
+	composeContent := `version: '3.8'\nservices:\n  redis:\n    image: redis:latest\n  postgres:\n    image: postgres:13`
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
