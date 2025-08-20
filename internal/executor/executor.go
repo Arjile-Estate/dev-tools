@@ -708,8 +708,28 @@ func CleanupStalePIDFiles(projectDir string) ExecutionResult {
 	}
 }
 
+// appendPassthroughArgs appends passthrough arguments to a base command
+func appendPassthroughArgs(baseCommand string, passthroughArgs []string) string {
+	if len(passthroughArgs) == 0 {
+		return baseCommand
+	}
+
+	// Safely quote and append arguments
+	var quotedArgs []string
+	for _, arg := range passthroughArgs {
+		// Simple shell escaping - handle spaces and quotes
+		if strings.Contains(arg, " ") || strings.Contains(arg, "'") || strings.Contains(arg, "\"") {
+			quotedArgs = append(quotedArgs, fmt.Sprintf("'%s'", strings.ReplaceAll(arg, "'", "'\\''")))
+		} else {
+			quotedArgs = append(quotedArgs, arg)
+		}
+	}
+
+	return fmt.Sprintf("%s %s", baseCommand, strings.Join(quotedArgs, " "))
+}
+
 // ExecuteCommandStep executes a single command step with all its components
-func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string) ExecutionResult {
+func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
 	log.Printf("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Handle directory option
@@ -773,7 +793,9 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 
 	// Handle run commands
 	if len(step.Run) > 0 {
-		for _, command := range []string(step.Run) {
+		for _, baseCommand := range []string(step.Run) {
+			// Append passthrough arguments to the command
+			command := appendPassthroughArgs(baseCommand, passthroughArgs)
 			log.Printf("Executing command: %s", command)
 
 			// Check if daemon instance is already running
@@ -830,12 +852,12 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string)
 }
 
 // ExecuteCommandWithSteps executes a command consisting of multiple steps
-func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string) ExecutionResult {
-	log.Printf("Executing command '%s' with %d steps", commandName, len(steps))
+func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string, passthroughArgs []string) ExecutionResult {
+	log.Printf("Executing command '%s' with %d steps and passthrough args: %v", commandName, len(steps), passthroughArgs)
 
 	for i, step := range steps {
 		log.Printf("Executing step %d/%d", i+1, len(steps))
-		result := ExecuteCommandStep(step, commandName, workingDir)
+		result := ExecuteCommandStep(step, commandName, workingDir, passthroughArgs)
 		if !result.Success {
 			log.Printf("Step %d failed, aborting command execution", i+1)
 			return result

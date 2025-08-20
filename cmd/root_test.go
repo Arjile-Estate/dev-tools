@@ -158,7 +158,7 @@ func TestRunCommand_WithMocks(t *testing.T) {
 	mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 
 	// Set up the mock executor to return a successful result
-	mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".").Return(executor.ExecutionResult{Success: true})
+	mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", mock.Anything).Return(executor.ExecutionResult{Success: true})
 	mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
 
 	// Execute the command
@@ -305,7 +305,7 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		}
 		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
-		mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".").Return(
+		mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", mock.Anything).Return(
 			executor.ExecutionResult{
 				Success:    false,
 				ReturnCode: 1,
@@ -346,7 +346,7 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		}
 		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
-		mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".").Return(
+		mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", mock.Anything).Return(
 			executor.ExecutionResult{
 				Success: true,
 				Stdout:  "hello world\n",
@@ -396,4 +396,50 @@ func TestSetExecutor(t *testing.T) {
 	SetExecutor(mockExec)
 
 	assert.Equal(t, mockExec, exec)
+}
+
+func TestParseArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected CommandArgs
+	}{
+		{
+			name:     "empty args",
+			args:     []string{},
+			expected: CommandArgs{CommandName: "", PassthroughArgs: nil},
+		},
+		{
+			name:     "simple command",
+			args:     []string{"test"},
+			expected: CommandArgs{CommandName: "test", PassthroughArgs: nil},
+		},
+		{
+			name:     "command with passthrough args",
+			args:     []string{"test", "--", "--verbose", "--timeout=30s"},
+			expected: CommandArgs{CommandName: "test", PassthroughArgs: []string{"--verbose", "--timeout=30s"}},
+		},
+		{
+			name:     "command with separator but no args",
+			args:     []string{"test", "--"},
+			expected: CommandArgs{CommandName: "test", PassthroughArgs: nil},
+		},
+		{
+			name:     "command with flags before separator",
+			args:     []string{"build", "--verbose", "--", "-ldflags=-s -w"},
+			expected: CommandArgs{CommandName: "build", PassthroughArgs: []string{"-ldflags=-s -w"}},
+		},
+		{
+			name:     "multiple passthrough args",
+			args:     []string{"test", "--", "--verbose", "--run", "TestExample", "--timeout=5m"},
+			expected: CommandArgs{CommandName: "test", PassthroughArgs: []string{"--verbose", "--run", "TestExample", "--timeout=5m"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseArgs(tt.args)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

@@ -467,7 +467,7 @@ func TestExecuteCommandStep(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteCommandStep(tt.step, "test-command", "")
+			result := ExecuteCommandStep(tt.step, "test-command", "", nil)
 
 			if tt.expectError {
 				assert.False(t, result.Success)
@@ -524,7 +524,7 @@ func TestExecuteCommandStepWithDirectory(t *testing.T) {
 				Directory: workingDir,
 			}
 
-			result := ExecuteCommandStep(step, "test-command", "")
+			result := ExecuteCommandStep(step, "test-command", "", nil)
 
 			if tt.expectError {
 				assert.False(t, result.Success, "Command should fail")
@@ -582,7 +582,7 @@ func TestExecuteCommandWithSteps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteCommandWithSteps(tt.commandName, tt.steps, "")
+			result := ExecuteCommandWithSteps(tt.commandName, tt.steps, "", nil)
 
 			assert.Equal(t, tt.wantSuccess, result.Success)
 		})
@@ -1290,7 +1290,7 @@ func TestExecuteCommandStep_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteCommandStep(tt.step, "test-command", tmpDir)
+			result := ExecuteCommandStep(tt.step, "test-command", tmpDir, nil)
 
 			if tt.expectError {
 				assert.False(t, result.Success)
@@ -1436,7 +1436,7 @@ func TestExecuteCommandStep_ServicesConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteCommandStep(tt.step, "test-command", tmpDir)
+			result := ExecuteCommandStep(tt.step, "test-command", tmpDir, nil)
 
 			t.Logf("Services configuration test: %s (success: %v)", tt.description, result.Success)
 			// Don't assert specific success/failure since Docker may not be available
@@ -1832,4 +1832,99 @@ func TestPIDFileOperations_ErrorHandling(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no such file or directory")
 	})
+}
+
+func TestAppendPassthroughArgs(t *testing.T) {
+	tests := []struct {
+		name            string
+		baseCommand     string
+		passthroughArgs []string
+		expected        string
+	}{
+		{
+			name:            "no passthrough args",
+			baseCommand:     "go test ./...",
+			passthroughArgs: nil,
+			expected:        "go test ./...",
+		},
+		{
+			name:            "simple args",
+			baseCommand:     "go test ./...",
+			passthroughArgs: []string{"--verbose", "--timeout=30s"},
+			expected:        "go test ./... --verbose --timeout=30s",
+		},
+		{
+			name:            "args with spaces",
+			baseCommand:     "go test ./...",
+			passthroughArgs: []string{"--run", "Test Name With Spaces"},
+			expected:        "go test ./... --run 'Test Name With Spaces'",
+		},
+		{
+			name:            "args with quotes",
+			baseCommand:     "go test ./...",
+			passthroughArgs: []string{"--ldflags", "-X 'main.version=1.0.0'"},
+			expected:        "go test ./... --ldflags '-X '\\''main.version=1.0.0'\\'''",
+		},
+		{
+			name:            "mixed args",
+			baseCommand:     "npm test",
+			passthroughArgs: []string{"--", "--verbose", "--reporter=json"},
+			expected:        "npm test -- --verbose --reporter=json",
+		},
+		{
+			name:            "empty passthrough args slice",
+			baseCommand:     "cargo build",
+			passthroughArgs: []string{},
+			expected:        "cargo build",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := appendPassthroughArgs(tt.baseCommand, tt.passthroughArgs)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExecuteCommandStepWithPassthroughArgs(t *testing.T) {
+	tests := []struct {
+		name            string
+		step            config.CommandStep
+		passthroughArgs []string
+		description     string
+	}{
+		{
+			name: "run command with passthrough args",
+			step: config.CommandStep{
+				Run: config.RunCommand{"echo hello"},
+			},
+			passthroughArgs: []string{"world"},
+			description:     "Command should have passthrough args appended",
+		},
+		{
+			name: "multiple run commands with passthrough args",
+			step: config.CommandStep{
+				Run: config.RunCommand{"echo first", "echo second"},
+			},
+			passthroughArgs: []string{"--verbose"},
+			description:     "All run commands should have passthrough args appended",
+		},
+		{
+			name: "no run commands",
+			step: config.CommandStep{
+				Background: true,
+			},
+			passthroughArgs: []string{"--verbose"},
+			description:     "Step with no run commands should succeed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteCommandStep(tt.step, "test-command", "", tt.passthroughArgs)
+			t.Logf("Step execution test: %s (success: %v)", tt.description, result.Success)
+			// The important thing is that the code doesn't panic and handles passthrough args
+		})
+	}
 }

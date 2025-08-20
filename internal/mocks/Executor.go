@@ -12,13 +12,13 @@ type Executor struct {
 	mock.Mock
 }
 
-// ExecuteCommandWithSteps provides a mock function with given fields: commandName, steps, projectDir
-func (_m *Executor) ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string) executor.ExecutionResult {
-	ret := _m.Called(commandName, steps, projectDir)
+// ExecuteCommandWithSteps provides a mock function with given fields: commandName, steps, projectDir, passthroughArgs
+func (_m *Executor) ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string, passthroughArgs []string) executor.ExecutionResult {
+	ret := _m.Called(commandName, steps, projectDir, passthroughArgs)
 
 	var r0 executor.ExecutionResult
-	if rf, ok := ret.Get(0).(func(string, []config.CommandStep, string) executor.ExecutionResult); ok {
-		r0 = rf(commandName, steps, projectDir)
+	if rf, ok := ret.Get(0).(func(string, []config.CommandStep, string, []string) executor.ExecutionResult); ok {
+		r0 = rf(commandName, steps, projectDir, passthroughArgs)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(executor.ExecutionResult)

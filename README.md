@@ -85,6 +85,34 @@ dev-tools --verbose test
 dev-tools --project-dir /path/to/project test
 ```
 
+### Passthrough Arguments
+
+You can pass additional arguments to the underlying commands using the `--` separator:
+
+```bash
+# Pass test flags to the underlying test command
+dev-tools test -- --verbose --timeout=30s
+
+# Pass build flags
+dev-tools build -- -ldflags="-X main.version=1.0.0"
+
+# Pass multiple arguments
+dev-tools test -- --run TestSpecific --count=3 --parallel=4
+
+# Works with any custom command
+dev-tools custom-command -- --extra --flags
+```
+
+The arguments after `--` are appended to each `run` command defined in your configuration. For example, if your `.dev-config.yaml` defines:
+
+```yaml
+commands:
+  test:
+    - run: "go test ./..."
+```
+
+Then `dev-tools test -- --verbose` becomes `go test ./... --verbose`.
+
 ## Shell Completion
 
 Dev Tools supports automatic command completion for popular shells, making it faster and easier to use commands.

@@ -4,6 +4,6 @@ import "dev-tools/internal/config"
 
 //go:generate mockery --name Executor --output ../mocks --outpkg mocks
 type Executor interface {
-	ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string) ExecutionResult
+	ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string, passthroughArgs []string) ExecutionResult
 	LoadEnvironmentVariables(envFile string) error
 }

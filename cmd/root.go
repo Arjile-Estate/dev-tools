@@ -44,7 +44,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.12.1"
+	rootCmd.Version = "0.12.2"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -76,6 +76,74 @@ func preRun(cmd *cobra.Command, args []string) {
 }
 
 type CommandFunc func(*cobra.Command, []string) error
+
+// CommandArgs represents parsed command arguments
+type CommandArgs struct {
+	CommandName     string
+	PassthroughArgs []string
+}
+
+// parseArgsFromOsArgs parses arguments from os.Args to handle Cobra's -- consumption
+func parseArgsFromOsArgs(args []string) CommandArgs {
+	if len(args) == 0 {
+		return CommandArgs{}
+	}
+
+	commandName := args[0]
+	var passthroughArgs []string
+
+	// Parse from os.Args since Cobra consumes the -- separator
+	// Find the command in os.Args and then look for -- after it
+	commandFound := false
+	separatorIndex := -1
+	for i, arg := range os.Args {
+		if commandFound && arg == "--" {
+			separatorIndex = i
+			break
+		}
+		if arg == commandName {
+			commandFound = true
+		}
+	}
+
+	if separatorIndex > 0 && separatorIndex < len(os.Args)-1 {
+		passthroughArgs = os.Args[separatorIndex+1:]
+	}
+
+	return CommandArgs{
+		CommandName:     commandName,
+		PassthroughArgs: passthroughArgs,
+	}
+}
+
+// parseArgs separates the command name from passthrough arguments using -- separator
+// This version is used for testing with provided arguments
+func parseArgs(args []string) CommandArgs {
+	if len(args) == 0 {
+		return CommandArgs{}
+	}
+
+	commandName := args[0]
+	var passthroughArgs []string
+
+	// Find "--" separator
+	separatorIndex := -1
+	for i, arg := range args {
+		if arg == "--" {
+			separatorIndex = i
+			break
+		}
+	}
+
+	if separatorIndex > 0 && separatorIndex < len(args)-1 {
+		passthroughArgs = args[separatorIndex+1:]
+	}
+
+	return CommandArgs{
+		CommandName:     commandName,
+		PassthroughArgs: passthroughArgs,
+	}
+}
 
 var builtInCommands = map[string]CommandFunc{
 	"logs": func(cmd *cobra.Command, args []string) error {
@@ -109,9 +177,10 @@ var builtInCommands = map[string]CommandFunc{
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	commandName := args[0]
+	parsedArgs := parseArgsFromOsArgs(args)
+	commandName := parsedArgs.CommandName
 
-	log.Printf("Starting dev-tools with command: %s", commandName)
+	log.Printf("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
 	// Handle special built-in commands
 	if commandFunc, exists := builtInCommands[commandName]; exists {
@@ -156,9 +225,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Execute command
 	var result executor.ExecutionResult
 	if exec != nil {
-		result = exec.ExecuteCommandWithSteps(commandName, steps, projectDir)
+		result = exec.ExecuteCommandWithSteps(commandName, steps, projectDir, parsedArgs.PassthroughArgs)
 	} else {
-		result = executor.ExecuteCommandWithSteps(commandName, steps, projectDir)
+		result = executor.ExecuteCommandWithSteps(commandName, steps, projectDir, parsedArgs.PassthroughArgs)
 	}
 
 	// For most commands, we want to show output and return the exit code
