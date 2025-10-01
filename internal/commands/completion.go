@@ -46,16 +46,52 @@ func generateBashCompletion(cmd *cobra.Command) error {
 
 _dev_tools_completion() {
     local cur prev words cword
-    _init_completion || return
+    COMPREPLY=()
 
-    # Get completions from dev-tools
+    # Try to use bash-completion helpers if available
+    if declare -F _get_comp_words_by_ref >/dev/null; then
+        _get_comp_words_by_ref -n : cur prev words cword
+    else
+        # Fallback: handle word splitting manually
+        # Bash splits on COMP_WORDBREAKS which includes ':'
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+        # Reconstruct the current word if it was split by ':'
+        if [[ "$prev" == ":" ]]; then
+            # The word was split, reconstruct it
+            local i=$((COMP_CWORD - 2))
+            while [[ $i -ge 0 ]]; do
+                if [[ "${COMP_WORDS[$i]}" == ":" ]]; then
+                    i=$((i - 1))
+                    continue
+                fi
+                cur="${COMP_WORDS[$i]}:$cur"
+                if [[ $i -eq 0 ]] || [[ "${COMP_WORDS[$i-1]}" != ":" ]]; then
+                    break
+                fi
+                i=$((i - 1))
+            done
+        elif [[ "$cur" == ":" ]]; then
+            # Cursor is on the colon itself
+            cur="${COMP_WORDS[COMP_CWORD-1]}:"
+        fi
+    fi
+
+    # Get completions from dev-tools using the full COMP_LINE
     local completions=$(dev-tools __dev_complete "$COMP_LINE" 2>/dev/null)
-    if [[ $? -eq 0 ]]; then
+    if [[ $? -eq 0 && -n "$completions" ]]; then
+        # Generate completions - compgen expects space-separated words
         COMPREPLY=($(compgen -W "$completions" -- "$cur"))
+
+        # Handle colon trimming if bash-completion helpers exist
+        if declare -F __ltrim_colon_completions >/dev/null; then
+            __ltrim_colon_completions "$cur"
+        fi
     fi
 }
 
-complete -F _dev_tools_completion dev-tools
+complete -o nospace -F _dev_tools_completion dev-tools
 `
 
 	_, _ = fmt.Fprint(cmd.OutOrStdout(), script)

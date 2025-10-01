@@ -35,7 +35,7 @@ func TestHandleCompletionCommand(t *testing.T) {
 			expectedOutput: []string{
 				"#!/bin/bash",
 				"_dev_tools_completion",
-				"complete -F _dev_tools_completion dev-tools",
+				"complete -o nospace -F _dev_tools_completion dev-tools",
 			},
 			expectError: false,
 		},
@@ -101,8 +101,11 @@ func TestGenerateBashCompletion(t *testing.T) {
 
 	assert.Contains(t, output, "#!/bin/bash")
 	assert.Contains(t, output, "_dev_tools_completion")
-	assert.Contains(t, output, "complete -F _dev_tools_completion dev-tools")
+	assert.Contains(t, output, "complete -o nospace -F _dev_tools_completion dev-tools")
 	assert.Contains(t, output, "dev-tools __dev_complete")
+	// Verify colon handling for commands like "test:coverage"
+	assert.Contains(t, output, "_get_comp_words_by_ref -n :")
+	assert.Contains(t, output, "__ltrim_colon_completions")
 }
 
 func TestGenerateZshCompletion(t *testing.T) {

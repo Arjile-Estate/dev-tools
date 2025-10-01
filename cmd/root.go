@@ -45,7 +45,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.13.0"
+	rootCmd.Version = "0.13.2"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -200,6 +200,12 @@ func extractDevToolsFlags(args []string) ([]string, map[string]string) {
 			} else if arg == "--no-color" {
 				flags["no-color"] = "true"
 				continue // Don't add to filtered
+			} else if arg == "--version" {
+				flags["version"] = "true"
+				continue // Don't add to filtered
+			} else if arg == "-h" || arg == "--help" {
+				flags["help"] = "true"
+				continue // Don't add to filtered
 			} else if arg == "-p" || arg == "--project-dir" {
 				if i+1 < len(args) {
 					flags["project-dir"] = args[i+1]
@@ -254,6 +260,17 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// With DisableFlagParsing=true, we need to manually extract dev-tools flags
 	// Dev-tools flags must come BEFORE the command name
 	filteredArgs, devToolsFlags := extractDevToolsFlags(args)
+
+	// Handle --version flag
+	if v, ok := devToolsFlags["version"]; ok && v == "true" {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Version)
+		return nil
+	}
+
+	// Handle --help flag
+	if v, ok := devToolsFlags["help"]; ok && v == "true" {
+		return cmd.Help()
+	}
 
 	// Apply dev-tools flags
 	if v, ok := devToolsFlags["verbose"]; ok && v == "true" {

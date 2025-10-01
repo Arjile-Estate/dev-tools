@@ -21,7 +21,7 @@ func TestCompletionBashCommand(t *testing.T) {
 			wantErr: false,
 			contains: []string{
 				"_dev_tools_completion()",
-				"complete -F _dev_tools_completion dev-tools",
+				"complete -o nospace -F _dev_tools_completion dev-tools",
 				"COMPREPLY=",
 			},
 		},

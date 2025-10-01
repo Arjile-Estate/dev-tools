@@ -155,3 +155,4 @@ commands:
 
   test-command-with-args:
     - run: "./test-tools/cmd.sh"
+    - run: "./test-tools/cmd.sh"
