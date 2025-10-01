@@ -1155,7 +1155,7 @@ func TestWaitForServiceHealth(t *testing.T) {
 			service:     123,
 			timeout:     5,
 			expectError: true,
-			errorMsg:    "Service must be a string or object",
+			errorMsg:    "service must be a string or object",
 		},
 		{
 			name:        "string service name",

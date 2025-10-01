@@ -28,6 +28,33 @@ type ExecuteOptions struct {
 	CommandName   string
 }
 
+// waitForProcessWithSignalHandling waits for a process to complete while handling signals
+func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case sig := <-signalChan:
+		log.Printf("Received signal %v, terminating process", sig)
+		if cmd.Process != nil {
+			if sigErr := cmd.Process.Signal(sig); sigErr != nil {
+				log.Printf("Failed to forward signal to child process: %v", sigErr)
+				if killErr := cmd.Process.Kill(); killErr != nil {
+					log.Printf("Failed to kill child process: %v", killErr)
+				}
+			}
+		}
+		return <-done
+	}
+}
+
 // ExecuteShellCommand executes a shell command with the given options
 func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 	cmd := exec.Command("sh", "-c", opts.Command)
@@ -107,34 +134,7 @@ func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 				opts.Command, cmd.Process.Pid, pidFile))
 		}
 
-		// Set up signal handling for graceful termination
-		signalChan := make(chan os.Signal, 1)
-		signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-		// Wait for process to complete or receive signal
-		done := make(chan error, 1)
-		go func() {
-			done <- cmd.Wait()
-		}()
-
-		var waitErr error
-		select {
-		case waitErr = <-done:
-			// Process completed normally
-		case sig := <-signalChan:
-			log.Printf("Received signal %v, terminating daemon process", sig)
-			// Forward signal to child process
-			if cmd.Process != nil {
-				if sigErr := cmd.Process.Signal(sig); sigErr != nil {
-					log.Printf("Failed to forward signal to child process: %v", sigErr)
-					// Force kill if signal forwarding fails
-					if killErr := cmd.Process.Kill(); killErr != nil {
-						log.Printf("Failed to kill child process: %v", killErr)
-					}
-				}
-			}
-			waitErr = <-done // Wait for process to actually exit
-		}
+		waitErr := waitForProcessWithSignalHandling(cmd)
 
 		success := waitErr == nil
 		returnCode := 0
@@ -168,10 +168,6 @@ func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Set up signal handling for graceful termination
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
 	// Start the command
 	err := cmd.Start()
 	if err != nil {
@@ -183,30 +179,7 @@ func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 		}
 	}
 
-	// Wait for process to complete or receive signal
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	var waitError error
-	select {
-	case waitError = <-done:
-		// Process completed normally
-	case sig := <-signalChan:
-		log.Printf("Received signal %v, terminating command process", sig)
-		// Forward signal to child process
-		if cmd.Process != nil {
-			if sigErr := cmd.Process.Signal(sig); sigErr != nil {
-				log.Printf("Failed to forward signal to child process: %v", sigErr)
-				// Force kill if signal forwarding fails
-				if killErr := cmd.Process.Kill(); killErr != nil {
-					log.Printf("Failed to kill child process: %v", killErr)
-				}
-			}
-		}
-		waitError = <-done // Wait for process to actually exit
-	}
+	waitError := waitForProcessWithSignalHandling(cmd)
 
 	success := waitError == nil
 	returnCode := 0
@@ -252,7 +225,7 @@ type DaemonInfo struct {
 	Uptime    string `json:"uptime,omitempty"`
 }
 
-// CreatePIDFile creates a PID file for daemon process tracking (legacy format)
+// CreatePIDFile creates a PID file in legacy format (for backward compatibility in tests)
 func CreatePIDFile(pidFile string, pid int) error {
 	return os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644)
 }
@@ -275,29 +248,16 @@ func CreateEnhancedPIDFile(pidFile string, pid int, commandName, command string)
 	return os.WriteFile(pidFile, data, 0644)
 }
 
-// ReadPIDFile reads a PID from a PID file (legacy format for backward compatibility)
+// ReadPIDFile reads a PID from a PID file (supports both enhanced and legacy formats)
 func ReadPIDFile(pidFile string) (int, error) {
-	data, err := os.ReadFile(pidFile)
+	pidInfo, err := ReadEnhancedPIDFile(pidFile)
 	if err != nil {
 		return 0, err
 	}
-
-	// Try to parse as JSON first (enhanced format)
-	var pidInfo PIDFileInfo
-	if err := json.Unmarshal(data, &pidInfo); err == nil {
-		return pidInfo.PID, nil
-	}
-
-	// Fall back to legacy format (just PID number)
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid PID in file %s: %w", pidFile, err)
-	}
-
-	return pid, nil
+	return pidInfo.PID, nil
 }
 
-// ReadEnhancedPIDFile reads enhanced PID file information
+// ReadEnhancedPIDFile reads enhanced PID file information (supports both formats)
 func ReadEnhancedPIDFile(pidFile string) (*PIDFileInfo, error) {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
@@ -321,7 +281,7 @@ func ReadEnhancedPIDFile(pidFile string) (*PIDFileInfo, error) {
 		PID:          pid,
 		CommandName:  "",
 		Command:      "",
-		StartTime:    time.Time{}, // Zero time for legacy
+		StartTime:    time.Time{},
 		RestartCount: 0,
 	}, nil
 }
@@ -615,97 +575,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 
 // CleanupStalePIDFiles cleans up stale PID files for processes that are no longer running
 func CleanupStalePIDFiles(projectDir string) ExecutionResult {
-	log.Print("Starting PID file cleanup")
-
-	pidFiles, err := filepath.Glob(filepath.Join(projectDir, "*.pid"))
-	if err != nil {
-		return ExecutionResult{
-			Success: false,
-			Stderr:  fmt.Sprintf("Failed to find PID files: %v", err),
-		}
-	}
-
-	if len(pidFiles) == 0 {
-		message := "No PID files found to clean up"
-		log.Print(message)
-		return ExecutionResult{
-			Success: true,
-			Stdout:  message,
-		}
-	}
-
-	var cleanedFiles []string
-	var activeProcesses []string
-	var errors []string
-
-	for _, pidFile := range pidFiles {
-		pid, err := ReadPIDFile(pidFile)
-		if err != nil {
-			errorMsg := fmt.Sprintf("Could not read PID from %s: %v", filepath.Base(pidFile), err)
-			log.Print(errorMsg)
-			errors = append(errors, errorMsg)
-			continue
-		}
-
-		if IsProcessRunning(pid) {
-			log.Printf("Process %d from %s is still running", pid, filepath.Base(pidFile))
-			activeProcesses = append(activeProcesses, fmt.Sprintf("%s (PID %d)", filepath.Base(pidFile), pid))
-		} else {
-			log.Printf("Process %d from %s is not running, removing PID file", pid, filepath.Base(pidFile))
-			if err := RemovePIDFile(pidFile); err != nil {
-				errorMsg := fmt.Sprintf("Failed to remove %s: %v", filepath.Base(pidFile), err)
-				log.Print(errorMsg)
-				errors = append(errors, errorMsg)
-			} else {
-				cleanedFiles = append(cleanedFiles, fmt.Sprintf("%s (PID %d)", filepath.Base(pidFile), pid))
-			}
-		}
-	}
-
-	// Prepare summary message
-	var summary strings.Builder
-
-	if len(cleanedFiles) > 0 {
-		fmt.Fprintf(&summary, "%s\n", colors.Info("Cleaned up %d stale PID file(s):", len(cleanedFiles)))
-		for _, file := range cleanedFiles {
-			fmt.Fprintf(&summary, "  - %s\n", file)
-		}
-	}
-
-	if len(activeProcesses) > 0 {
-		if summary.Len() > 0 {
-			summary.WriteString("\n")
-		}
-		fmt.Fprintf(&summary, "%s\n", colors.Info("Found %d active process(es):", len(activeProcesses)))
-		for _, process := range activeProcesses {
-			fmt.Fprintf(&summary, "  - %s\n", process)
-		}
-	}
-
-	if len(errors) > 0 {
-		if summary.Len() > 0 {
-			summary.WriteString("\n")
-		}
-		fmt.Fprintf(&summary, "%s\n", colors.Warning("Encountered %d error(s):", len(errors)))
-		for _, error := range errors {
-			fmt.Fprintf(&summary, "  - %s\n", error)
-		}
-	}
-
-	if len(cleanedFiles) == 0 && len(activeProcesses) == 0 && len(errors) == 0 {
-		summary.WriteString(colors.Info("No PID files found to process"))
-	}
-
-	log.Printf("PID cleanup completed. Summary: %s", summary.String())
-
-	// Return success if we cleaned files or found active processes, error only if all operations failed
-	success := len(errors) == 0 || len(cleanedFiles) > 0 || len(activeProcesses) > 0
-
-	return ExecutionResult{
-		Success: success,
-		Stdout:  summary.String(),
-		Stderr:  strings.Join(errors, "\n"),
-	}
+	return CleanupStalePIDFilesWithTermination(projectDir, false)
 }
 
 // appendPassthroughArgs appends passthrough arguments to a base command
@@ -866,6 +736,21 @@ func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, wor
 
 	log.Printf("Command '%s' completed successfully", commandName)
 	return ExecutionResult{Success: true}
+}
+
+// getContainerName extracts container name from service definition
+func getContainerName(service interface{}) (string, error) {
+	switch s := service.(type) {
+	case string:
+		return s, nil
+	case map[string]interface{}:
+		for name := range s {
+			return name, nil
+		}
+		return "", fmt.Errorf("empty service configuration")
+	default:
+		return "", fmt.Errorf("service must be a string or object")
+	}
 }
 
 // StartDockerService starts a Docker service container
@@ -1052,26 +937,22 @@ func LoadEnvironmentVariables(envFile string) error {
 		return fmt.Errorf("failed to read .env file: %w", err)
 	}
 
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
+		key, value, found := strings.Cut(line, "=")
+		if !found {
 			continue
 		}
 
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 
-		// Remove quotes if present
-		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
-			(value[0] == '\'' && value[len(value)-1] == '\'')) {
-			value = value[1 : len(value)-1]
-		}
+		// Remove surrounding quotes if present
+		value = strings.Trim(value, `"'`)
 
 		if err := os.Setenv(key, value); err != nil {
 			log.Printf("Failed to set environment variable %s: %v", key, err)
@@ -1128,6 +1009,20 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 	return ExecutionResult{Success: true}
 }
 
+// getDockerComposeCommand determines which docker compose command to use
+func getDockerComposeCommand() string {
+	checkNewCmd := "docker compose version"
+	checkResult := ExecuteShellCommand(ExecuteOptions{
+		Command:       checkNewCmd,
+		CaptureOutput: true,
+	})
+
+	if checkResult.Success {
+		return "docker compose"
+	}
+	return "docker-compose"
+}
+
 // StartDockerCompose starts services using Docker Compose
 func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	log.Printf("Starting Docker Compose services from file: %s", compose.File)
@@ -1139,22 +1034,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
-	// Determine which docker compose command to use
-	var composeCmd string
-
-	// Try new docker compose command first
-	checkNewCmd := "docker compose version"
-	checkResult := ExecuteShellCommand(ExecuteOptions{
-		Command:       checkNewCmd,
-		CaptureOutput: true,
-	})
-
-	if checkResult.Success {
-		composeCmd = "docker compose"
-	} else {
-		// Fall back to docker-compose
-		composeCmd = "docker-compose"
-	}
+	composeCmd := getDockerComposeCommand()
 
 	// Build command
 	cmdParts := []string{composeCmd, "-f", compose.File}
@@ -1235,22 +1115,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
-	// Determine which docker compose command to use
-	var composeCmd string
-
-	// Try new docker compose command first
-	checkNewCmd := "docker compose version"
-	checkResult := ExecuteShellCommand(ExecuteOptions{
-		Command:       checkNewCmd,
-		CaptureOutput: true,
-	})
-
-	if checkResult.Success {
-		composeCmd = "docker compose"
-	} else {
-		// Fall back to docker-compose
-		composeCmd = "docker-compose"
-	}
+	composeCmd := getDockerComposeCommand()
 
 	// Build command
 	cmdParts := []string{composeCmd, "-f", compose.File}
@@ -1288,21 +1153,11 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 func StopDockerService(service interface{}) ExecutionResult {
 	log.Printf("Stopping Docker service: %v", service)
 
-	var containerName string
-
-	switch s := service.(type) {
-	case string:
-		containerName = s
-	case map[string]interface{}:
-		// Complex service definition - assume first key is service name
-		for name := range s {
-			containerName = name
-			break
-		}
-	default:
+	containerName, err := getContainerName(service)
+	if err != nil {
 		return ExecutionResult{
 			Success: false,
-			Stderr:  "Service must be a string or object",
+			Stderr:  err.Error(),
 		}
 	}
 
@@ -1340,21 +1195,11 @@ func StopDockerService(service interface{}) ExecutionResult {
 func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
 	log.Printf("Waiting for service health check: %v (timeout: %d seconds)", service, timeout)
 
-	var containerName string
-
-	switch s := service.(type) {
-	case string:
-		containerName = s
-	case map[string]interface{}:
-		// Complex service definition - assume first key is service name
-		for name := range s {
-			containerName = name
-			break
-		}
-	default:
+	containerName, err := getContainerName(service)
+	if err != nil {
 		return ExecutionResult{
 			Success: false,
-			Stderr:  "Service must be a string or object",
+			Stderr:  err.Error(),
 		}
 	}
 

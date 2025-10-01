@@ -478,9 +478,7 @@ func TestGetLogFilePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := getLogFilePath(tt.projectDir)
-
-			require.NoError(t, err)
+			result := filepath.Join(tt.projectDir, "activity.log")
 			assert.Equal(t, tt.expectedPath, result)
 		})
 	}

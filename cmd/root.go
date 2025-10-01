@@ -45,7 +45,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.13.2"
+	rootCmd.Version = "0.14.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -84,64 +84,7 @@ type CommandArgs struct {
 	PassthroughArgs []string
 }
 
-// parseArgsFromOsArgs parses arguments from os.Args to handle Cobra's -- consumption
-func parseArgsFromOsArgs(args []string) CommandArgs {
-	if len(args) == 0 {
-		return CommandArgs{}
-	}
-
-	commandName := args[0]
-	var passthroughArgs []string
-
-	// With FParseErrWhitelist.UnknownFlags = true, Cobra passes unknown flags
-	// through the args parameter. Check if we have args beyond the command name.
-	if len(args) > 1 {
-		// Look for -- separator in the provided args
-		separatorIndex := -1
-		for i, arg := range args {
-			if arg == "--" {
-				separatorIndex = i
-				break
-			}
-		}
-
-		if separatorIndex > 0 && separatorIndex < len(args)-1 {
-			// Use args after -- separator
-			passthroughArgs = args[separatorIndex+1:]
-		} else {
-			// No separator - treat all args after command as passthrough
-			passthroughArgs = args[1:]
-		}
-	} else {
-		// Fallback to os.Args parsing (for cases where args aren't passed through)
-		commandIndex := -1
-		separatorIndex := -1
-
-		for i, arg := range os.Args {
-			if arg == commandName && commandIndex == -1 {
-				commandIndex = i
-			}
-			if commandIndex != -1 && arg == "--" {
-				separatorIndex = i
-				break
-			}
-		}
-
-		if separatorIndex > 0 && separatorIndex < len(os.Args)-1 {
-			passthroughArgs = os.Args[separatorIndex+1:]
-		} else if commandIndex != -1 && commandIndex < len(os.Args)-1 {
-			passthroughArgs = os.Args[commandIndex+1:]
-		}
-	}
-
-	return CommandArgs{
-		CommandName:     commandName,
-		PassthroughArgs: passthroughArgs,
-	}
-}
-
-// parseArgs separates the command name from passthrough arguments using -- separator
-// This version is used for testing with provided arguments
+// parseArgs separates the command name from passthrough arguments
 func parseArgs(args []string) CommandArgs {
 	if len(args) == 0 {
 		return CommandArgs{}
@@ -166,8 +109,6 @@ func parseArgs(args []string) CommandArgs {
 		// No separator found - treat all args after command as passthrough
 		passthroughArgs = args[1:]
 	}
-	// If separator is at the end (separatorIndex >= 0 && separatorIndex == len(args)-1),
-	// leave passthroughArgs as nil
 
 	return CommandArgs{
 		CommandName:     commandName,
@@ -287,7 +228,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	colors.InitializeColorSupport(noColor)
 	setupLogging(verbose, projectDir)
 
-	parsedArgs := parseArgsFromOsArgs(filteredArgs)
+	parsedArgs := parseArgs(filteredArgs)
 	commandName := parsedArgs.CommandName
 
 	log.Printf("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)

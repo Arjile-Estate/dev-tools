@@ -15,10 +15,7 @@ import (
 func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 	log.Print("Displaying recent activity logs")
 
-	logFile, err := getLogFilePath(projectDir)
-	if err != nil {
-		return fmt.Errorf("failed to get log file path: %w", err)
-	}
+	logFile := filepath.Join(projectDir, "activity.log")
 
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s", logFile)
@@ -168,11 +165,4 @@ func HandleStopCommand(cmd *cobra.Command, args []string, projectDir string) err
 
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Stopped daemon '%s'", daemonName)))
 	return nil
-}
-
-// getLogFilePath determines the path to the log file.
-func getLogFilePath(projectDir string) (string, error) {
-	// This function is not exported, so it's a private helper.
-	// It needs to be moved along with the functions that use it.
-	return filepath.Join(projectDir, "activity.log"), nil
 }

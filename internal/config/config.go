@@ -76,41 +76,20 @@ type ServicesConfig struct {
 
 // UnmarshalYAML implements custom unmarshaling for ServicesConfig with defaults
 func (s *ServicesConfig) UnmarshalYAML(value *yaml.Node) error {
-	// Set defaults
-	s.Cleanup = false
-	s.WaitForHealth = true
-	s.Timeout = 30
-
-	// Create a temporary struct to avoid infinite recursion
-	type servicesConfigAlias struct {
-		Compose       *ComposeConfig `yaml:"compose,omitempty"`
-		Containers    []interface{}  `yaml:"containers,omitempty"`
-		Cleanup       *bool          `yaml:"cleanup,omitempty"`
-		WaitForHealth *bool          `yaml:"wait_for_health,omitempty"`
-		Timeout       *int           `yaml:"timeout,omitempty"`
+	// Set defaults first
+	type servicesConfigDefaults ServicesConfig
+	defaults := servicesConfigDefaults{
+		Cleanup:       false,
+		WaitForHealth: true,
+		Timeout:       30,
 	}
 
-	var temp servicesConfigAlias
-
-	if err := value.Decode(&temp); err != nil {
+	// Decode into defaults struct to avoid infinite recursion
+	if err := value.Decode(&defaults); err != nil {
 		return err
 	}
 
-	// Copy values from temp to s
-	s.Compose = temp.Compose
-	s.Containers = temp.Containers
-
-	// Override defaults only if explicitly set
-	if temp.Cleanup != nil {
-		s.Cleanup = *temp.Cleanup
-	}
-	if temp.WaitForHealth != nil {
-		s.WaitForHealth = *temp.WaitForHealth
-	}
-	if temp.Timeout != nil {
-		s.Timeout = *temp.Timeout
-	}
-
+	*s = ServicesConfig(defaults)
 	return nil
 }
 
