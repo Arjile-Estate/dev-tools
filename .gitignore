@@ -60,4 +60,4 @@ docker-compose.override.yml
 # Build directories
 build/
 dist/
-bin/
+.gocache/

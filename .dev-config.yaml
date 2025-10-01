@@ -152,3 +152,6 @@ commands:
 
   test-failing:
     - run: "echo This command will fail && exit 42"
+
+  test-command-with-args:
+    - run: "./test-tools/cmd.sh"

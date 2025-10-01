@@ -33,18 +33,19 @@ and provides consistent commands across different project types.
 
 It automatically detects project types (Go, Python, Node.js, Rust) and provides
 sensible defaults, while allowing customization through configuration files.`,
-		Args:             cobra.MinimumNArgs(1),
-		PersistentPreRun: preRun,
-		RunE:             runCommand,
-		SilenceUsage:     false,
-		SilenceErrors:    false,
+		Args:               cobra.MinimumNArgs(1),
+		PersistentPreRun:   preRun,
+		RunE:               runCommand,
+		SilenceUsage:       false,
+		SilenceErrors:      false,
+		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging to stdout")
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 
-	rootCmd.Version = "0.12.2"
+	rootCmd.Version = "0.13.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -92,22 +93,45 @@ func parseArgsFromOsArgs(args []string) CommandArgs {
 	commandName := args[0]
 	var passthroughArgs []string
 
-	// Parse from os.Args since Cobra consumes the -- separator
-	// Find the command in os.Args and then look for -- after it
-	commandFound := false
-	separatorIndex := -1
-	for i, arg := range os.Args {
-		if commandFound && arg == "--" {
-			separatorIndex = i
-			break
+	// With FParseErrWhitelist.UnknownFlags = true, Cobra passes unknown flags
+	// through the args parameter. Check if we have args beyond the command name.
+	if len(args) > 1 {
+		// Look for -- separator in the provided args
+		separatorIndex := -1
+		for i, arg := range args {
+			if arg == "--" {
+				separatorIndex = i
+				break
+			}
 		}
-		if arg == commandName {
-			commandFound = true
-		}
-	}
 
-	if separatorIndex > 0 && separatorIndex < len(os.Args)-1 {
-		passthroughArgs = os.Args[separatorIndex+1:]
+		if separatorIndex > 0 && separatorIndex < len(args)-1 {
+			// Use args after -- separator
+			passthroughArgs = args[separatorIndex+1:]
+		} else {
+			// No separator - treat all args after command as passthrough
+			passthroughArgs = args[1:]
+		}
+	} else {
+		// Fallback to os.Args parsing (for cases where args aren't passed through)
+		commandIndex := -1
+		separatorIndex := -1
+
+		for i, arg := range os.Args {
+			if arg == commandName && commandIndex == -1 {
+				commandIndex = i
+			}
+			if commandIndex != -1 && arg == "--" {
+				separatorIndex = i
+				break
+			}
+		}
+
+		if separatorIndex > 0 && separatorIndex < len(os.Args)-1 {
+			passthroughArgs = os.Args[separatorIndex+1:]
+		} else if commandIndex != -1 && commandIndex < len(os.Args)-1 {
+			passthroughArgs = os.Args[commandIndex+1:]
+		}
 	}
 
 	return CommandArgs{
@@ -135,14 +159,64 @@ func parseArgs(args []string) CommandArgs {
 		}
 	}
 
+	// If we found a -- separator, use everything after it
 	if separatorIndex > 0 && separatorIndex < len(args)-1 {
 		passthroughArgs = args[separatorIndex+1:]
+	} else if separatorIndex == -1 && len(args) > 1 {
+		// No separator found - treat all args after command as passthrough
+		passthroughArgs = args[1:]
 	}
+	// If separator is at the end (separatorIndex >= 0 && separatorIndex == len(args)-1),
+	// leave passthroughArgs as nil
 
 	return CommandArgs{
 		CommandName:     commandName,
 		PassthroughArgs: passthroughArgs,
 	}
+}
+
+// extractDevToolsFlags extracts dev-tools flags from args
+// Returns filtered args (without dev-tools flags) and a map of flag values
+// Only extracts flags that appear BEFORE the command name
+func extractDevToolsFlags(args []string) ([]string, map[string]string) {
+	flags := make(map[string]string)
+	var filtered []string
+
+	commandFound := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// Check if this looks like a command name (doesn't start with -)
+		if !strings.HasPrefix(arg, "-") {
+			commandFound = true
+		}
+
+		// Only extract dev-tools flags before the command name
+		if !commandFound {
+			// Check for dev-tools flags
+			if arg == "-v" || arg == "--verbose" {
+				flags["verbose"] = "true"
+				continue // Don't add to filtered
+			} else if arg == "--no-color" {
+				flags["no-color"] = "true"
+				continue // Don't add to filtered
+			} else if arg == "-p" || arg == "--project-dir" {
+				if i+1 < len(args) {
+					flags["project-dir"] = args[i+1]
+					i++      // Skip the next arg (the value)
+					continue // Don't add to filtered
+				}
+			} else if strings.HasPrefix(arg, "--project-dir=") {
+				flags["project-dir"] = strings.TrimPrefix(arg, "--project-dir=")
+				continue // Don't add to filtered
+			}
+		}
+
+		// Add to filtered (either not a dev-tools flag, or after command name)
+		filtered = append(filtered, arg)
+	}
+
+	return filtered, flags
 }
 
 var builtInCommands = map[string]CommandFunc{
@@ -177,14 +251,33 @@ var builtInCommands = map[string]CommandFunc{
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	parsedArgs := parseArgsFromOsArgs(args)
+	// With DisableFlagParsing=true, we need to manually extract dev-tools flags
+	// Dev-tools flags must come BEFORE the command name
+	filteredArgs, devToolsFlags := extractDevToolsFlags(args)
+
+	// Apply dev-tools flags
+	if v, ok := devToolsFlags["verbose"]; ok && v == "true" {
+		verbose = true
+	}
+	if v, ok := devToolsFlags["no-color"]; ok && v == "true" {
+		noColor = true
+	}
+	if v, ok := devToolsFlags["project-dir"]; ok {
+		projectDir = v
+	}
+
+	// Re-initialize colors and logging with the parsed flags
+	colors.InitializeColorSupport(noColor)
+	setupLogging(verbose, projectDir)
+
+	parsedArgs := parseArgsFromOsArgs(filteredArgs)
 	commandName := parsedArgs.CommandName
 
 	log.Printf("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
 	// Handle special built-in commands
 	if commandFunc, exists := builtInCommands[commandName]; exists {
-		return commandFunc(cmd, args)
+		return commandFunc(cmd, filteredArgs)
 	}
 
 	// Load environment variables

@@ -23,7 +23,7 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "0.12.1", cmd.Version)
+		assert.Equal(t, "0.12.2", cmd.Version)
 		assert.False(t, cmd.SilenceUsage)
 		assert.False(t, cmd.SilenceErrors)
 
@@ -398,6 +398,69 @@ func TestSetExecutor(t *testing.T) {
 	assert.Equal(t, mockExec, exec)
 }
 
+func TestRunCommand_WithPassthroughArgs(t *testing.T) {
+	tests := []struct {
+		name                string
+		args                []string
+		expectedPassthrough []string
+	}{
+		{
+			name:                "passthrough args without separator",
+			args:                []string{"test", "--option", "toto"},
+			expectedPassthrough: []string{"--option", "toto"},
+		},
+		{
+			name:                "passthrough args with separator",
+			args:                []string{"test", "--", "--option", "toto"},
+			expectedPassthrough: []string{"--option", "toto"},
+		},
+		{
+			name:                "multiple passthrough args without separator",
+			args:                []string{"test", "--verbose", "--run", "TestExample"},
+			expectedPassthrough: []string{"--verbose", "--run", "TestExample"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockLoader := new(mocks.ConfigLoader)
+			mockExecutor := new(mocks.Executor)
+
+			SetConfigLoader(mockLoader)
+			SetExecutor(mockExecutor)
+			defer func() {
+				SetConfigLoader(nil)
+				SetExecutor(nil)
+			}()
+
+			expectedConfig := &config.Config{
+				Commands: map[string][]config.CommandStep{
+					"test": {
+						{Run: config.RunCommand{"echo test"}},
+					},
+				},
+			}
+			mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
+			mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
+
+			// The key assertion: verify that ExecuteCommandWithSteps is called with the correct passthrough args
+			mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", tt.expectedPassthrough).Return(
+				executor.ExecutionResult{Success: true})
+
+			rootCmd := NewRootCommand()
+			var buf bytes.Buffer
+			rootCmd.SetOut(&buf)
+			rootCmd.SetArgs(tt.args)
+
+			err := rootCmd.Execute()
+			assert.NoError(t, err)
+
+			mockLoader.AssertExpectations(t)
+			mockExecutor.AssertExpectations(t)
+		})
+	}
+}
+
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -433,6 +496,26 @@ func TestParseArgs(t *testing.T) {
 			name:     "multiple passthrough args",
 			args:     []string{"test", "--", "--verbose", "--run", "TestExample", "--timeout=5m"},
 			expected: CommandArgs{CommandName: "test", PassthroughArgs: []string{"--verbose", "--run", "TestExample", "--timeout=5m"}},
+		},
+		{
+			name:     "command with args without separator",
+			args:     []string{"test", "--option", "toto"},
+			expected: CommandArgs{CommandName: "test", PassthroughArgs: []string{"--option", "toto"}},
+		},
+		{
+			name:     "command with single arg without separator",
+			args:     []string{"build", "--release"},
+			expected: CommandArgs{CommandName: "build", PassthroughArgs: []string{"--release"}},
+		},
+		{
+			name:     "command with multiple args without separator",
+			args:     []string{"test", "--verbose", "--run", "TestExample", "--timeout=5m"},
+			expected: CommandArgs{CommandName: "test", PassthroughArgs: []string{"--verbose", "--run", "TestExample", "--timeout=5m"}},
+		},
+		{
+			name:     "command with mixed flags and values without separator",
+			args:     []string{"deploy", "--env", "production", "--region", "us-west-2"},
+			expected: CommandArgs{CommandName: "deploy", PassthroughArgs: []string{"--env", "production", "--region", "us-west-2"}},
 		},
 	}
 
