@@ -46,7 +46,8 @@ func TestLoadConfigFromFile(t *testing.T) {
 			name: "config with services and background",
 			fileContent: `commands:
   dev:
-    - start_services: ["redis", "postgres"]
+    - services:
+        containers: ["redis", "postgres"]
     - run: "go run main.go"
       background: true
       daemon: true`,
@@ -54,7 +55,14 @@ func TestLoadConfigFromFile(t *testing.T) {
 			wantConfig: &Config{
 				Commands: map[string][]CommandStep{
 					"dev": {
-						{StartServices: StartServices{"redis", "postgres"}},
+						{
+							Services: ServicesConfig{
+								Containers:    []interface{}{"redis", "postgres"},
+								Cleanup:       false,
+								WaitForHealth: true,
+								Timeout:       30,
+							},
+						},
 						{
 							Run:        RunCommand{"go run main.go"},
 							Background: true,
@@ -275,16 +283,6 @@ func compareCommandSteps(a, b CommandStep) bool {
 		}
 	}
 
-	// Compare StartServices slices
-	if len(a.StartServices) != len(b.StartServices) {
-		return false
-	}
-	for i, serviceA := range a.StartServices {
-		if serviceA != b.StartServices[i] {
-			return false
-		}
-	}
-
 	// Compare Services configuration
 	if !compareServicesConfig(a.Services, b.Services) {
 		return false
@@ -475,109 +473,6 @@ services: []`,
 
 			if !compareComposeConfig(result, tt.want) {
 				t.Errorf("ComposeConfig.UnmarshalYAML() = %+v, want %+v", result, tt.want)
-			}
-		})
-	}
-}
-
-func TestBackwardCompatibility_StartServices(t *testing.T) {
-	tests := []struct {
-		name        string
-		fileContent string
-		wantErr     bool
-		wantConfig  *Config
-	}{
-		{
-			name: "backward compatibility with start_services",
-			fileContent: `commands:
-  dev:
-    - start_services: ["redis", "postgres"]
-    - run: "go run main.go"`,
-			wantErr: false,
-			wantConfig: &Config{
-				Commands: map[string][]CommandStep{
-					"dev": {
-						{StartServices: StartServices{"redis", "postgres"}},
-						{Run: RunCommand{"go run main.go"}},
-					},
-				},
-			},
-		},
-		{
-			name: "new services configuration",
-			fileContent: `commands:
-  dev:
-    - services:
-        containers: ["redis", "postgres"]
-        cleanup: true
-    - run: "go run main.go"`,
-			wantErr: false,
-			wantConfig: &Config{
-				Commands: map[string][]CommandStep{
-					"dev": {
-						{
-							Services: ServicesConfig{
-								Containers:    []interface{}{"redis", "postgres"},
-								Cleanup:       true,
-								WaitForHealth: true,
-								Timeout:       30,
-							},
-						},
-						{Run: RunCommand{"go run main.go"}},
-					},
-				},
-			},
-		},
-		{
-			name: "mixed configuration - both start_services and services",
-			fileContent: `commands:
-  dev:
-    - start_services: ["redis"]
-    - services:
-        containers: ["postgres"]
-    - run: "go run main.go"`,
-			wantErr: false,
-			wantConfig: &Config{
-				Commands: map[string][]CommandStep{
-					"dev": {
-						{StartServices: StartServices{"redis"}},
-						{
-							Services: ServicesConfig{
-								Containers:    []interface{}{"postgres"},
-								Cleanup:       false,
-								WaitForHealth: true,
-								Timeout:       30,
-							},
-						},
-						{Run: RunCommand{"go run main.go"}},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary file
-			tmpDir := t.TempDir()
-			configFile := filepath.Join(tmpDir, ".dev-config.yaml")
-			err := os.WriteFile(configFile, []byte(tt.fileContent), 0644)
-			if err != nil {
-				t.Fatalf("Failed to create test file: %v", err)
-			}
-
-			got, err := LoadConfigFromFile(configFile)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("LoadConfigFromFile() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if !compareConfigs(got, tt.wantConfig) {
-				t.Errorf("LoadConfigFromFile() = %+v, want %+v", got, tt.wantConfig)
 			}
 		})
 	}

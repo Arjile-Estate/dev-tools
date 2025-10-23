@@ -42,22 +42,6 @@ func (r *RunCommand) UnmarshalYAML(value *yaml.Node) error {
 	return fmt.Errorf("run must be a string or array of strings")
 }
 
-// StartServices represents services that can be strings or complex objects
-type StartServices []interface{}
-
-// UnmarshalYAML implements custom unmarshaling for StartServices
-func (s *StartServices) UnmarshalYAML(value *yaml.Node) error {
-	var services []interface{}
-
-	// Try to unmarshal as array of interfaces
-	if err := value.Decode(&services); err == nil {
-		*s = services
-		return nil
-	}
-
-	return fmt.Errorf("start_services must be an array")
-}
-
 // ComposeConfig represents Docker Compose configuration
 type ComposeConfig struct {
 	File     string   `yaml:"file"`

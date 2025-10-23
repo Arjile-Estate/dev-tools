@@ -1395,14 +1395,6 @@ func TestExecuteCommandStep_ServicesConfiguration(t *testing.T) {
 		description string
 	}{
 		{
-			name: "deprecated start_services",
-			step: config.CommandStep{
-				Run:           config.RunCommand{"echo hello"},
-				StartServices: []interface{}{"redis", "postgres"},
-			},
-			description: "should handle deprecated start_services configuration",
-		},
-		{
 			name: "new services configuration",
 			step: config.CommandStep{
 				Run: config.RunCommand{"echo hello"},

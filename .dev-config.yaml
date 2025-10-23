@@ -78,11 +78,6 @@ commands:
         timeout: 30
     - run: "go test ./... -tags=integration -v"
 
-  # Legacy examples showing backward compatibility (deprecated)
-  legacy-test:
-    - start_services: ["redis", "postgres"]  # Shows deprecation warning
-    - run: "go test ./... -v"
-
   # Advanced container configuration example
   advanced-services:
     - services:

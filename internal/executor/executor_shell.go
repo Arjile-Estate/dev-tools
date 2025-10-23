@@ -259,21 +259,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		log.Printf("Using directory: %s", stepDir)
 	}
 
-	// Handle start_services (backward compatibility with deprecation warning)
-	if len(step.StartServices) > 0 {
-		log.Printf("WARNING: 'start_services' is deprecated and will be removed in a future version. Please use 'services' configuration instead.")
-		fmt.Printf("%s\n", colors.Warning("WARNING: 'start_services' is deprecated. Please migrate to 'services' configuration."))
-
-		for _, service := range step.StartServices {
-			result := StartDockerService(service)
-			if !result.Success {
-				log.Printf("Failed to start service %v", service)
-				return result
-			}
-		}
-	}
-
-	// Handle new services configuration
+	// Handle services configuration
 	if step.Services.Compose != nil || len(step.Services.Containers) > 0 {
 		result := HandleServicesConfiguration(step.Services)
 		if !result.Success {

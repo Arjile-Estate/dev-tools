@@ -7,10 +7,9 @@ type Config struct {
 
 // CommandStep represents a single step in a command execution
 type CommandStep struct {
-	Run           RunCommand     `yaml:"run,omitempty"`
-	StartServices StartServices  `yaml:"start_services,omitempty"`
-	Services      ServicesConfig `yaml:"services,omitempty"`
-	Background    bool           `yaml:"background,omitempty"`
-	Daemon        bool           `yaml:"daemon,omitempty"`
-	Directory     string         `yaml:"directory,omitempty"`
+	Run        RunCommand     `yaml:"run,omitempty"`
+	Services   ServicesConfig `yaml:"services,omitempty"`
+	Background bool           `yaml:"background,omitempty"`
+	Daemon     bool           `yaml:"daemon,omitempty"`
+	Directory  string         `yaml:"directory,omitempty"`
 }
