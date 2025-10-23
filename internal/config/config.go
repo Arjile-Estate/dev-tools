@@ -19,6 +19,16 @@ const (
 	ProjectTypeUnknown ProjectType = "unknown"
 )
 
+// Service configuration defaults
+const (
+	// DefaultServiceTimeout is the default timeout in seconds for service health checks
+	DefaultServiceTimeout = 30
+	// DefaultServiceCleanup is the default setting for automatic service cleanup
+	DefaultServiceCleanup = false
+	// DefaultWaitForHealth is the default setting for waiting for service health checks
+	DefaultWaitForHealth = true
+)
+
 // RunCommand represents a command that can be either a string or array of strings
 type RunCommand []string
 
@@ -63,9 +73,9 @@ func (s *ServicesConfig) UnmarshalYAML(value *yaml.Node) error {
 	// Set defaults first
 	type servicesConfigDefaults ServicesConfig
 	defaults := servicesConfigDefaults{
-		Cleanup:       false,
-		WaitForHealth: true,
-		Timeout:       30,
+		Cleanup:       DefaultServiceCleanup,
+		WaitForHealth: DefaultWaitForHealth,
+		Timeout:       DefaultServiceTimeout,
 	}
 
 	// Decode into defaults struct to avoid infinite recursion

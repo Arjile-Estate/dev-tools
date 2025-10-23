@@ -14,6 +14,12 @@ import (
 	"dev-tools/internal/executor"
 )
 
+// Completion cache configuration
+const (
+	// DefaultCompletionCacheTTL is the default time-to-live for completion cache entries
+	DefaultCompletionCacheTTL = 5 * time.Second
+)
+
 // CompletionCache provides thread-safe caching for rapid completions
 type CompletionCache struct {
 	mu         sync.RWMutex
@@ -65,7 +71,7 @@ func (c *CompletionCache) Set(ctx *CompletionContext, completions []string) {
 }
 
 // Global completion cache instance (thread-safe)
-var globalCompletionCache = NewCompletionCache(5 * time.Second)
+var globalCompletionCache = NewCompletionCache(DefaultCompletionCacheTTL)
 
 // HandleCompletionCommand generates shell completion scripts
 func HandleCompletionCommand(cmd *cobra.Command, args []string) error {

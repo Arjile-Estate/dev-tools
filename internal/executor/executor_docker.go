@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// Docker command strings
+const (
+	// DockerCommand is the base docker CLI command
+	DockerCommand = "docker"
+)
+
 // getContainerName extracts container name from service definition
 func getContainerName(service interface{}) (string, error) {
 	switch s := service.(type) {

@@ -9,6 +9,14 @@ import (
 	"dev-tools/internal/config"
 )
 
+// Docker Compose command variants
+const (
+	// DockerComposeV2 is the modern docker compose command (built into docker CLI)
+	DockerComposeV2 = "docker compose"
+	// DockerComposeV1 is the legacy docker-compose command (standalone binary)
+	DockerComposeV1 = "docker-compose"
+)
+
 // HandleServicesConfiguration handles the new services configuration
 func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult {
 	log.Printf("Handling services configuration (compose: %v, containers: %d)",
@@ -56,16 +64,16 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 
 // getDockerComposeCommand determines which docker compose command to use
 func getDockerComposeCommand() string {
-	checkNewCmd := "docker compose version"
+	checkNewCmd := DockerComposeV2 + " version"
 	checkResult := ExecuteShellCommand(ExecuteOptions{
 		Command:       checkNewCmd,
 		CaptureOutput: true,
 	})
 
 	if checkResult.Success {
-		return "docker compose"
+		return DockerComposeV2
 	}
-	return "docker-compose"
+	return DockerComposeV1
 }
 
 // StartDockerCompose starts services using Docker Compose
