@@ -3,8 +3,10 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -431,8 +433,8 @@ commands:
 }
 
 func TestGetCachedCompletions(t *testing.T) {
-	// Clear cache first
-	lastCompletionCache = nil
+	// Create a fresh cache for testing
+	cache := NewCompletionCache(5 * time.Second)
 
 	ctx := &CompletionContext{
 		Words:       []string{"test"},
@@ -442,26 +444,28 @@ func TestGetCachedCompletions(t *testing.T) {
 	}
 
 	// Should return nil when no cache exists
-	result := getCachedCompletions(ctx)
+	result := cache.Get(ctx)
 	assert.Nil(t, result)
 
 	// Cache some completions
 	completions := []string{"completion1", "completion2"}
-	cacheCompletions(ctx, completions)
+	cache.Set(ctx, completions)
 
 	// Should return cached completions
-	result = getCachedCompletions(ctx)
+	result = cache.Get(ctx)
 	assert.Equal(t, completions, result)
 
-	// Test cache expiration
-	lastCompletionCacheTime = time.Now().Add(-10 * time.Second)
-	result = getCachedCompletions(ctx)
+	// Test cache expiration - create a cache with very short TTL
+	shortCache := NewCompletionCache(1 * time.Nanosecond)
+	shortCache.Set(ctx, completions)
+	time.Sleep(2 * time.Millisecond) // Wait for expiration
+	result = shortCache.Get(ctx)
 	assert.Nil(t, result)
 }
 
 func TestCacheCompletions(t *testing.T) {
-	// Clear cache first
-	lastCompletionCache = nil
+	// Create a fresh cache for testing
+	cache := NewCompletionCache(5 * time.Second)
 
 	ctx := &CompletionContext{
 		Words:       []string{"test"},
@@ -472,14 +476,70 @@ func TestCacheCompletions(t *testing.T) {
 
 	completions := []string{"completion1", "completion2"}
 
-	cacheCompletions(ctx, completions)
+	cache.Set(ctx, completions)
 
-	assert.NotNil(t, lastCompletionCache)
-	assert.Equal(t, "/test", lastCompletionCacheDir)
+	// Verify the cached value can be retrieved
+	result := cache.Get(ctx)
+	assert.Equal(t, completions, result)
 
-	// Verify the key format and cached value
-	key := "test:1:arg"
-	assert.Equal(t, completions, lastCompletionCache[key])
+	// Test that changing project directory invalidates cache
+	ctx2 := &CompletionContext{
+		Words:       []string{"test"},
+		WordIndex:   1,
+		CurrentWord: "arg",
+		ProjectDir:  "/different",
+	}
+	result = cache.Get(ctx2)
+	assert.Nil(t, result, "Cache should be invalid for different project directory")
+}
+
+func TestCompletionCacheConcurrency(t *testing.T) {
+	cache := NewCompletionCache(5 * time.Second)
+
+	ctx := &CompletionContext{
+		Words:       []string{"test"},
+		WordIndex:   1,
+		CurrentWord: "arg",
+		ProjectDir:  "/test",
+	}
+
+	completions := []string{"completion1", "completion2", "completion3"}
+
+	// Run concurrent reads and writes
+	const numGoroutines = 50
+	const numOperations = 100
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines * 2) // readers and writers
+
+	// Writers
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				cache.Set(ctx, append(completions, fmt.Sprintf("writer-%d-%d", id, j)))
+			}
+		}(i)
+	}
+
+	// Readers
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numOperations; j++ {
+				result := cache.Get(ctx)
+				// Just verify we can read without panic
+				_ = result
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify cache still works after concurrent operations
+	cache.Set(ctx, completions)
+	result := cache.Get(ctx)
+	assert.Equal(t, completions, result)
 }
 
 func TestOutputCompletions(t *testing.T) {

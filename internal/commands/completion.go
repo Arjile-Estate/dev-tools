@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,13 +14,58 @@ import (
 	"dev-tools/internal/executor"
 )
 
-// Caching for rapid completions
-var (
-	lastCompletionCache     map[string][]string
-	lastCompletionCacheDir  string
-	lastCompletionCacheTime time.Time
-	completionCacheTTL      = 5 * time.Second
-)
+// CompletionCache provides thread-safe caching for rapid completions
+type CompletionCache struct {
+	mu         sync.RWMutex
+	cache      map[string][]string
+	projectDir string
+	timestamp  time.Time
+	ttl        time.Duration
+}
+
+// NewCompletionCache creates a new thread-safe completion cache
+func NewCompletionCache(ttl time.Duration) *CompletionCache {
+	return &CompletionCache{
+		cache: make(map[string][]string),
+		ttl:   ttl,
+	}
+}
+
+// Get retrieves cached completions if still valid
+func (c *CompletionCache) Get(ctx *CompletionContext) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Check if cache is invalid
+	if c.cache == nil ||
+		c.projectDir != ctx.ProjectDir ||
+		time.Since(c.timestamp) > c.ttl {
+		return nil
+	}
+
+	key := fmt.Sprintf("%s:%d:%s", strings.Join(ctx.Words, " "), ctx.WordIndex, ctx.CurrentWord)
+	return c.cache[key]
+}
+
+// Set caches completions for rapid access
+func (c *CompletionCache) Set(ctx *CompletionContext, completions []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Reset cache if project directory changed
+	if c.cache == nil || c.projectDir != ctx.ProjectDir {
+		c.cache = make(map[string][]string)
+	}
+
+	c.projectDir = ctx.ProjectDir
+	c.timestamp = time.Now()
+
+	key := fmt.Sprintf("%s:%d:%s", strings.Join(ctx.Words, " "), ctx.WordIndex, ctx.CurrentWord)
+	c.cache[key] = completions
+}
+
+// Global completion cache instance (thread-safe)
+var globalCompletionCache = NewCompletionCache(5 * time.Second)
 
 // HandleCompletionCommand generates shell completion scripts
 func HandleCompletionCommand(cmd *cobra.Command, args []string) error {
@@ -187,8 +233,8 @@ func HandleCompleteCommand(cmd *cobra.Command, args []string, projectDir string)
 	log.Printf("Completion context: WordIndex=%d, CurrentWord=%q, CommandName=%q, IsFlag=%v",
 		ctx.WordIndex, ctx.CurrentWord, ctx.CommandName, ctx.IsFlag)
 
-	// Check cache first
-	if completions := getCachedCompletions(ctx); completions != nil {
+	// Check cache first using thread-safe cache
+	if completions := globalCompletionCache.Get(ctx); completions != nil {
 		outputCompletions(cmd, completions)
 		return nil
 	}
@@ -204,8 +250,8 @@ func HandleCompleteCommand(cmd *cobra.Command, args []string, projectDir string)
 	completions := generateCompletions(ctx, config)
 	log.Printf("Generated %d completions: %v", len(completions), completions)
 
-	// Cache the results
-	cacheCompletions(ctx, completions)
+	// Cache the results using thread-safe cache
+	globalCompletionCache.Set(ctx, completions)
 
 	// Output completions
 	outputCompletions(cmd, completions)
@@ -373,31 +419,6 @@ func getDaemonNames(projectDir string) []string {
 
 	sort.Strings(names)
 	return names
-}
-
-// getCachedCompletions returns cached completions if still valid
-func getCachedCompletions(ctx *CompletionContext) []string {
-	if lastCompletionCache == nil ||
-		lastCompletionCacheDir != ctx.ProjectDir ||
-		time.Since(lastCompletionCacheTime) > completionCacheTTL {
-		return nil
-	}
-
-	key := fmt.Sprintf("%s:%d:%s", strings.Join(ctx.Words, " "), ctx.WordIndex, ctx.CurrentWord)
-	return lastCompletionCache[key]
-}
-
-// cacheCompletions caches completions for rapid access
-func cacheCompletions(ctx *CompletionContext, completions []string) {
-	if lastCompletionCache == nil || lastCompletionCacheDir != ctx.ProjectDir {
-		lastCompletionCache = make(map[string][]string)
-	}
-
-	lastCompletionCacheDir = ctx.ProjectDir
-	lastCompletionCacheTime = time.Now()
-
-	key := fmt.Sprintf("%s:%d:%s", strings.Join(ctx.Words, " "), ctx.WordIndex, ctx.CurrentWord)
-	lastCompletionCache[key] = completions
 }
 
 // outputCompletions outputs completions in space-separated format
