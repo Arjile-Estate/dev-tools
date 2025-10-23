@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"dev-tools/internal/colors"
+	"dev-tools/internal/commands"
 	"dev-tools/internal/config"
 )
 
@@ -30,29 +31,29 @@ Examples:
 	}
 
 	// Add available commands
-	var commands []string
+	var commandList []string
 	commandSet := make(map[string]bool)
 
 	// Add commands from config
-	for cmd := range config.Commands {
-		commands = append(commands, cmd)
-		commandSet[cmd] = true
+	for cmdName := range config.Commands {
+		commandList = append(commandList, cmdName)
+		commandSet[cmdName] = true
 	}
 
-	// Add built-in commands (avoid duplicates)
-	builtInCommands := []string{"logs", "cleanup-pids", "cleanup-all", "status", "restart", "stop", "version"}
-	for _, cmd := range builtInCommands {
-		if !commandSet[cmd] {
-			commands = append(commands, cmd)
+	// Add built-in commands from registry (avoid duplicates)
+	builtInCommandNames := commands.GetBuiltInCommandNames()
+	for _, cmdName := range builtInCommandNames {
+		if !commandSet[cmdName] {
+			commandList = append(commandList, cmdName)
 		}
 	}
 
-	if len(commands) > 0 {
+	if len(commandList) > 0 {
 		baseHelp += fmt.Sprintf(`
 
 Available commands: %s
 
-Examples:`, colors.Highlight(strings.Join(commands, ", ")))
+Examples:`, colors.Highlight(strings.Join(commandList, ", ")))
 
 		// Show examples for first few commands
 		exampleCount := 0

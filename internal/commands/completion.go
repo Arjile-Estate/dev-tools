@@ -311,13 +311,14 @@ func generateCompletions(ctx *CompletionContext, config *config.Config) []string
 func getAllAvailableCommands(config *config.Config) []string {
 	commandSet := make(map[string]bool)
 
-	// Add built-in commands (hardcoded list to avoid circular dependency)
-	builtinCommands := []string{
-		"logs", "cleanup-pids", "cleanup-all", "status",
-		"restart", "stop", "version", "completion",
-	}
-	for _, cmd := range builtinCommands {
-		commandSet[cmd] = true
+	// Add built-in commands - initialize registry first, then iterate
+	initBuiltInCommandRegistry()
+	for _, cmd := range builtInCommandRegistry {
+		// Skip internal commands (like __dev_complete) - they shouldn't be visible to users
+		if strings.HasPrefix(cmd.Name, "__") {
+			continue
+		}
+		commandSet[cmd.Name] = true
 	}
 
 	// Add commands from config
@@ -404,4 +405,14 @@ func outputCompletions(cmd *cobra.Command, completions []string) {
 	if len(completions) > 0 {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), strings.Join(completions, " "))
 	}
+}
+
+// contains checks if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

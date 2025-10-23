@@ -166,35 +166,31 @@ func extractDevToolsFlags(args []string) ([]string, map[string]string) {
 	return filtered, flags
 }
 
-var builtInCommands = map[string]CommandFunc{
-	"logs": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleLogsCommand(cmd, projectDir)
-	},
-	"cleanup-pids": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleCleanupPidsCommand(cmd, projectDir)
-	},
-	"cleanup-all": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleCleanupAllCommand(cmd, projectDir)
-	},
-	"status": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleStatusCommand(cmd, projectDir)
-	},
-	"restart": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleRestartCommand(cmd, args, projectDir)
-	},
-	"stop": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleStopCommand(cmd, args, projectDir)
-	},
-	"version": func(cmd *cobra.Command, args []string) error {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Root().Version)
-		return nil
-	},
-	"completion": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleCompletionCommand(cmd, args)
-	},
-	"__dev_complete": func(cmd *cobra.Command, args []string) error {
-		return commands.HandleCompleteCommand(cmd, args, projectDir)
-	},
+// getBuiltInCommands creates a map of built-in commands with proper closure of projectDir and cmdVersion
+func getBuiltInCommands(projectDir string, cmdVersion string) map[string]CommandFunc {
+	// Get handlers from registry
+	registryMap := commands.GetBuiltInCommandMap()
+
+	// Convert to the format expected by runCommand
+	builtInMap := make(map[string]CommandFunc)
+	for name, handler := range registryMap {
+		// Special handling for version command which needs access to cmd.Version
+		if name == "version" {
+			builtInMap[name] = func(cmd *cobra.Command, args []string) error {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmdVersion)
+				return nil
+			}
+		} else {
+			// Capture handler and projectDir in closure
+			capturedHandler := handler
+			capturedProjectDir := projectDir
+			builtInMap[name] = func(cmd *cobra.Command, args []string) error {
+				return capturedHandler(cmd, args, capturedProjectDir)
+			}
+		}
+	}
+
+	return builtInMap
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
@@ -234,6 +230,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	log.Printf("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
 	// Handle special built-in commands
+	builtInCommands := getBuiltInCommands(projectDir, cmd.Version)
 	if commandFunc, exists := builtInCommands[commandName]; exists {
 		return commandFunc(cmd, filteredArgs)
 	}
