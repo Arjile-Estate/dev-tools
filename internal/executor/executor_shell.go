@@ -260,12 +260,27 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 	}
 
 	// Handle services configuration
+	servicesStarted := false
 	if step.Services.Compose != nil || len(step.Services.Containers) > 0 {
 		result := HandleServicesConfiguration(step.Services)
 		if !result.Success {
 			log.Printf("Failed to handle services configuration")
 			return result
 		}
+		servicesStarted = true
+	}
+
+	// Defer cleanup if services were started and cleanup is enabled
+	if servicesStarted && step.Services.Cleanup {
+		defer func() {
+			log.Printf("Cleaning up services after command execution")
+			cleanupResult := StopServices(step.Services)
+			if !cleanupResult.Success {
+				log.Printf("Warning: Service cleanup failed: %s", cleanupResult.Stderr)
+			} else {
+				log.Printf("Services cleaned up successfully")
+			}
+		}()
 	}
 
 	// Handle run commands

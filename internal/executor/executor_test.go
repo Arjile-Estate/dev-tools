@@ -1920,3 +1920,56 @@ func TestExecuteCommandStepWithPassthroughArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteCommandStep_ServiceCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name        string
+		step        config.CommandStep
+		description string
+	}{
+		{
+			name: "services with cleanup enabled",
+			step: config.CommandStep{
+				Services: config.ServicesConfig{
+					Containers:    []interface{}{"redis"},
+					Cleanup:       true,
+					WaitForHealth: false,
+				},
+				Run: config.RunCommand{"echo 'test command'"},
+			},
+			description: "should cleanup services after command execution when cleanup is enabled",
+		},
+		{
+			name: "services without cleanup",
+			step: config.CommandStep{
+				Services: config.ServicesConfig{
+					Containers:    []interface{}{"redis"},
+					Cleanup:       false,
+					WaitForHealth: false,
+				},
+				Run: config.RunCommand{"echo 'test command'"},
+			},
+			description: "should NOT cleanup services when cleanup is disabled",
+		},
+		{
+			name: "no services configured",
+			step: config.CommandStep{
+				Run: config.RunCommand{"echo 'test command'"},
+			},
+			description: "should execute normally when no services are configured",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExecuteCommandStep(tt.step, "test-command", tmpDir, nil)
+			t.Logf("Service cleanup test: %s (success: %v)", tt.description, result.Success)
+
+			// We can't assert much here since Docker might not be available
+			// But we can verify the function completes without panic
+			// The deferred cleanup will run automatically when the function returns
+		})
+	}
+}

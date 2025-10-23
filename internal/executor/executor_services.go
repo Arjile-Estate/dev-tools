@@ -46,10 +46,9 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 		}
 	}
 
-	// Store services for cleanup if needed
+	// Cleanup is now handled via defer in ExecuteCommandStep
 	if services.Cleanup {
-		// TODO: Implement proper cleanup tracking
-		log.Printf("Cleanup enabled for services - tracking for future cleanup")
+		log.Printf("Cleanup enabled for services - will be cleaned up after command execution")
 	}
 
 	return ExecutionResult{Success: true}
