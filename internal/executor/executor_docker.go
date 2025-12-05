@@ -38,6 +38,10 @@ func StartDockerService(service interface{}) ExecutionResult {
 	case string:
 		// Simple string service name
 		containerName = s
+		// Predefined service configurations with default development credentials
+		// WARNING: These use hardcoded passwords ("password") for development convenience only.
+		// In production environments, always use secure passwords and proper secrets management.
+		// Consider using environment variables or Docker secrets for sensitive data.
 		serviceConfigs := map[string]string{
 			"redis":    "docker run -d --name redis -p 6379:6379 redis:latest",
 			"postgres": "docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest",
