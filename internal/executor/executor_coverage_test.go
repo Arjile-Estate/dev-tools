@@ -305,7 +305,6 @@ func TestHandleServicesConfiguration_ComposeAndContainers(t *testing.T) {
 		result := HandleServicesConfiguration(services)
 
 		assert.True(t, result.Success)
-		// Note: Cleanup tracking is not yet implemented (TODO at line 1005)
 	})
 
 	t.Run("services with wait for health", func(t *testing.T) {
