@@ -242,61 +242,146 @@ func shellEscape(arg string) string {
 	return fmt.Sprintf("'%s'", escaped)
 }
 
+// validateAndResolveDirectory validates and resolves the execution directory
+func validateAndResolveDirectory(stepDir, workingDir string) (string, error) {
+	if stepDir == "" {
+		return workingDir, nil
+	}
+
+	// Make path absolute if relative
+	if !filepath.IsAbs(stepDir) && workingDir != "" {
+		stepDir = filepath.Join(workingDir, stepDir)
+	}
+
+	// Validate directory exists and is accessible
+	info, err := os.Stat(stepDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("directory '%s' does not exist", stepDir)
+		}
+		return "", fmt.Errorf("directory '%s' is not accessible: %w", stepDir, err)
+	}
+
+	if !info.IsDir() {
+		return "", fmt.Errorf("path '%s' is not a directory", stepDir)
+	}
+
+	// Test directory accessibility
+	if _, err := os.ReadDir(stepDir); err != nil {
+		return "", fmt.Errorf("directory '%s' is not accessible: %w", stepDir, err)
+	}
+
+	log.Printf("Using directory: %s", stepDir)
+	return stepDir, nil
+}
+
+// handleServicesStartup starts configured services and returns their names
+func handleServicesStartup(services config.ServicesConfig) ([]string, error) {
+	if services.Compose == nil && len(services.Containers) == 0 {
+		return nil, nil
+	}
+
+	result := HandleServicesConfiguration(services)
+	if !result.Success {
+		return nil, fmt.Errorf("failed to start services: %s", result.Stderr)
+	}
+
+	return result.ServicesStarted, nil
+}
+
+// checkDaemonAlreadyRunning checks if a daemon is already running and cleans up stale PID files
+func checkDaemonAlreadyRunning(commandName, command string) error {
+	pidFile := GeneratePIDFilename(commandName, command)
+	if _, err := os.Stat(pidFile); err == nil {
+		if existingPID, err := ReadPIDFile(pidFile); err == nil && IsProcessRunning(existingPID) {
+			return fmt.Errorf("daemon process already running with PID %d (pid file: %s)", existingPID, pidFile)
+		}
+		// Clean up stale PID file
+		log.Printf("Removing stale PID file %s", pidFile)
+		_ = RemovePIDFile(pidFile)
+	}
+	return nil
+}
+
+// executeWithRetry executes a command with retry logic based on step configuration
+func executeWithRetry(step config.CommandStep, command, executionDir, commandName string) ExecutionResult {
+	maxAttempts := step.Retry + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	// Parse retry delay
+	retryDelay := time.Second
+	if step.RetryDelay != "" {
+		if parsed, err := time.ParseDuration(step.RetryDelay); err == nil {
+			retryDelay = parsed
+		} else {
+			log.Printf("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
+		}
+	}
+
+	var result ExecutionResult
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			log.Printf("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
+			time.Sleep(retryDelay)
+		}
+
+		result = ExecuteShellCommand(ExecuteOptions{
+			Command:       command,
+			Background:    step.Background,
+			CaptureOutput: step.Background,
+			WorkingDir:    executionDir,
+			Daemon:        step.Daemon,
+			CommandName:   commandName,
+		})
+
+		if result.Success {
+			break
+		}
+
+		// Check if we should retry based on exit code
+		shouldRetry := len(step.RetryOnExitCodes) == 0
+		if !shouldRetry {
+			for _, code := range step.RetryOnExitCodes {
+				if result.ReturnCode == code {
+					shouldRetry = true
+					break
+				}
+			}
+		}
+
+		if attempt >= maxAttempts || !shouldRetry {
+			if !shouldRetry {
+				log.Printf("Exit code %d not in retry list, not retrying", result.ReturnCode)
+			}
+			break
+		}
+	}
+
+	return result
+}
+
 // ExecuteCommandStep executes a single command step with all its components
 func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
 	log.Printf("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
-	// Handle directory option
-	executionDir := workingDir
-	if step.Directory != "" {
-		stepDir := step.Directory
-		if !filepath.IsAbs(stepDir) && workingDir != "" {
-			stepDir = filepath.Join(workingDir, stepDir)
-		}
-
-		// Validate directory exists and is accessible
-		if info, err := os.Stat(stepDir); err != nil {
-			if os.IsNotExist(err) {
-				errorMsg := fmt.Sprintf("Directory '%s' does not exist", stepDir)
-				log.Print(errorMsg)
-				return ExecutionResult{Success: false, Stderr: errorMsg}
-			} else {
-				errorMsg := fmt.Sprintf("Directory '%s' is not accessible: %v", stepDir, err)
-				log.Print(errorMsg)
-				return ExecutionResult{Success: false, Stderr: errorMsg}
-			}
-		} else if !info.IsDir() {
-			errorMsg := fmt.Sprintf("Path '%s' is not a directory", stepDir)
-			log.Print(errorMsg)
-			return ExecutionResult{Success: false, Stderr: errorMsg}
-		}
-
-		// Test directory accessibility
-		if _, err := os.ReadDir(stepDir); err != nil {
-			errorMsg := fmt.Sprintf("Directory '%s' is not accessible: %v", stepDir, err)
-			log.Print(errorMsg)
-			return ExecutionResult{Success: false, Stderr: errorMsg}
-		}
-
-		executionDir = stepDir
-		log.Printf("Using directory: %s", stepDir)
+	// Validate and resolve execution directory
+	executionDir, err := validateAndResolveDirectory(step.Directory, workingDir)
+	if err != nil {
+		log.Print(err.Error())
+		return ExecutionResult{Success: false, Stderr: err.Error()}
 	}
 
-	// Handle services configuration
-	var servicesStarted []string
-	servicesStartedFlag := false
-	if step.Services.Compose != nil || len(step.Services.Containers) > 0 {
-		result := HandleServicesConfiguration(step.Services)
-		if !result.Success {
-			log.Printf("Failed to handle services configuration")
-			return result
-		}
-		servicesStarted = result.ServicesStarted
-		servicesStartedFlag = true
+	// Start services if configured
+	servicesStarted, err := handleServicesStartup(step.Services)
+	if err != nil {
+		log.Print(err.Error())
+		return ExecutionResult{Success: false, Stderr: err.Error()}
 	}
 
 	// Defer cleanup if services were started and cleanup is enabled
-	if servicesStartedFlag && step.Services.Cleanup {
+	if len(servicesStarted) > 0 && step.Services.Cleanup {
 		defer func() {
 			log.Printf("Cleaning up services after command execution")
 			cleanupResult := StopServices(step.Services)
@@ -308,125 +393,56 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		}()
 	}
 
-	// Handle run commands
-	if len(step.Run) > 0 {
-		for _, baseCommand := range []string(step.Run) {
-			// Append passthrough arguments to the command
-			command := appendPassthroughArgs(baseCommand, passthroughArgs)
-			log.Printf("Executing command: %s", command)
+	// Execute run commands
+	if len(step.Run) == 0 {
+		return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
+	}
 
-			// Check if daemon instance is already running
-			if step.Daemon {
-				pidFile := GeneratePIDFilename(commandName, command)
-				if _, err := os.Stat(pidFile); err == nil {
-					if existingPID, err := ReadPIDFile(pidFile); err == nil && IsProcessRunning(existingPID) {
-						errorMsg := fmt.Sprintf("Daemon process already running with PID %d (pid file: %s)",
-							existingPID, pidFile)
-						log.Print(errorMsg)
-						return ExecutionResult{Success: false, Stderr: errorMsg}
-					} else {
-						// Clean up stale PID file
-						log.Printf("Removing stale PID file %s", pidFile)
-						_ = RemovePIDFile(pidFile)
-					}
-				}
+	for _, baseCommand := range []string(step.Run) {
+		command := appendPassthroughArgs(baseCommand, passthroughArgs)
+		log.Printf("Executing command: %s", command)
+
+		// Check if daemon already running
+		if step.Daemon {
+			if err := checkDaemonAlreadyRunning(commandName, command); err != nil {
+				log.Print(err.Error())
+				return ExecutionResult{Success: false, Stderr: err.Error()}
 			}
+		}
 
-			// Execute with retry logic
-			var result ExecutionResult
-			maxAttempts := step.Retry + 1 // retry=0 means 1 attempt, retry=3 means 4 attempts
-			if maxAttempts < 1 {
-				maxAttempts = 1
-			}
+		// Execute with retry logic
+		result := executeWithRetry(step, command, executionDir, commandName)
 
-			// Parse retry delay
-			var retryDelay time.Duration
-			if step.RetryDelay != "" {
-				var err error
-				retryDelay, err = time.ParseDuration(step.RetryDelay)
-				if err != nil {
-					log.Printf("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
-					retryDelay = time.Second
-				}
+		if !result.Success && !step.Background {
+			result.ServicesStarted = servicesStarted
+			return result
+		}
+
+		// Handle background daemon process
+		if result.PID != 0 && step.Daemon && step.Background {
+			log.Printf("Background daemon process with PID %d", result.PID)
+			pidFile := GeneratePIDFilename(commandName, command)
+			if err := CreateEnhancedPIDFile(pidFile, result.PID, commandName, command); err != nil {
+				log.Printf("Failed to create enhanced PID file: %v", err)
 			} else {
-				retryDelay = time.Second // Default 1 second delay
+				log.Printf("Created enhanced PID file %s for background daemon process", pidFile)
+				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
+					command, result.PID, pidFile))
 			}
+			result.ServicesStarted = servicesStarted
+			return result
+		}
 
-			for attempt := 1; attempt <= maxAttempts; attempt++ {
-				if attempt > 1 {
-					log.Printf("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
-					time.Sleep(retryDelay)
-				}
-
-				result = ExecuteShellCommand(ExecuteOptions{
-					Command:       command,
-					Background:    step.Background,
-					CaptureOutput: step.Background, // Capture output for background commands for PID tracking
-					WorkingDir:    executionDir,
-					Daemon:        step.Daemon,
-					CommandName:   commandName,
-				})
-
-				// Success - no need to retry
-				if result.Success {
-					break
-				}
-
-				// Check if we should retry based on exit code
-				shouldRetry := false
-				if len(step.RetryOnExitCodes) > 0 {
-					// Only retry on specific exit codes
-					for _, code := range step.RetryOnExitCodes {
-						if result.ReturnCode == code {
-							shouldRetry = true
-							break
-						}
-					}
-				} else {
-					// Retry on any failure (no exit code filter)
-					shouldRetry = true
-				}
-
-				// If this is the last attempt or we shouldn't retry, break
-				if attempt >= maxAttempts || !shouldRetry {
-					if !shouldRetry {
-						log.Printf("Exit code %d not in retry list, not retrying", result.ReturnCode)
-					}
-					break
-				}
-			}
-
-			if !result.Success && !step.Background {
-				result.ServicesStarted = servicesStarted
-				return result
-			}
-
-			if result.PID != 0 && step.Daemon && step.Background {
-				// Handle background daemon processes
-				log.Printf("Background daemon process with PID %d", result.PID)
-				pidFile := GeneratePIDFilename(commandName, command)
-				if err := CreateEnhancedPIDFile(pidFile, result.PID, commandName, command); err != nil {
-					log.Printf("Failed to create enhanced PID file: %v", err)
-				} else {
-					log.Printf("Created enhanced PID file %s for background daemon process", pidFile)
-					fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
-						command, result.PID, pidFile))
-				}
-				result.ServicesStarted = servicesStarted
-				return result
-			} else if result.PID != 0 && step.Background {
-				log.Printf("Command started with PID %d", result.PID)
-				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background", command))
-				result.ServicesStarted = servicesStarted
-				return result
-			}
+		// Handle background process
+		if result.PID != 0 && step.Background {
+			log.Printf("Command started with PID %d", result.PID)
+			fmt.Printf("%s\n", colors.Success("Running job '%s' in the background", command))
+			result.ServicesStarted = servicesStarted
+			return result
 		}
 	}
 
-	return ExecutionResult{
-		Success:         true,
-		ServicesStarted: servicesStarted,
-	}
+	return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
 }
 
 // ExecuteCommandWithSteps executes a command consisting of multiple steps
