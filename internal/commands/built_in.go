@@ -233,6 +233,14 @@ func projectTypeToString(pt config.ProjectType) string {
 		return "Node.js"
 	case config.ProjectTypeRust:
 		return "Rust"
+	case config.ProjectTypeMaven:
+		return "Java/Maven"
+	case config.ProjectTypeDotNet:
+		return ".NET"
+	case config.ProjectTypePHP:
+		return "PHP"
+	case config.ProjectTypeRuby:
+		return "Ruby"
 	default:
 		return "Unknown"
 	}

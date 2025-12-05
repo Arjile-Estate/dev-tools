@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,6 +17,10 @@ const (
 	ProjectTypePython  ProjectType = "python"
 	ProjectTypeNodeJS  ProjectType = "nodejs"
 	ProjectTypeRust    ProjectType = "rust"
+	ProjectTypeMaven   ProjectType = "maven"
+	ProjectTypeDotNet  ProjectType = "dotnet"
+	ProjectTypePHP     ProjectType = "php"
+	ProjectTypeRuby    ProjectType = "ruby"
 	ProjectTypeUnknown ProjectType = "unknown"
 )
 
@@ -123,12 +128,25 @@ func DetectProjectType(projectDir string) ProjectType {
 		{ProjectTypePython, []string{"pyproject.toml", "requirements.txt", "setup.py", "Pipfile"}},
 		{ProjectTypeNodeJS, []string{"package.json"}},
 		{ProjectTypeRust, []string{"Cargo.toml"}},
+		{ProjectTypeMaven, []string{"pom.xml"}},
+		{ProjectTypeDotNet, []string{"*.csproj", "*.sln"}},
+		{ProjectTypePHP, []string{"composer.json"}},
+		{ProjectTypeRuby, []string{"Gemfile"}},
 	}
 
 	for _, detection := range detectionPatterns {
 		for _, pattern := range detection.patterns {
-			if _, err := os.Stat(filepath.Join(projectDir, pattern)); err == nil {
-				return detection.projectType
+			// Handle glob patterns (e.g., *.csproj)
+			if strings.Contains(pattern, "*") {
+				matches, _ := filepath.Glob(filepath.Join(projectDir, pattern))
+				if len(matches) > 0 {
+					return detection.projectType
+				}
+			} else {
+				// Direct file check
+				if _, err := os.Stat(filepath.Join(projectDir, pattern)); err == nil {
+					return detection.projectType
+				}
 			}
 		}
 	}
@@ -165,6 +183,36 @@ func GetDefaultCommandsForProjectType(projectType ProjectType) *Config {
 				"lint":  {{Run: RunCommand{"cargo clippy"}}},
 				"dev":   {{Run: RunCommand{"cargo run"}}},
 				"build": {{Run: RunCommand{"cargo build"}}},
+			},
+		},
+		ProjectTypeMaven: {
+			Commands: map[string][]CommandStep{
+				"test":  {{Run: RunCommand{"mvn test"}}},
+				"lint":  {{Run: RunCommand{"mvn checkstyle:check"}}},
+				"build": {{Run: RunCommand{"mvn package"}}},
+				"clean": {{Run: RunCommand{"mvn clean"}}},
+			},
+		},
+		ProjectTypeDotNet: {
+			Commands: map[string][]CommandStep{
+				"test":    {{Run: RunCommand{"dotnet test"}}},
+				"build":   {{Run: RunCommand{"dotnet build"}}},
+				"dev":     {{Run: RunCommand{"dotnet run"}}},
+				"restore": {{Run: RunCommand{"dotnet restore"}}},
+			},
+		},
+		ProjectTypePHP: {
+			Commands: map[string][]CommandStep{
+				"test":    {{Run: RunCommand{"composer test"}}},
+				"lint":    {{Run: RunCommand{"composer phpcs"}}},
+				"install": {{Run: RunCommand{"composer install"}}},
+			},
+		},
+		ProjectTypeRuby: {
+			Commands: map[string][]CommandStep{
+				"test":    {{Run: RunCommand{"bundle exec rspec"}}},
+				"lint":    {{Run: RunCommand{"bundle exec rubocop"}}},
+				"install": {{Run: RunCommand{"bundle install"}}},
 			},
 		},
 		ProjectTypeUnknown: {
