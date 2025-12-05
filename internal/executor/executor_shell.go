@@ -332,14 +332,69 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 				}
 			}
 
-			result := ExecuteShellCommand(ExecuteOptions{
-				Command:       command,
-				Background:    step.Background,
-				CaptureOutput: step.Background, // Capture output for background commands for PID tracking
-				WorkingDir:    executionDir,
-				Daemon:        step.Daemon,
-				CommandName:   commandName,
-			})
+			// Execute with retry logic
+			var result ExecutionResult
+			maxAttempts := step.Retry + 1 // retry=0 means 1 attempt, retry=3 means 4 attempts
+			if maxAttempts < 1 {
+				maxAttempts = 1
+			}
+
+			// Parse retry delay
+			var retryDelay time.Duration
+			if step.RetryDelay != "" {
+				var err error
+				retryDelay, err = time.ParseDuration(step.RetryDelay)
+				if err != nil {
+					log.Printf("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
+					retryDelay = time.Second
+				}
+			} else {
+				retryDelay = time.Second // Default 1 second delay
+			}
+
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				if attempt > 1 {
+					log.Printf("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
+					time.Sleep(retryDelay)
+				}
+
+				result = ExecuteShellCommand(ExecuteOptions{
+					Command:       command,
+					Background:    step.Background,
+					CaptureOutput: step.Background, // Capture output for background commands for PID tracking
+					WorkingDir:    executionDir,
+					Daemon:        step.Daemon,
+					CommandName:   commandName,
+				})
+
+				// Success - no need to retry
+				if result.Success {
+					break
+				}
+
+				// Check if we should retry based on exit code
+				shouldRetry := false
+				if len(step.RetryOnExitCodes) > 0 {
+					// Only retry on specific exit codes
+					for _, code := range step.RetryOnExitCodes {
+						if result.ReturnCode == code {
+							shouldRetry = true
+							break
+						}
+					}
+				} else {
+					// Retry on any failure (no exit code filter)
+					shouldRetry = true
+				}
+
+				// If this is the last attempt or we shouldn't retry, break
+				if attempt >= maxAttempts || !shouldRetry {
+					if !shouldRetry {
+						log.Printf("Exit code %d not in retry list, not retrying", result.ReturnCode)
+					}
+					break
+				}
+			}
 
 			if !result.Success && !step.Background {
 				result.ServicesStarted = servicesStarted
