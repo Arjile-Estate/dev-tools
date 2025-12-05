@@ -141,7 +141,7 @@ func TestHandleStatusCommand(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		err := HandleStatusCommand(cmd, tempDir)
+		err := HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()
@@ -183,13 +183,17 @@ func TestHandleStatusCommand(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		err = HandleStatusCommand(cmd, tempDir)
+		err = HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()
 
+		// Check for project information header
+		assert.Contains(t, output, "PROJECT INFORMATION")
+		assert.Contains(t, output, "Project Type")
+
 		// Check for daemon status header
-		assert.Contains(t, output, "DAEMON STATUS")
+		assert.Contains(t, output, "DAEMON PROCESSES")
 		assert.Contains(t, output, "COMMAND NAME")
 		assert.Contains(t, output, "STATUS")
 		assert.Contains(t, output, "PID")
@@ -199,7 +203,11 @@ func TestHandleStatusCommand(t *testing.T) {
 		assert.Contains(t, output, "stopped-daemon")
 		assert.Contains(t, output, "Running") // For running daemon
 		assert.Contains(t, output, "Stopped") // For stopped daemon
-		assert.Contains(t, output, "Total: 2 daemon process(es)")
+		assert.Contains(t, output, "Total:")
+		assert.Contains(t, output, "2 daemon(s)")
+
+		// Check for Docker services section
+		assert.Contains(t, output, "DOCKER SERVICES")
 	})
 
 	t.Run("handle daemon with empty command name", func(t *testing.T) {
@@ -223,7 +231,7 @@ func TestHandleStatusCommand(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		err = HandleStatusCommand(cmd, tempDir)
+		err = HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()
@@ -251,7 +259,7 @@ func TestHandleStatusCommand(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		err = HandleStatusCommand(cmd, tempDir)
+		err = HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()
@@ -279,7 +287,7 @@ func TestHandleStatusCommand(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		err = HandleStatusCommand(cmd, tempDir)
+		err = HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()
@@ -290,7 +298,7 @@ func TestHandleStatusCommand(t *testing.T) {
 		tempDir := t.TempDir()
 
 		// Create PID file with very long command
-		longCommand := "this is a very long command that exceeds the 40 character limit and should be truncated"
+		longCommand := "this is a very long command that exceeds the 38 character limit and should be truncated"
 		pidFile := filepath.Join(tempDir, ".test.pid")
 		pidInfo := executor.PIDFileInfo{
 			PID:          os.Getpid(),
@@ -308,11 +316,11 @@ func TestHandleStatusCommand(t *testing.T) {
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		err = HandleStatusCommand(cmd, tempDir)
+		err = HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()
-		assert.Contains(t, output, "this is a very long command that exce...") // Should be truncated with "..."
+		assert.Contains(t, output, "this is a very long command that ex...") // Should be truncated with "..."
 	})
 }
 

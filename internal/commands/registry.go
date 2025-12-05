@@ -31,9 +31,9 @@ func initBuiltInCommandRegistry() {
 			},
 			{
 				Name:        "status",
-				Description: "Show daemon process status",
+				Description: "Show comprehensive system status",
 				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
-					return HandleStatusCommand(cmd, projectDir)
+					return HandleStatusCommand(cmd, args, projectDir)
 				},
 			},
 			{
