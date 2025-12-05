@@ -164,43 +164,20 @@ func StartDockerService(service interface{}) ExecutionResult {
 		}
 	}
 
-	// Check if container already exists
-	checkCmd := fmt.Sprintf("docker ps -a --format '{{.Names}}' --filter name=^%s$", containerName)
-	log.Printf("Checking if container exists: %s", checkCmd)
-	checkResult := ExecuteShellCommand(ExecuteOptions{
-		Command:       checkCmd,
-		CaptureOutput: true,
-	})
+	// Check container status and handle accordingly
+	exists, running := getContainerStatus(containerName)
 
-	if checkResult.Success && strings.Contains(checkResult.Stdout, containerName) {
-		// Container exists, check if it's running
-		statusCmd := fmt.Sprintf("docker ps --format '{{.Names}}' --filter name=^%s$", containerName)
-		log.Printf("Checking container status: %s", statusCmd)
-		statusResult := ExecuteShellCommand(ExecuteOptions{
-			Command:       statusCmd,
-			CaptureOutput: true,
-		})
-
-		if statusResult.Success && strings.Contains(statusResult.Stdout, containerName) {
+	if exists {
+		if running {
 			log.Printf("Container %s is already running", containerName)
 			return ExecutionResult{Success: true, Stdout: "Container already running"}
-		} else {
-			// Container exists but is stopped, start it
-			startCmd := fmt.Sprintf("docker start %s", containerName)
-			log.Printf("Starting existing container: %s", startCmd)
-			return ExecuteShellCommand(ExecuteOptions{
-				Command:       startCmd,
-				CaptureOutput: true,
-			})
 		}
+		// Container exists but is stopped, start it
+		return startExistingContainer(containerName)
 	}
 
 	// Container doesn't exist, create and start it
-	log.Printf("Creating new container: %s", runCmd)
-	return ExecuteShellCommand(ExecuteOptions{
-		Command:       runCmd,
-		CaptureOutput: true,
-	})
+	return createAndStartContainer(runCmd)
 }
 
 // StopDockerService stops a Docker service container
@@ -215,15 +192,8 @@ func StopDockerService(service interface{}) ExecutionResult {
 		}
 	}
 
-	// Check if container exists and is running
-	checkCmd := fmt.Sprintf("docker ps --format '{{.Names}}' --filter name=^%s$", containerName)
-	log.Printf("Checking if container is running: %s", checkCmd)
-	checkResult := ExecuteShellCommand(ExecuteOptions{
-		Command:       checkCmd,
-		CaptureOutput: true,
-	})
-
-	if !checkResult.Success || !strings.Contains(checkResult.Stdout, containerName) {
+	// Check if container is running
+	if !containerIsRunning(containerName) {
 		log.Printf("Container %s is not running", containerName)
 		return ExecutionResult{Success: true, Stdout: "Container not running"}
 	}
