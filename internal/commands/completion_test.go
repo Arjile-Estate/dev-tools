@@ -353,7 +353,7 @@ func TestGetAllAvailableCommands(t *testing.T) {
 				Commands: map[string][]config.CommandStep{},
 			},
 			expectedCommands: []string{
-				"cleanup-all", "cleanup-pids", "completion", "logs", "restart", "status", "stop", "version",
+				"cleanup-all", "cleanup-pids", "completion", "logs", "onboard", "restart", "status", "stop", "version",
 			},
 		},
 		{
@@ -366,7 +366,7 @@ func TestGetAllAvailableCommands(t *testing.T) {
 				},
 			},
 			expectedCommands: []string{
-				"build", "cleanup-all", "cleanup-pids", "completion", "deploy", "logs", "restart", "status", "stop", "test", "version",
+				"build", "cleanup-all", "cleanup-pids", "completion", "deploy", "logs", "onboard", "restart", "status", "stop", "test", "version",
 			},
 		},
 	}

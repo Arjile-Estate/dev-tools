@@ -73,6 +73,13 @@ func initBuiltInCommandRegistry() {
 				},
 			},
 			{
+				Name:        "onboard",
+				Description: "Generate AI assistant documentation",
+				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
+					return HandleOnboardCommand(cmd, args, projectDir)
+				},
+			},
+			{
 				Name:        "completion",
 				Description: "Generate shell completion script",
 				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
