@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"dev-tools/internal/colors"
 	"dev-tools/internal/config"
@@ -282,18 +283,20 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 	}
 
 	// Handle services configuration
-	servicesStarted := false
+	var servicesStarted []string
+	servicesStartedFlag := false
 	if step.Services.Compose != nil || len(step.Services.Containers) > 0 {
 		result := HandleServicesConfiguration(step.Services)
 		if !result.Success {
 			log.Printf("Failed to handle services configuration")
 			return result
 		}
-		servicesStarted = true
+		servicesStarted = result.ServicesStarted
+		servicesStartedFlag = true
 	}
 
 	// Defer cleanup if services were started and cleanup is enabled
-	if servicesStarted && step.Services.Cleanup {
+	if servicesStartedFlag && step.Services.Cleanup {
 		defer func() {
 			log.Printf("Cleaning up services after command execution")
 			cleanupResult := StopServices(step.Services)
@@ -339,6 +342,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			})
 
 			if !result.Success && !step.Background {
+				result.ServicesStarted = servicesStarted
 				return result
 			}
 
@@ -353,33 +357,66 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 					fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
 						command, result.PID, pidFile))
 				}
+				result.ServicesStarted = servicesStarted
 				return result
 			} else if result.PID != 0 && step.Background {
 				log.Printf("Command started with PID %d", result.PID)
 				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background", command))
+				result.ServicesStarted = servicesStarted
 				return result
 			}
 		}
 	}
 
-	return ExecutionResult{Success: true}
+	return ExecutionResult{
+		Success:         true,
+		ServicesStarted: servicesStarted,
+	}
 }
 
 // ExecuteCommandWithSteps executes a command consisting of multiple steps
 func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string, passthroughArgs []string) ExecutionResult {
+	startTime := time.Now()
 	log.Printf("Executing command '%s' with %d steps and passthrough args: %v", commandName, len(steps), passthroughArgs)
+
+	var servicesStarted []string
+	var finalResult ExecutionResult
 
 	for i, step := range steps {
 		log.Printf("Executing step %d/%d", i+1, len(steps))
 		result := ExecuteCommandStep(step, commandName, workingDir, passthroughArgs)
+
+		// Track services started in this step
+		if len(result.ServicesStarted) > 0 {
+			servicesStarted = append(servicesStarted, result.ServicesStarted...)
+		}
+
 		if !result.Success {
 			log.Printf("Step %d failed, aborting command execution", i+1)
+			result.CommandName = commandName
+			result.DurationMs = time.Since(startTime).Milliseconds()
+			result.ServicesStarted = servicesStarted
+			result.StartTime = startTime
 			return result
 		}
+
+		// Keep track of the final result (PID, stdout, etc from last step)
+		finalResult = result
 	}
 
-	log.Printf("Command '%s' completed successfully", commandName)
-	return ExecutionResult{Success: true}
+	duration := time.Since(startTime).Milliseconds()
+	log.Printf("Command '%s' completed successfully in %dms", commandName, duration)
+
+	return ExecutionResult{
+		Success:         true,
+		CommandName:     commandName,
+		DurationMs:      duration,
+		ServicesStarted: servicesStarted,
+		StartTime:       startTime,
+		Stdout:          finalResult.Stdout,
+		Stderr:          finalResult.Stderr,
+		PID:             finalResult.PID,
+	}
 }
 
 // getContainerName extracts container name from service definition

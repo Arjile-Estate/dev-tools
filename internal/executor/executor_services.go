@@ -22,11 +22,18 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 	log.Printf("Handling services configuration (compose: %v, containers: %d)",
 		services.Compose != nil, len(services.Containers))
 
+	var servicesStarted []string
+
 	// Handle Docker Compose services
 	if services.Compose != nil {
 		result := StartDockerCompose(*services.Compose)
 		if !result.Success {
 			return result
+		}
+
+		// Track compose services
+		if services.Compose.File != "" {
+			servicesStarted = append(servicesStarted, "compose:"+services.Compose.File)
 		}
 
 		// Wait for health checks if enabled
@@ -44,6 +51,12 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 			return result
 		}
 
+		// Track the container service
+		containerName, err := getContainerName(container)
+		if err == nil {
+			servicesStarted = append(servicesStarted, containerName)
+		}
+
 		// Wait for health checks if enabled
 		if services.WaitForHealth {
 			healthResult := WaitForServiceHealth(container, services.Timeout)
@@ -59,7 +72,10 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 		log.Printf("Cleanup enabled for services - will be cleaned up after command execution")
 	}
 
-	return ExecutionResult{Success: true}
+	return ExecutionResult{
+		Success:         true,
+		ServicesStarted: servicesStarted,
+	}
 }
 
 // getDockerComposeCommand determines which docker compose command to use

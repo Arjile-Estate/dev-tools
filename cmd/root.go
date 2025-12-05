@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +20,7 @@ var (
 	verbose      bool
 	projectDir   string
 	noColor      bool
+	format       string
 	configLoader config.ConfigLoader
 	exec         executor.Executor
 )
@@ -44,6 +46,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging to stdout")
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
+	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
 
 	rootCmd.Version = "0.16.0"
 
@@ -59,6 +62,7 @@ Usage:
   %s [flags] [command]
 
 Flags:
+      --format string        Output format: text or json (default "text")
   -h, --help                 help for dev-tools
       --no-color             Disable colored output
   -p, --project-dir string   Project directory to run commands in (default ".")
@@ -156,6 +160,15 @@ func extractDevToolsFlags(args []string) ([]string, map[string]string) {
 			} else if strings.HasPrefix(arg, "--project-dir=") {
 				flags["project-dir"] = strings.TrimPrefix(arg, "--project-dir=")
 				continue // Don't add to filtered
+			} else if arg == "--format" {
+				if i+1 < len(args) {
+					flags["format"] = args[i+1]
+					i++      // Skip the next arg (the value)
+					continue // Don't add to filtered
+				}
+			} else if strings.HasPrefix(arg, "--format=") {
+				flags["format"] = strings.TrimPrefix(arg, "--format=")
+				continue // Don't add to filtered
 			}
 		}
 
@@ -193,6 +206,39 @@ func getBuiltInCommands(projectDir string, cmdVersion string) map[string]Command
 	return builtInMap
 }
 
+// formatResultAsJSON converts an ExecutionResult to JSON output
+func formatResultAsJSON(result executor.ExecutionResult) (string, error) {
+	output := map[string]interface{}{
+		"command":          result.CommandName,
+		"success":          result.Success,
+		"return_code":      result.ReturnCode,
+		"duration_ms":      result.DurationMs,
+		"services_started": result.ServicesStarted,
+	}
+
+	// Only include stdout if not empty
+	if result.Stdout != "" {
+		output["stdout"] = result.Stdout
+	}
+
+	// Only include stderr if not empty
+	if result.Stderr != "" {
+		output["stderr"] = result.Stderr
+	}
+
+	// Only include PID if present (for daemon commands)
+	if result.PID > 0 {
+		output["daemon_pid"] = result.PID
+	}
+
+	jsonBytes, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonBytes), nil
+}
+
 func runCommand(cmd *cobra.Command, args []string) error {
 	// With DisableFlagParsing=true, we need to manually extract dev-tools flags
 	// Dev-tools flags must come BEFORE the command name
@@ -218,6 +264,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 	if v, ok := devToolsFlags["project-dir"]; ok {
 		projectDir = v
+	}
+	if v, ok := devToolsFlags["format"]; ok {
+		format = v
 	}
 
 	// Re-initialize colors and logging with the parsed flags
@@ -278,10 +327,19 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		result = executor.ExecuteCommandWithSteps(commandName, steps, projectDir, parsedArgs.PassthroughArgs)
 	}
 
-	// For most commands, we want to show output and return the exit code
-	// rather than treating non-zero exit codes as errors
-	if result.Stdout != "" {
-		_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+	// Output based on format
+	if format == "json" {
+		// JSON output mode
+		jsonOutput, err := formatResultAsJSON(result)
+		if err != nil {
+			return fmt.Errorf("failed to format JSON output: %w", err)
+		}
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), jsonOutput)
+	} else {
+		// Text output mode (default)
+		if result.Stdout != "" {
+			_, _ = fmt.Fprint(cmd.OutOrStdout(), result.Stdout)
+		}
 	}
 
 	if !result.Success {
