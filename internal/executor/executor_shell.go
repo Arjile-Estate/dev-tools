@@ -205,18 +205,40 @@ func appendPassthroughArgs(baseCommand string, passthroughArgs []string) string 
 		return baseCommand
 	}
 
-	// Safely quote and append arguments
+	// Safely quote and append arguments using POSIX shell escaping
 	var quotedArgs []string
 	for _, arg := range passthroughArgs {
-		// Simple shell escaping - handle spaces and quotes
-		if strings.Contains(arg, " ") || strings.Contains(arg, "'") || strings.Contains(arg, "\"") {
-			quotedArgs = append(quotedArgs, fmt.Sprintf("'%s'", strings.ReplaceAll(arg, "'", "'\\''")))
-		} else {
-			quotedArgs = append(quotedArgs, arg)
-		}
+		quotedArgs = append(quotedArgs, shellEscape(arg))
 	}
 
 	return fmt.Sprintf("%s %s", baseCommand, strings.Join(quotedArgs, " "))
+}
+
+// shellEscape escapes a string for safe use as a shell argument using POSIX shell quoting rules.
+// It wraps the argument in single quotes and escapes any single quotes within the string.
+// Single quotes prevent all shell expansions: variables ($), command substitution (`), etc.
+func shellEscape(arg string) string {
+	// Special characters that require quoting
+	specialChars := " \t\n$`!&|;<>()[]{}*?\\\"'"
+
+	// Check if the argument needs quoting
+	needsQuoting := false
+	for _, char := range specialChars {
+		if strings.ContainsRune(arg, char) {
+			needsQuoting = true
+			break
+		}
+	}
+
+	// If no special characters, return as-is
+	if !needsQuoting {
+		return arg
+	}
+
+	// Use single quotes and escape any embedded single quotes
+	// The technique: replace ' with '\'' (end quote, escaped quote, start quote)
+	escaped := strings.ReplaceAll(arg, "'", "'\\''")
+	return fmt.Sprintf("'%s'", escaped)
 }
 
 // ExecuteCommandStep executes a single command step with all its components

@@ -1869,6 +1869,54 @@ func TestAppendPassthroughArgs(t *testing.T) {
 			passthroughArgs: []string{},
 			expected:        "cargo build",
 		},
+		{
+			name:            "args with dollar sign (variable expansion)",
+			baseCommand:     "echo test",
+			passthroughArgs: []string{"$HOME"},
+			expected:        "echo test '$HOME'",
+		},
+		{
+			name:            "args with backticks (command substitution)",
+			baseCommand:     "echo test",
+			passthroughArgs: []string{"`whoami`"},
+			expected:        "echo test '`whoami`'",
+		},
+		{
+			name:            "args with semicolon (command separator)",
+			baseCommand:     "echo test",
+			passthroughArgs: []string{"arg;rm -rf /"},
+			expected:        "echo test 'arg;rm -rf /'",
+		},
+		{
+			name:            "args with pipe (command chaining)",
+			baseCommand:     "cat file",
+			passthroughArgs: []string{"data|malicious"},
+			expected:        "cat file 'data|malicious'",
+		},
+		{
+			name:            "args with ampersand (background process)",
+			baseCommand:     "sleep 1",
+			passthroughArgs: []string{"arg&malicious"},
+			expected:        "sleep 1 'arg&malicious'",
+		},
+		{
+			name:            "args with redirect operators",
+			baseCommand:     "echo test",
+			passthroughArgs: []string{">evil.txt"},
+			expected:        "echo test '>evil.txt'",
+		},
+		{
+			name:            "args with newline",
+			baseCommand:     "echo test",
+			passthroughArgs: []string{"line1\nrm -rf /"},
+			expected:        "echo test 'line1\nrm -rf /'",
+		},
+		{
+			name:            "args with backslash",
+			baseCommand:     "echo test",
+			passthroughArgs: []string{"test\\escape"},
+			expected:        "echo test 'test\\escape'",
+		},
 	}
 
 	for _, tt := range tests {
