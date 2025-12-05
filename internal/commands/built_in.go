@@ -320,15 +320,16 @@ func HandleStopCommand(cmd *cobra.Command, args []string, projectDir string) err
 func HandleOnboardCommand(cmd *cobra.Command, args []string, projectDir string) error {
 	log.Print("Generating onboarding documentation for AI assistants")
 
-	// Determine output file
-	outputFile := "CLAUDE.md"
-	if len(args) >= 2 {
-		outputFile = args[1]
-	}
-
-	// Make path absolute if relative
-	if !filepath.IsAbs(outputFile) {
-		outputFile = filepath.Join(projectDir, outputFile)
+	// Check for --output-file flag
+	var outputFile string
+	for i, arg := range args {
+		if arg == "--output-file" && i+1 < len(args) {
+			outputFile = args[i+1]
+			break
+		} else if strings.HasPrefix(arg, "--output-file=") {
+			outputFile = strings.TrimPrefix(arg, "--output-file=")
+			break
+		}
 	}
 
 	// Detect project type
@@ -356,16 +357,26 @@ func HandleOnboardCommand(cmd *cobra.Command, args []string, projectDir string) 
 		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to generate documentation: %v", err)))
 	}
 
-	// Write to file
-	err = os.WriteFile(outputFile, []byte(doc), 0644)
-	if err != nil {
-		return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to write to %s: %v", outputFile, err)))
-	}
+	// Output to file if --output-file specified, otherwise stdout
+	if outputFile != "" {
+		// Make path absolute if relative
+		if !filepath.IsAbs(outputFile) {
+			outputFile = filepath.Join(projectDir, outputFile)
+		}
 
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Generated AI assistant documentation at %s", outputFile)))
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("Project type: %s", projectTypeStr)))
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("Commands documented: %d built-in, %d custom",
-		len(builtInCommands), len(customCommands))))
+		err = os.WriteFile(outputFile, []byte(doc), 0644)
+		if err != nil {
+			return fmt.Errorf("%s", colors.Error(fmt.Sprintf("failed to write to %s: %v", outputFile, err)))
+		}
+
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Success(fmt.Sprintf("Generated AI assistant documentation at %s", outputFile)))
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("Project type: %s", projectTypeStr)))
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), colors.Info(fmt.Sprintf("Commands documented: %d built-in, %d custom",
+			len(builtInCommands), len(customCommands))))
+	} else {
+		// Output to stdout
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), doc)
+	}
 
 	return nil
 }
