@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -21,7 +22,7 @@ func containerExists(containerName string) bool {
 	args := buildDockerPsArgs(containerName, true)
 	log.Printf("Checking if container exists: docker %v", args)
 
-	result := ExecuteCommandDirect(DirectExecuteOptions{
+	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
 		Args:          args,
 		CaptureOutput: true,
@@ -35,7 +36,7 @@ func containerIsRunning(containerName string) bool {
 	args := buildDockerPsArgs(containerName, false)
 	log.Printf("Checking container status: docker %v", args)
 
-	result := ExecuteCommandDirect(DirectExecuteOptions{
+	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
 		Args:          args,
 		CaptureOutput: true,
@@ -56,7 +57,7 @@ func getContainerStatus(containerName string) (exists bool, running bool) {
 // startExistingContainer starts a stopped container using direct execution (no shell)
 func startExistingContainer(containerName string) ExecutionResult {
 	log.Printf("Starting existing container: docker start %s", containerName)
-	return ExecuteCommandDirect(DirectExecuteOptions{
+	return ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
 		Args:          []string{"start", containerName},
 		CaptureOutput: true,
@@ -67,7 +68,7 @@ func startExistingContainer(containerName string) ExecutionResult {
 // Accepts command name and arguments separately for security
 func createAndStartContainer(command string, args []string) ExecutionResult {
 	log.Printf("Creating new container: %s %v", command, args)
-	return ExecuteCommandDirect(DirectExecuteOptions{
+	return ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       command,
 		Args:          args,
 		CaptureOutput: true,

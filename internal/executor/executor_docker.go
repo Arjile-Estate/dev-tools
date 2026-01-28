@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -214,7 +215,7 @@ func StopDockerService(service interface{}) ExecutionResult {
 
 	// Stop the container using direct execution (no shell)
 	log.Printf("Stopping container: docker stop %s", containerName)
-	stopResult := ExecuteCommandDirect(DirectExecuteOptions{
+	stopResult := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
 		Args:          []string{"stop", containerName},
 		CaptureOutput: true,
@@ -245,7 +246,7 @@ func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
 	healthCmd := fmt.Sprintf("timeout %d bash -c 'while [ \"$(docker inspect --format=\"{{.State.Health.Status}}\" %s 2>/dev/null || echo \"no-health\")\" != \"healthy\" ]; do sleep 1; done'", timeout, containerName)
 	log.Printf("Running health check: %s", healthCmd)
 
-	result := ExecuteShellCommand(ExecuteOptions{
+	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 		Command:       healthCmd,
 		CaptureOutput: true,
 	})

@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -33,9 +34,9 @@ type DirectExecuteOptions struct {
 
 // ExecuteCommandDirect executes a command directly without shell interpretation
 // This is safer than ExecuteShellCommand for commands with user-provided arguments
-// as it prevents shell injection attacks
-func ExecuteCommandDirect(opts DirectExecuteOptions) ExecutionResult {
-	cmd := exec.Command(opts.Command, opts.Args...)
+// as it prevents shell injection attacks. Context allows for cancellation and timeouts.
+func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) ExecutionResult {
+	cmd := exec.CommandContext(ctx, opts.Command, opts.Args...)
 
 	if opts.WorkingDir != "" {
 		cmd.Dir = opts.WorkingDir
@@ -48,6 +49,22 @@ func ExecuteCommandDirect(opts DirectExecuteOptions) ExecutionResult {
 		stderr := ""
 
 		if err != nil {
+			// Check if context was cancelled
+			if ctx.Err() == context.Canceled {
+				return ExecutionResult{
+					Success:    false,
+					Stderr:     "command cancelled",
+					ReturnCode: -1,
+				}
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				return ExecutionResult{
+					Success:    false,
+					Stderr:     "command timeout exceeded",
+					ReturnCode: -1,
+				}
+			}
+
 			if exitError, ok := err.(*exec.ExitError); ok {
 				returnCode = exitError.ExitCode()
 			} else {
@@ -84,6 +101,22 @@ func ExecuteCommandDirect(opts DirectExecuteOptions) ExecutionResult {
 	returnCode := 0
 
 	if waitError != nil {
+		// Check if context was cancelled
+		if ctx.Err() == context.Canceled {
+			return ExecutionResult{
+				Success:    false,
+				Stderr:     "command cancelled",
+				ReturnCode: -1,
+			}
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return ExecutionResult{
+				Success:    false,
+				Stderr:     "command timeout exceeded",
+				ReturnCode: -1,
+			}
+		}
+
 		if exitError, ok := waitError.(*exec.ExitError); ok {
 			returnCode = exitError.ExitCode()
 		} else {
@@ -101,8 +134,9 @@ func ExecuteCommandDirect(opts DirectExecuteOptions) ExecutionResult {
 }
 
 // ExecuteShellCommand executes a shell command with the given options
-func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
-	cmd := exec.Command("sh", "-c", opts.Command)
+// Context allows for cancellation and timeouts
+func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResult {
+	cmd := exec.CommandContext(ctx, "sh", "-c", opts.Command)
 
 	if opts.WorkingDir != "" {
 		cmd.Dir = opts.WorkingDir
@@ -136,6 +170,22 @@ func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 		stderr := ""
 
 		if err != nil {
+			// Check if context was cancelled
+			if ctx.Err() == context.Canceled {
+				return ExecutionResult{
+					Success:    false,
+					Stderr:     "command cancelled",
+					ReturnCode: -1,
+				}
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				return ExecutionResult{
+					Success:    false,
+					Stderr:     "command timeout exceeded",
+					ReturnCode: -1,
+				}
+			}
+
 			if exitError, ok := err.(*exec.ExitError); ok {
 				returnCode = exitError.ExitCode()
 			} else {
@@ -185,6 +235,28 @@ func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 		returnCode := 0
 
 		if waitErr != nil {
+			// Check if context was cancelled
+			if ctx.Err() == context.Canceled {
+				// Clean up PID file
+				_ = RemovePIDFile(pidFile)
+				return ExecutionResult{
+					Success:    false,
+					Stderr:     "command cancelled",
+					ReturnCode: -1,
+					PID:        cmd.Process.Pid,
+				}
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				// Clean up PID file
+				_ = RemovePIDFile(pidFile)
+				return ExecutionResult{
+					Success:    false,
+					Stderr:     "command timeout exceeded",
+					ReturnCode: -1,
+					PID:        cmd.Process.Pid,
+				}
+			}
+
 			if exitError, ok := waitErr.(*exec.ExitError); ok {
 				returnCode = exitError.ExitCode()
 			} else {
@@ -230,6 +302,22 @@ func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 	returnCode := 0
 
 	if waitError != nil {
+		// Check if context was cancelled
+		if ctx.Err() == context.Canceled {
+			return ExecutionResult{
+				Success:    false,
+				Stderr:     "command cancelled",
+				ReturnCode: -1,
+			}
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return ExecutionResult{
+				Success:    false,
+				Stderr:     "command timeout exceeded",
+				ReturnCode: -1,
+			}
+		}
+
 		if exitError, ok := waitError.(*exec.ExitError); ok {
 			returnCode = exitError.ExitCode()
 		} else {
@@ -369,7 +457,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		}
 
 		// Execute with retry logic
-		result := executeWithRetry(step, command, executionDir, commandName)
+		result := executeWithRetry(context.Background(), step, command, executionDir, commandName)
 
 		if !result.Success && !step.Background {
 			result.ServicesStarted = servicesStarted

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,7 +26,7 @@ func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 		return fmt.Errorf("no log file found at %s", logFile)
 	}
 
-	result := executor.ExecuteShellCommand(executor.ExecuteOptions{
+	result := executor.ExecuteShellCommand(context.Background(), executor.ExecuteOptions{
 		Command:       fmt.Sprintf("tail -n 50 %s", logFile),
 		CaptureOutput: true,
 	})
@@ -230,7 +231,7 @@ type DockerService struct {
 
 func getRunningDockerContainers() []DockerService {
 	// Check if Docker is available
-	checkCmd := executor.ExecuteShellCommand(executor.ExecuteOptions{
+	checkCmd := executor.ExecuteShellCommand(context.Background(), executor.ExecuteOptions{
 		Command:       "docker ps --version",
 		CaptureOutput: true,
 	})
@@ -239,7 +240,7 @@ func getRunningDockerContainers() []DockerService {
 	}
 
 	// Get running containers
-	psCmd := executor.ExecuteShellCommand(executor.ExecuteOptions{
+	psCmd := executor.ExecuteShellCommand(context.Background(), executor.ExecuteOptions{
 		Command:       "docker ps --format '{{.Names}}|{{.Status}}|{{.Image}}|{{.Ports}}'",
 		CaptureOutput: true,
 	})

@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -81,7 +82,7 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 // getDockerComposeCommand determines which docker compose command to use
 func getDockerComposeCommand() string {
 	checkNewCmd := DockerComposeV2 + " version"
-	checkResult := ExecuteShellCommand(ExecuteOptions{
+	checkResult := ExecuteShellCommand(context.Background(), ExecuteOptions{
 		Command:       checkNewCmd,
 		CaptureOutput: true,
 	})
@@ -123,7 +124,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	log.Printf("Running compose command: %s %v", composeCmd, args)
 
 	// Use direct execution to avoid shell injection vulnerabilities
-	result := ExecuteCommandDirect(DirectExecuteOptions{
+	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       composeCmd,
 		Args:          args,
 		CaptureOutput: true,
@@ -205,7 +206,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	log.Printf("Running compose down command: %s %v", composeCmd, args)
 
 	// Use direct execution to avoid shell injection vulnerabilities
-	result := ExecuteCommandDirect(DirectExecuteOptions{
+	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       composeCmd,
 		Args:          args,
 		CaptureOutput: true,

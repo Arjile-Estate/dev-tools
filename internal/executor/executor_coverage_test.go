@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +15,7 @@ import (
 // TestWaitForProcessWithSignalHandling tests signal handling during process execution
 func TestWaitForProcessWithSignalHandling(t *testing.T) {
 	t.Run("process completes successfully", func(t *testing.T) {
-		result := ExecuteShellCommand(ExecuteOptions{
+		result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 			Command:       "echo 'test'",
 			CaptureOutput: false,
 		})
@@ -24,7 +25,7 @@ func TestWaitForProcessWithSignalHandling(t *testing.T) {
 	})
 
 	t.Run("process fails with non-zero exit code", func(t *testing.T) {
-		result := ExecuteShellCommand(ExecuteOptions{
+		result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 			Command:       "exit 42",
 			CaptureOutput: false,
 		})
@@ -34,7 +35,7 @@ func TestWaitForProcessWithSignalHandling(t *testing.T) {
 	})
 
 	t.Run("long-running process completes", func(t *testing.T) {
-		result := ExecuteShellCommand(ExecuteOptions{
+		result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 			Command:       "sleep 0.1",
 			CaptureOutput: false,
 		})

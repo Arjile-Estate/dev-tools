@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -73,7 +74,7 @@ func TestExecuteShellCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteShellCommand(ExecuteOptions{
+			result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 				Command:       tt.command,
 				Background:    tt.background,
 				CaptureOutput: tt.captureOutput,
@@ -127,7 +128,7 @@ func TestExecuteShellCommandWithWorkingDirectory(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			result := ExecuteShellCommand(ExecuteOptions{
+			result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 				Command:       tt.command,
 				CaptureOutput: true,
 				WorkingDir:    tmpDir,
@@ -416,7 +417,7 @@ func TestExecuteDaemonCommand(t *testing.T) {
 		require.NoError(t, os.Chdir(oldDir))
 	}()
 
-	result := ExecuteShellCommand(ExecuteOptions{
+	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 		Command:     "sleep 0.1",
 		Background:  false,
 		Daemon:      true,
@@ -1232,7 +1233,7 @@ func TestExecuteShellCommand_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteShellCommand(tt.opts)
+			result := ExecuteShellCommand(context.Background(), tt.opts)
 
 			if tt.expectError {
 				assert.False(t, result.Success)

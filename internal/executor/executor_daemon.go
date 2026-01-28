@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
@@ -245,7 +246,7 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 		return fmt.Errorf("cannot restart daemon %s: no command information available (legacy PID file)", daemon.CommandName)
 	}
 
-	result := ExecuteShellCommand(ExecuteOptions{
+	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 		Command:     daemon.Command,
 		Background:  true,
 		Daemon:      true,
