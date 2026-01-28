@@ -64,7 +64,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
 	rootCmd.PersistentFlags().BoolVarP(&watch, "watch", "w", false, "Watch mode: re-run command on file changes")
 
-	rootCmd.Version = "0.28.0"
+	rootCmd.Version = "0.29.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {

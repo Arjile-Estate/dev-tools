@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 // ANSI color codes
@@ -16,34 +17,44 @@ const (
 	DarkGray = "\033[90m"
 )
 
-// Global flag to control color output
-var colorEnabled = true
+// colorEnabled uses atomic operations for thread-safe access
+// 1 = enabled, 0 = disabled
+var colorEnabled atomic.Int32
+
+func init() {
+	// Default to enabled
+	colorEnabled.Store(1)
+}
 
 // InitializeColorSupport sets up color support based on environment and flags
+// This function is thread-safe and can be called multiple times
 func InitializeColorSupport(noColor bool) {
 	if noColor {
-		colorEnabled = false
+		colorEnabled.Store(0)
 		return
 	}
 
 	// Check for NO_COLOR environment variable (following https://no-color.org/)
 	if os.Getenv("NO_COLOR") != "" {
-		colorEnabled = false
+		colorEnabled.Store(0)
 		return
 	}
 
 	// Check if we're in a terminal that supports colors
 	term := os.Getenv("TERM")
 	if term == "" || term == "dumb" {
-		colorEnabled = false
+		colorEnabled.Store(0)
 		return
 	}
 
 	// Check if output is being piped
 	if !isTerminal() {
-		colorEnabled = false
+		colorEnabled.Store(0)
 		return
 	}
+
+	// Enable colors if all checks pass
+	colorEnabled.Store(1)
 }
 
 // isTerminal checks if stdout is a terminal
@@ -54,7 +65,7 @@ func isTerminal() bool {
 
 // colorize applies color to text if colors are enabled
 func colorize(color, text string) string {
-	if !colorEnabled || text == "" {
+	if colorEnabled.Load() == 0 || text == "" {
 		return text
 	}
 	return color + text + Reset
@@ -91,8 +102,9 @@ func Highlight(format string, args ...interface{}) string {
 }
 
 // IsColorEnabled returns whether color output is currently enabled
+// This function is thread-safe
 func IsColorEnabled() bool {
-	return colorEnabled
+	return colorEnabled.Load() == 1
 }
 
 // StripColors removes ANSI color codes from text

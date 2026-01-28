@@ -7,7 +7,7 @@ import (
 
 func TestColorizeWhenEnabled(t *testing.T) {
 	// Enable colors for testing
-	colorEnabled = true
+	colorEnabled.Store(1)
 
 	tests := []struct {
 		name     string
@@ -59,7 +59,7 @@ func TestColorizeWhenEnabled(t *testing.T) {
 
 func TestColorizeWhenDisabled(t *testing.T) {
 	// Disable colors for testing
-	colorEnabled = false
+	colorEnabled.Store(0)
 
 	tests := []struct {
 		name     string
@@ -110,7 +110,7 @@ func TestColorizeWhenDisabled(t *testing.T) {
 }
 
 func TestColorFormattingWithArguments(t *testing.T) {
-	colorEnabled = true
+	colorEnabled.Store(1)
 
 	result := Success("Process %s completed with code %d", "test", 0)
 	expected := Green + "Process test completed with code 0" + Reset
@@ -122,11 +122,11 @@ func TestColorFormattingWithArguments(t *testing.T) {
 
 func TestInitializeColorSupportWithNoColorFlag(t *testing.T) {
 	// Reset state
-	colorEnabled = true
+	colorEnabled.Store(1)
 
 	InitializeColorSupport(true)
 
-	if colorEnabled {
+	if colorEnabled.Load() == 1 {
 		t.Error("Expected colors to be disabled when noColor=true")
 	}
 }
@@ -143,14 +143,14 @@ func TestInitializeColorSupportWithNOCOLOREnv(t *testing.T) {
 	}()
 
 	// Reset state
-	colorEnabled = true
+	colorEnabled.Store(1)
 
 	// Set NO_COLOR environment variable
 	_ = os.Setenv("NO_COLOR", "1")
 
 	InitializeColorSupport(false)
 
-	if colorEnabled {
+	if colorEnabled.Load() == 1 {
 		t.Error("Expected colors to be disabled when NO_COLOR is set")
 	}
 }
@@ -167,25 +167,25 @@ func TestInitializeColorSupportWithDumbTerm(t *testing.T) {
 	}()
 
 	// Reset state
-	colorEnabled = true
+	colorEnabled.Store(1)
 
 	// Set TERM to dumb
 	_ = os.Setenv("TERM", "dumb")
 
 	InitializeColorSupport(false)
 
-	if colorEnabled {
+	if colorEnabled.Load() == 1 {
 		t.Error("Expected colors to be disabled when TERM=dumb")
 	}
 }
 
 func TestIsColorEnabled(t *testing.T) {
-	colorEnabled = true
+	colorEnabled.Store(1)
 	if !IsColorEnabled() {
 		t.Error("Expected IsColorEnabled to return true when colors are enabled")
 	}
 
-	colorEnabled = false
+	colorEnabled.Store(0)
 	if IsColorEnabled() {
 		t.Error("Expected IsColorEnabled to return false when colors are disabled")
 	}
@@ -250,7 +250,7 @@ func TestStripColors(t *testing.T) {
 }
 
 func TestColorizeWithEmptyText(t *testing.T) {
-	colorEnabled = true
+	colorEnabled.Store(1)
 
 	result := Success("")
 	expected := ""
