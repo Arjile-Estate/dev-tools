@@ -72,11 +72,13 @@ func TestGenerateDynamicHelp(t *testing.T) {
 		assert.Contains(t, result, "--verbose")
 	})
 
-	t.Run("with empty config file", func(t *testing.T) {
+	t.Run("with minimal config file", func(t *testing.T) {
 		tempDir := t.TempDir()
 
-		// Create an empty config file
-		configContent := `commands: {}`
+		// Create a minimal valid config file with one command
+		configContent := `commands:
+  test:
+    - run: "go test ./..."`
 		configFile := filepath.Join(tempDir, ".dev-config.yaml")
 		err := os.WriteFile(configFile, []byte(configContent), 0644)
 		require.NoError(t, err)

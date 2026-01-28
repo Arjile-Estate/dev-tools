@@ -33,8 +33,8 @@ func TestLoadConfigFromFile(t *testing.T) {
 		{
 			name:        "empty config file",
 			fileContent: "",
-			wantErr:     false,
-			wantConfig:  &Config{Commands: make(map[string][]CommandStep)},
+			wantErr:     true,
+			wantConfig:  nil,
 		},
 		{
 			name:        "invalid yaml",

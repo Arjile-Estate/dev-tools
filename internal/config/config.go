@@ -94,7 +94,7 @@ func (s *ServicesConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // Config represents the complete development configuration
 
-// LoadConfigFromFile loads configuration from a .dev-config.yaml file
+// LoadConfigFromFile loads and validates configuration from a .dev-config.yaml file
 func LoadConfigFromFile(configPath string) (*Config, error) {
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, nil // File doesn't exist, return nil without error
@@ -113,6 +113,11 @@ func LoadConfigFromFile(configPath string) (*Config, error) {
 	// Initialize commands map if it's nil
 	if config.Commands == nil {
 		config.Commands = make(map[string][]CommandStep)
+	}
+
+	// Validate configuration against schema
+	if err := ValidateConfig(&config); err != nil {
+		return nil, NewConfigError(configPath, fmt.Errorf("validation failed: %w", err))
 	}
 
 	return &config, nil

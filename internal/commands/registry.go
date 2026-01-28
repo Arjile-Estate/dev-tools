@@ -80,6 +80,13 @@ func initBuiltInCommandRegistry() {
 				},
 			},
 			{
+				Name:        "validate",
+				Description: "Validate configuration file",
+				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
+					return HandleValidateCommand(cmd, args, projectDir)
+				},
+			},
+			{
 				Name:        "completion",
 				Description: "Generate shell completion script",
 				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
