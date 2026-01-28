@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"dev-tools/internal/config"
 	"dev-tools/internal/executor"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -488,6 +489,352 @@ func TestGetLogFilePath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := filepath.Join(tt.projectDir, "activity.log")
 			assert.Equal(t, tt.expectedPath, result)
+		})
+	}
+}
+func TestOutputStatusJSON(t *testing.T) {
+	t.Run("output daemon status as JSON", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create a PID file
+		pidFile := filepath.Join(tempDir, ".test.pid")
+		pidInfo := executor.PIDFileInfo{
+			PID:          os.Getpid(),
+			CommandName:  "test-daemon",
+			Command:      "npm run dev",
+			StartTime:    time.Now().Add(-5 * time.Minute),
+			RestartCount: 0,
+		}
+		data, err := json.Marshal(pidInfo)
+		require.NoError(t, err)
+		err = os.WriteFile(pidFile, data, 0644)
+		require.NoError(t, err)
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err = HandleStatusCommand(cmd, []string{"--format=json"}, tempDir)
+
+		require.NoError(t, err)
+		output := buf.String()
+
+		// Verify it's valid JSON
+		var jsonOutput map[string]interface{}
+		err = json.Unmarshal([]byte(output), &jsonOutput)
+		require.NoError(t, err)
+
+		// Check for expected fields
+		assert.Contains(t, jsonOutput, "project_type")
+		assert.Contains(t, jsonOutput, "daemons")
+		assert.Contains(t, jsonOutput, "services")
+	})
+}
+
+func TestProjectTypeToString(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupFiles   func(tmpDir string)
+		expectedType string
+	}{
+		{
+			name: "go project",
+			setupFiles: func(tmpDir string) {
+				os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test"), 0644)
+			},
+			expectedType: "Go",
+		},
+		{
+			name: "python project",
+			setupFiles: func(tmpDir string) {
+				os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte(""), 0644)
+			},
+			expectedType: "Python",
+		},
+		{
+			name: "node project",
+			setupFiles: func(tmpDir string) {
+				os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte("{}"), 0644)
+			},
+			expectedType: "Node.js",
+		},
+		{
+			name: "rust project",
+			setupFiles: func(tmpDir string) {
+				os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(""), 0644)
+			},
+			expectedType: "Rust",
+		},
+		{
+			name:         "generic project",
+			setupFiles:   func(tmpDir string) {},
+			expectedType: "Unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tt.setupFiles(tmpDir)
+
+			cmd := &cobra.Command{}
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+
+			err := HandleStatusCommand(cmd, []string{}, tmpDir)
+			require.NoError(t, err)
+
+			output := buf.String()
+			assert.Contains(t, output, tt.expectedType)
+		})
+	}
+}
+
+func TestGetRunningDockerContainers(t *testing.T) {
+	t.Run("returns empty list when Docker is not available", func(t *testing.T) {
+		containers := getRunningDockerContainers()
+		// Should not panic, should return empty list or list of containers
+		assert.NotNil(t, containers)
+	})
+}
+
+func TestContains(t *testing.T) {
+	tests := []struct {
+		name     string
+		slice    []string
+		item     string
+		expected bool
+	}{
+		{
+			name:     "item exists",
+			slice:    []string{"apple", "banana", "cherry"},
+			item:     "banana",
+			expected: true,
+		},
+		{
+			name:     "item does not exist",
+			slice:    []string{"apple", "banana", "cherry"},
+			item:     "orange",
+			expected: false,
+		},
+		{
+			name:     "empty slice",
+			slice:    []string{},
+			item:     "apple",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := contains(tt.slice, tt.item)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHandleOnboardCommand(t *testing.T) {
+	t.Run("generate onboarding documentation", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create a basic config file
+		configContent := `commands:
+  test:
+    - run: "go test ./..."
+  build:
+    - run: "go build -o app ."
+`
+		configFile := filepath.Join(tempDir, ".dev-config.yaml")
+		err := os.WriteFile(configFile, []byte(configContent), 0644)
+		require.NoError(t, err)
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err = HandleOnboardCommand(cmd, []string{}, tempDir)
+
+		require.NoError(t, err)
+		output := buf.String()
+
+		// Check for key sections
+		assert.Contains(t, output, "Dev-Tools Usage Guide")
+		assert.Contains(t, output, "Available Project Commands")
+		assert.Contains(t, output, "test")
+		assert.Contains(t, output, "build")
+	})
+
+	t.Run("generate onboarding outputs to stdout by default", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create a basic config file
+		configContent := `commands:
+  lint:
+    - run: "golangci-lint run"
+`
+		configFile := filepath.Join(tempDir, ".dev-config.yaml")
+		err := os.WriteFile(configFile, []byte(configContent), 0644)
+		require.NoError(t, err)
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err = HandleOnboardCommand(cmd, []string{}, tempDir)
+
+		require.NoError(t, err)
+		output := buf.String()
+		assert.Contains(t, output, "lint")
+	})
+}
+
+func TestFileExists(t *testing.T) {
+	t.Run("file exists", func(t *testing.T) {
+		tempDir := t.TempDir()
+		testFile := filepath.Join(tempDir, "test.txt")
+		err := os.WriteFile(testFile, []byte("content"), 0644)
+		require.NoError(t, err)
+
+		result := fileExists(testFile)
+		assert.True(t, result)
+	})
+
+	t.Run("file does not exist", func(t *testing.T) {
+		result := fileExists("/nonexistent/file.txt")
+		assert.False(t, result)
+	})
+}
+
+func TestInitBuiltInCommandRegistry(t *testing.T) {
+	t.Run("registry initializes with all built-in commands", func(t *testing.T) {
+		// Initialize registry (should be called automatically but we can call explicitly)
+		initBuiltInCommandRegistry()
+
+		// Verify all built-in commands are registered
+		expectedCommands := []string{
+			"logs", "status", "cleanup-pids", "cleanup-all",
+			"restart", "stop", "version", "onboard", "completion", "__dev_complete",
+		}
+
+		for _, cmdName := range expectedCommands {
+			assert.True(t, IsBuiltInCommand(cmdName), "Command %s should be registered", cmdName)
+		}
+	})
+
+	t.Run("get built-in command names", func(t *testing.T) {
+		names := GetBuiltInCommandNames()
+		assert.NotEmpty(t, names)
+		assert.Contains(t, names, "logs")
+		assert.Contains(t, names, "status")
+	})
+
+	t.Run("get built-in command map", func(t *testing.T) {
+		cmdMap := GetBuiltInCommandMap()
+		assert.NotEmpty(t, cmdMap)
+		assert.NotNil(t, cmdMap["logs"])
+		assert.NotNil(t, cmdMap["status"])
+	})
+
+	t.Run("get individual built-in command", func(t *testing.T) {
+		logsCmd := GetBuiltInCommand("logs")
+		assert.NotNil(t, logsCmd)
+
+		statusCmd := GetBuiltInCommand("status")
+		assert.NotNil(t, statusCmd)
+
+		nonExistent := GetBuiltInCommand("nonexistent")
+		assert.Nil(t, nonExistent)
+	})
+}
+
+func TestGetBuiltInDescription(t *testing.T) {
+	t.Run("get description for built-in commands with empty steps", func(t *testing.T) {
+		tests := []struct {
+			command     string
+			expectedMsg string
+		}{
+			{"logs", "Run logs"},
+			{"status", "Run status"},
+			{"cleanup-pids", "Run cleanup-pids"},
+			{"onboard", "Run onboard"},
+		}
+
+		// Create empty steps for testing
+		emptySteps := []config.CommandStep{}
+
+		for _, tt := range tests {
+			t.Run(tt.command, func(t *testing.T) {
+				desc := getBuiltInDescription(tt.command, emptySteps)
+				assert.Equal(t, tt.expectedMsg, desc)
+			})
+		}
+	})
+
+	t.Run("get description for commands with steps", func(t *testing.T) {
+		steps := []config.CommandStep{
+			{Run: config.RunCommand{"go test ./..."}},
+		}
+
+		desc := getBuiltInDescription("test", steps)
+		assert.Equal(t, "Run go test ./...", desc)
+	})
+}
+
+func TestHasServiceManagement(t *testing.T) {
+	tests := []struct {
+		name        string
+		configFile  string
+		expected    bool
+		description string
+	}{
+		{
+			name: "config with docker services",
+			configFile: `commands:
+  dev:
+    - services:
+        containers:
+          - redis
+      run: "npm run dev"
+`,
+			expected:    true,
+			description: "should detect Docker services",
+		},
+		{
+			name: "config with compose services",
+			configFile: `commands:
+  dev:
+    - services:
+        compose:
+          file: "docker-compose.yml"
+      run: "npm run dev"
+`,
+			expected:    true,
+			description: "should detect Compose services",
+		},
+		{
+			name: "config without services",
+			configFile: `commands:
+  test:
+    - run: "go test ./..."
+`,
+			expected:    false,
+			description: "should return false for no services",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			configFile := filepath.Join(tempDir, ".dev-config.yaml")
+			err := os.WriteFile(configFile, []byte(tt.configFile), 0644)
+			require.NoError(t, err)
+
+			// Load the config
+			cfg, err := config.LoadConfigurationForProject(tempDir)
+			require.NoError(t, err)
+
+			result := hasServiceManagement(cfg.Commands)
+			assert.Equal(t, tt.expected, result, tt.description)
 		})
 	}
 }
