@@ -23,21 +23,10 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "0.29.0", cmd.Version)
+		assert.Equal(t, "0.30.0", cmd.Version)
 		assert.False(t, cmd.SilenceUsage)
 		assert.False(t, cmd.SilenceErrors)
-
-		// Check flags
-		verboseFlag := cmd.PersistentFlags().Lookup("verbose")
-		assert.NotNil(t, verboseFlag)
-		assert.Equal(t, "v", verboseFlag.Shorthand)
-
-		projectDirFlag := cmd.PersistentFlags().Lookup("project-dir")
-		assert.NotNil(t, projectDirFlag)
-		assert.Equal(t, "p", projectDirFlag.Shorthand)
-
-		noColorFlag := cmd.PersistentFlags().Lookup("no-color")
-		assert.NotNil(t, noColorFlag)
+		assert.True(t, cmd.DisableFlagParsing, "DisableFlagParsing should be true for manual flag handling")
 	})
 
 	t.Run("help function shows dynamic help", func(t *testing.T) {
@@ -53,17 +42,12 @@ func TestNewRootCommand(t *testing.T) {
 		require.NoError(t, err)
 
 		cmd := NewRootCommand()
-
-		// Set project dir to temp dir
-		err = cmd.PersistentFlags().Set("project-dir", tempDir)
-		require.NoError(t, err)
-
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
 
-		// Trigger help by calling the help function directly
-		// Note: cobra's help command doesn't call Execute normally, so we test the help function directly
-		_ = cmd.Help() // This calls the custom help function
+		// Pass project-dir as an argument and request help
+		cmd.SetArgs([]string{"--project-dir=" + tempDir, "--help"})
+		_ = cmd.Execute()
 
 		output := buf.String()
 		assert.Contains(t, output, "dev-tools is a command runner")
@@ -120,11 +104,8 @@ func TestRunCommand_BuiltInCommands(t *testing.T) {
 			var buf bytes.Buffer
 			cmd.SetOut(&buf)
 
-			err := cmd.PersistentFlags().Set("project-dir", tempDir)
-			require.NoError(t, err)
-
-			cmd.SetArgs([]string{tt.command})
-			err = cmd.Execute()
+			cmd.SetArgs([]string{"--project-dir=" + tempDir, tt.command})
+			err := cmd.Execute()
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -224,10 +205,7 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		var buf bytes.Buffer
 		rootCmd.SetOut(&buf)
 
-		err = rootCmd.PersistentFlags().Set("project-dir", tempDir)
-		require.NoError(t, err)
-
-		rootCmd.SetArgs([]string{"test"})
+		rootCmd.SetArgs([]string{"--project-dir=" + tempDir, "test"})
 		err = rootCmd.Execute()
 
 		// Should succeed even if .env doesn't exist
@@ -368,14 +346,57 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 	})
 }
 
-func TestPreRun(t *testing.T) {
-	t.Run("sets up colors and logging", func(t *testing.T) {
-		// preRun is called automatically by cobra, but we can test it directly
-		cmd := NewRootCommand()
+func TestConfigFromFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		flags    map[string]string
+		expected CommandConfig
+	}{
+		{
+			name:  "default values",
+			flags: map[string]string{},
+			expected: CommandConfig{
+				ProjectDir: ".",
+				Format:     "text",
+			},
+		},
+		{
+			name: "all flags set",
+			flags: map[string]string{
+				"verbose":     "true",
+				"watch":       "true",
+				"no-color":    "true",
+				"project-dir": "/tmp/test",
+				"format":      "json",
+			},
+			expected: CommandConfig{
+				Verbose:    true,
+				Watch:      true,
+				NoColor:    true,
+				ProjectDir: "/tmp/test",
+				Format:     "json",
+			},
+		},
+		{
+			name: "partial flags set",
+			flags: map[string]string{
+				"verbose":     "true",
+				"project-dir": "/home/user/project",
+			},
+			expected: CommandConfig{
+				Verbose:    true,
+				ProjectDir: "/home/user/project",
+				Format:     "text",
+			},
+		},
+	}
 
-		// This should not panic or error
-		preRun(cmd, []string{"test"})
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := configFromFlags(tt.flags)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestSetConfigLoader(t *testing.T) {

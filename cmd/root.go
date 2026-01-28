@@ -19,12 +19,17 @@ import (
 	"dev-tools/internal/executor"
 )
 
+// CommandConfig holds runtime configuration for command execution
+type CommandConfig struct {
+	Verbose    bool
+	ProjectDir string
+	NoColor    bool
+	Format     string
+	Watch      bool
+}
+
 var (
-	verbose      bool
-	projectDir   string
-	noColor      bool
-	format       string
-	watch        bool
+	// Dependency injection variables (used for testing)
 	configLoader config.ConfigLoader
 	exec         executor.Executor
 )
@@ -51,27 +56,24 @@ and provides consistent commands across different project types.
 It automatically detects project types (Go, Python, Node.js, Rust) and provides
 sensible defaults, while allowing customization through configuration files.`,
 		Args:               cobra.MinimumNArgs(1),
-		PersistentPreRun:   preRun,
 		RunE:               runCommand,
 		SilenceUsage:       false,
 		SilenceErrors:      false,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging to stdout")
-	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
-	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
-	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
-	rootCmd.PersistentFlags().BoolVarP(&watch, "watch", "w", false, "Watch mode: re-run command on file changes")
-
-	rootCmd.Version = "0.29.0"
+	rootCmd.Version = "0.30.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		// Initialize color support for help display
-		colors.InitializeColorSupport(noColor)
+		// Parse flags for help display
+		_, devToolsFlags := extractDevToolsFlags(args)
+		cfg := configFromFlags(devToolsFlags)
 
-		_, _ = fmt.Fprint(cmd.OutOrStdout(), generateDynamicHelp(projectDir))
+		// Initialize color support for help display
+		colors.InitializeColorSupport(cfg.NoColor)
+
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), generateDynamicHelp(cfg.ProjectDir))
 		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), `
 Usage:
@@ -83,6 +85,7 @@ Flags:
       --no-color             Disable colored output
   -p, --project-dir string   Project directory to run commands in (default ".")
   -v, --verbose              Enable verbose logging to stdout
+  -w, --watch                Watch mode: re-run command on file changes
       --version              version for dev-tools
 `, cmd.CommandPath())
 	})
@@ -90,10 +93,30 @@ Flags:
 	return rootCmd
 }
 
-// isRunningViaGoRun detects if the application is running via 'go run'
-func preRun(cmd *cobra.Command, args []string) {
-	colors.InitializeColorSupport(noColor)
-	setupLogging(verbose, projectDir)
+// configFromFlags creates a CommandConfig from parsed flag values
+func configFromFlags(flags map[string]string) CommandConfig {
+	cfg := CommandConfig{
+		ProjectDir: ".",      // default
+		Format:     "text",   // default
+	}
+
+	if v, ok := flags["verbose"]; ok && v == "true" {
+		cfg.Verbose = true
+	}
+	if v, ok := flags["watch"]; ok && v == "true" {
+		cfg.Watch = true
+	}
+	if v, ok := flags["no-color"]; ok && v == "true" {
+		cfg.NoColor = true
+	}
+	if v, ok := flags["project-dir"]; ok {
+		cfg.ProjectDir = v
+	}
+	if v, ok := flags["format"]; ok {
+		cfg.Format = v
+	}
+
+	return cfg
 }
 
 type CommandFunc func(*cobra.Command, []string) error
@@ -274,26 +297,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	// Apply dev-tools flags
-	if v, ok := devToolsFlags["verbose"]; ok && v == "true" {
-		verbose = true
-	}
-	if v, ok := devToolsFlags["watch"]; ok && v == "true" {
-		watch = true
-	}
-	if v, ok := devToolsFlags["no-color"]; ok && v == "true" {
-		noColor = true
-	}
-	if v, ok := devToolsFlags["project-dir"]; ok {
-		projectDir = v
-	}
-	if v, ok := devToolsFlags["format"]; ok {
-		format = v
-	}
+	// Create configuration from parsed flags
+	cmdCfg := configFromFlags(devToolsFlags)
 
-	// Re-initialize colors and logging with the parsed flags
-	colors.InitializeColorSupport(noColor)
-	setupLogging(verbose, projectDir)
+	// Initialize colors and logging with the parsed flags
+	colors.InitializeColorSupport(cmdCfg.NoColor)
+	setupLogging(cmdCfg.Verbose, cmdCfg.ProjectDir)
 
 	parsedArgs := parseArgs(filteredArgs)
 	commandName := parsedArgs.CommandName
@@ -301,13 +310,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	log.Printf("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
 	// Handle special built-in commands
-	builtInCommands := getBuiltInCommands(projectDir, cmd.Version)
+	builtInCommands := getBuiltInCommands(cmdCfg.ProjectDir, cmd.Version)
 	if commandFunc, exists := builtInCommands[commandName]; exists {
 		return commandFunc(cmd, filteredArgs)
 	}
 
 	// Load environment variables
-	envFile := filepath.Join(projectDir, ".env")
+	envFile := filepath.Join(cmdCfg.ProjectDir, ".env")
 	if exec != nil {
 		if err := exec.LoadEnvironmentVariables(envFile); err != nil {
 			return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
@@ -322,9 +331,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	var cfg *config.Config
 	var err error
 	if configLoader != nil {
-		cfg, err = configLoader.LoadConfig(projectDir)
+		cfg, err = configLoader.LoadConfig(cmdCfg.ProjectDir)
 	} else {
-		cfg, err = config.LoadConfigurationForProject(projectDir)
+		cfg, err = config.LoadConfigurationForProject(cmdCfg.ProjectDir)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", colors.Error("failed to load configuration"), err)
@@ -342,7 +351,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle watch mode
-	if watch {
+	if cmdCfg.Watch {
 		// Create context with cancellation for watch mode
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -357,7 +366,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}()
 
 		// Run in watch mode
-		if err := executor.WatchAndExecute(ctx, commandName, steps, projectDir, parsedArgs.PassthroughArgs); err != nil {
+		if err := executor.WatchAndExecute(ctx, commandName, steps, cmdCfg.ProjectDir, parsedArgs.PassthroughArgs); err != nil {
 			return fmt.Errorf("%s: %w", colors.Error("watch mode failed"), err)
 		}
 		return nil
@@ -367,7 +376,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	execOpts := executor.CommandExecutionOptions{
 		CommandName:     commandName,
 		Steps:           steps,
-		WorkingDir:      projectDir,
+		WorkingDir:      cmdCfg.ProjectDir,
 		PassthroughArgs: parsedArgs.PassthroughArgs,
 	}
 
@@ -379,7 +388,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output based on format
-	if format == "json" {
+	if cmdCfg.Format == "json" {
 		// JSON output mode
 		jsonOutput, err := formatResultAsJSON(result)
 		if err != nil {
