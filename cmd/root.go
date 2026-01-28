@@ -58,7 +58,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
 
-	rootCmd.Version = "0.20.0"
+	rootCmd.Version = "0.21.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
