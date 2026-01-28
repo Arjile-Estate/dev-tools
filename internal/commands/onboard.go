@@ -127,6 +127,7 @@ func generateOnboardingDoc(projectType, projectDir string, builtInCmds, customCm
 		{Name: "restart <name>", Description: "Restart a daemon process"},
 		{Name: "stop <name>", Description: "Stop a daemon process"},
 		{Name: "version", Description: "Show version information"},
+		{Name: "validate", Description: "Validate configuration file"},
 		{Name: "completion <shell>", Description: "Generate shell completion script"},
 	}
 

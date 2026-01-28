@@ -94,6 +94,9 @@ Stop a daemon process
 ### `dev-tools version`
 Show version information
 
+### `dev-tools validate`
+Validate configuration file
+
 ### `dev-tools completion <shell>`
 Generate shell completion script
 

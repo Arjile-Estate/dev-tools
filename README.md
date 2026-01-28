@@ -10,6 +10,7 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 
 - **Smart Project Detection**: Automatically detects project type from files like `go.mod`, `pyproject.toml`, `package.json`, `Cargo.toml`
 - **Consistent Interface**: Same commands work across all project types
+- **YAML Schema Validation**: Built-in configuration validation with detailed error messages
 - **Advanced Service Management**: Full Docker Compose and Docker container support with health checks
 - **Intelligent Docker Service Management**: Automatically detects existing containers and restarts stopped ones
 - **Advanced Daemon Support**: SHA1-based PID tracking prevents duplicate daemon instances
@@ -77,6 +78,9 @@ dev-tools restart <daemon-name>
 
 # Stop a specific daemon
 dev-tools stop <daemon-name>
+
+# Validate configuration file
+dev-tools validate
 
 # Run with verbose logging
 dev-tools --verbose test
@@ -192,7 +196,7 @@ Shell completion provides intelligent suggestions for:
 
 The completion system automatically discovers commands from:
 
-1. **Built-in commands**: `logs`, `status`, `version`, `completion`, etc.
+1. **Built-in commands**: `logs`, `status`, `validate`, `version`, `completion`, etc.
 2. **Project defaults**: Based on detected project type (Go, Python, Node.js, Rust)
 3. **Custom commands**: From your project's `.dev-config.yaml`
 
@@ -257,6 +261,42 @@ Detected by presence of `Cargo.toml`:
 ## Configuration
 
 Create a `.dev-config.yaml` file in your project root to customize commands with powerful service and execution management.
+
+### Configuration Validation
+
+Dev Tools includes built-in YAML schema validation to help catch configuration errors early:
+
+**Automatic Validation:**
+- Configuration is automatically validated when loaded
+- Invalid configurations are rejected with detailed error messages
+- Prevents runtime errors from malformed configs
+
+**Manual Validation:**
+```bash
+# Validate your configuration file
+dev-tools validate
+
+# Example output on success:
+✓ Configuration is valid
+  Config file: /path/to/project/.dev-config.yaml
+
+# Example output on error:
+✗ Configuration validation failed
+- commands.test[0].run: Invalid type. Expected: string, given: integer
+```
+
+**Validation Rules:**
+- At least one command must be defined
+- `run` commands must be strings or arrays of strings
+- Service configurations must have required fields (e.g., `compose.file`)
+- Retry delays and timeouts must match duration patterns (e.g., "5s", "1m")
+- Exit codes in `retry_on_exit_codes` must be integers
+
+**Benefits:**
+- Catch typos and structural errors before execution
+- Clear error messages pinpointing issues
+- Schema-based validation ensures consistency
+- IDE support with JSON schema integration (coming soon)
 
 ### YAML Configuration Format
 
