@@ -62,7 +62,7 @@ sensible defaults, while allowing customization through configuration files.`,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.30.0"
+	rootCmd.Version = "0.31.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -271,6 +271,11 @@ func formatResultAsJSON(result executor.ExecutionResult) (string, error) {
 	// Only include PID if present (for daemon commands)
 	if result.PID > 0 {
 		output["daemon_pid"] = result.PID
+	}
+
+	// Only include warnings if any exist
+	if len(result.Warnings) > 0 {
+		output["warnings"] = result.Warnings
 	}
 
 	jsonBytes, err := json.MarshalIndent(output, "", "  ")

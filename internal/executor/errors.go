@@ -2,6 +2,25 @@ package executor
 
 import "fmt"
 
+// Package executor provides custom error types for better error categorization and handling.
+//
+// Error Handling Patterns:
+//
+// 1. Use custom error types for all categorizable errors:
+//   - ExecutionError: Command execution failures
+//   - ServiceError: Docker service management failures
+//   - ValidationError: Configuration or input validation failures
+//   - DaemonError: Daemon process and PID file operations failures
+//
+// 2. When to return errors vs. log warnings:
+//   - Return errors: Critical failures that prevent command execution
+//   - Log warnings: Best-effort operations that fail but don't block success
+//     (e.g., PID file cleanup after process stops, service cleanup after command completes)
+//
+// 3. All custom errors implement Unwrap() for error chain inspection using errors.Is() and errors.As()
+//
+// 4. Non-fatal warnings are captured in ExecutionResult.Warnings for user visibility
+
 // ExecutionError represents errors that occur during command execution
 type ExecutionError struct {
 	Command string

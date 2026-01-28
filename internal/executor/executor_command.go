@@ -230,7 +230,8 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		// Create enhanced PID file for daemon tracking
 		pidFile := GeneratePIDFilename(opts.CommandName, opts.Command)
 		if pidErr := CreateEnhancedPIDFile(pidFile, cmd.Process.Pid, opts.CommandName, opts.Command); pidErr != nil {
-			log.Printf("Failed to create enhanced PID file: %v", pidErr)
+			// Log with proper error type but don't fail - daemon is running
+			log.Printf("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, pidErr))
 		} else {
 			log.Printf("Created enhanced PID file %s for daemon process", pidFile)
 			fmt.Printf("%s\n", colors.Success("Running job '%s' in the foreground. PID: %d, PID file: %s",
@@ -277,7 +278,8 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 
 		// Clean up PID file
 		if pidErr := RemovePIDFile(pidFile); pidErr != nil {
-			log.Printf("Failed to remove PID file: %v", pidErr)
+			// Log with proper error type but don't fail - daemon completed
+			log.Printf("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, fmt.Errorf("failed to remove PID file: %w", pidErr)))
 		} else {
 			log.Printf("Removed PID file %s after daemon completion", pidFile)
 		}
@@ -417,7 +419,7 @@ func checkDaemonAlreadyRunning(commandName, command string) error {
 
 // executeWithRetry executes a command with retry logic based on step configuration
 // ExecuteCommandStep executes a single command step with all its components
-func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
+func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) (result ExecutionResult) {
 	log.Printf("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Validate and resolve execution directory
@@ -440,7 +442,9 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			log.Printf("Cleaning up services after command execution")
 			cleanupResult := StopServices(step.Services)
 			if !cleanupResult.Success {
-				log.Printf("Warning: Service cleanup failed: %s", cleanupResult.Stderr)
+				warning := fmt.Sprintf("Service cleanup failed: %s", cleanupResult.Stderr)
+				log.Printf("Warning: %s", warning)
+				result.Warnings = append(result.Warnings, warning)
 			} else {
 				log.Printf("Services cleaned up successfully")
 			}
@@ -477,7 +481,9 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			log.Printf("Background daemon process with PID %d", result.PID)
 			pidFile := GeneratePIDFilename(commandName, command)
 			if err := CreateEnhancedPIDFile(pidFile, result.PID, commandName, command); err != nil {
-				log.Printf("Failed to create enhanced PID file: %v", err)
+				warning := fmt.Sprintf("Failed to create PID file: %v", NewDaemonError(result.PID, pidFile, err))
+				log.Printf("Warning: %s", warning)
+				result.Warnings = append(result.Warnings, warning)
 			} else {
 				log.Printf("Created enhanced PID file %s for background daemon process", pidFile)
 				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
@@ -587,7 +593,8 @@ func LoadEnvironmentVariables(envFile string) error {
 		value = strings.Trim(value, `"'`)
 
 		if err := os.Setenv(key, value); err != nil {
-			log.Printf("Failed to set environment variable %s: %v", key, err)
+			// Log with proper error type - not critical, other vars may still load
+			log.Printf("Warning: %v", NewValidationError("environment_variable", key, err))
 		}
 	}
 

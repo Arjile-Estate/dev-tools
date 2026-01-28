@@ -215,7 +215,8 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 	err = RemovePIDFile(pidFilePath)
 	if err != nil {
-		log.Printf("Failed to remove PID file %s: %v", pidFilePath, err)
+		// Log with proper error type but don't fail - process is stopped
+		log.Printf("Warning: %v", NewDaemonError(daemon.PID, pidFilePath, fmt.Errorf("failed to remove PID file: %w", err)))
 		// Don't return error for PID file removal failure
 	}
 
@@ -237,7 +238,8 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 		// If the process is not running, just remove the stale PID file
 		pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 		if err := RemovePIDFile(pidFilePath); err != nil {
-			log.Printf("Failed to remove stale PID file %s: %v", pidFilePath, err)
+			// Log with proper error type - not critical since process not running
+			log.Printf("Warning: %v", NewDaemonError(0, pidFilePath, fmt.Errorf("failed to remove stale PID file: %w", err)))
 		}
 	}
 
@@ -261,7 +263,8 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	pidFile := GeneratePIDFilename(daemon.CommandName, daemon.Command)
 	pidFilePath := filepath.Join(projectDir, pidFile)
 	if err := CreateEnhancedPIDFile(pidFilePath, result.PID, daemon.CommandName, daemon.Command); err != nil {
-		log.Printf("Failed to create enhanced PID file for restarted daemon: %v", err)
+		// Log with proper error type but don't fail - process is running
+		log.Printf("Warning: %v", NewDaemonError(result.PID, pidFilePath, fmt.Errorf("failed to create PID file: %w", err)))
 		// Don't return an error, as the process is running, but log it.
 	}
 

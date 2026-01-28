@@ -13,4 +13,5 @@ type ExecutionResult struct {
 	DurationMs      int64
 	ServicesStarted []string
 	StartTime       time.Time
+	Warnings        []string // Non-fatal issues (e.g., cleanup failures, PID file errors)
 }
