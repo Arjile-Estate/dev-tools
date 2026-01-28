@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -24,6 +23,17 @@ var (
 	configLoader config.ConfigLoader
 	exec         executor.Executor
 )
+
+// ExitError is an error that includes a specific exit code
+// This allows proper cleanup (defer statements) while preserving exit codes
+type ExitError struct {
+	Code    int
+	Message string
+}
+
+func (e *ExitError) Error() string {
+	return e.Message
+}
 
 // NewRootCommand creates the root command for the CLI
 func NewRootCommand() *cobra.Command {
@@ -344,7 +354,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	if !result.Success {
 		log.Printf("Command completed with exit code %d", result.ReturnCode)
-		os.Exit(result.ReturnCode)
+		return &ExitError{
+			Code:    result.ReturnCode,
+			Message: fmt.Sprintf("command failed with exit code %d", result.ReturnCode),
+		}
 	}
 
 	log.Print("Command completed successfully")
