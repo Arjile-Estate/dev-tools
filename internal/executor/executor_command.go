@@ -5,8 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,33 +21,6 @@ type ExecuteOptions struct {
 	WorkingDir    string
 	Daemon        bool
 	CommandName   string
-}
-
-// waitForProcessWithSignalHandling waits for a process to complete while handling signals
-func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		return err
-	case sig := <-signalChan:
-		log.Printf("Received signal %v, terminating process", sig)
-		if cmd.Process != nil {
-			if sigErr := cmd.Process.Signal(sig); sigErr != nil {
-				log.Printf("Failed to forward signal to child process: %v", sigErr)
-				if killErr := cmd.Process.Kill(); killErr != nil {
-					log.Printf("Failed to kill child process: %v", killErr)
-				}
-			}
-		}
-		return <-done
-	}
 }
 
 // ExecuteShellCommand executes a shell command with the given options
@@ -242,39 +213,6 @@ func shellEscape(arg string) string {
 	return fmt.Sprintf("'%s'", escaped)
 }
 
-// validateAndResolveDirectory validates and resolves the execution directory
-func validateAndResolveDirectory(stepDir, workingDir string) (string, error) {
-	if stepDir == "" {
-		return workingDir, nil
-	}
-
-	// Make path absolute if relative
-	if !filepath.IsAbs(stepDir) && workingDir != "" {
-		stepDir = filepath.Join(workingDir, stepDir)
-	}
-
-	// Validate directory exists and is accessible
-	info, err := os.Stat(stepDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("directory '%s' does not exist", stepDir)
-		}
-		return "", fmt.Errorf("directory '%s' is not accessible: %w", stepDir, err)
-	}
-
-	if !info.IsDir() {
-		return "", fmt.Errorf("path '%s' is not a directory", stepDir)
-	}
-
-	// Test directory accessibility
-	if _, err := os.ReadDir(stepDir); err != nil {
-		return "", fmt.Errorf("directory '%s' is not accessible: %w", stepDir, err)
-	}
-
-	log.Printf("Using directory: %s", stepDir)
-	return stepDir, nil
-}
-
 // handleServicesStartup starts configured services and returns their names
 func handleServicesStartup(services config.ServicesConfig) ([]string, error) {
 	if services.Compose == nil && len(services.Containers) == 0 {
@@ -304,64 +242,6 @@ func checkDaemonAlreadyRunning(commandName, command string) error {
 }
 
 // executeWithRetry executes a command with retry logic based on step configuration
-func executeWithRetry(step config.CommandStep, command, executionDir, commandName string) ExecutionResult {
-	maxAttempts := step.Retry + 1
-	if maxAttempts < 1 {
-		maxAttempts = 1
-	}
-
-	// Parse retry delay
-	retryDelay := time.Second
-	if step.RetryDelay != "" {
-		if parsed, err := time.ParseDuration(step.RetryDelay); err == nil {
-			retryDelay = parsed
-		} else {
-			log.Printf("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
-		}
-	}
-
-	var result ExecutionResult
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if attempt > 1 {
-			log.Printf("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
-			time.Sleep(retryDelay)
-		}
-
-		result = ExecuteShellCommand(ExecuteOptions{
-			Command:       command,
-			Background:    step.Background,
-			CaptureOutput: step.Background,
-			WorkingDir:    executionDir,
-			Daemon:        step.Daemon,
-			CommandName:   commandName,
-		})
-
-		if result.Success {
-			break
-		}
-
-		// Check if we should retry based on exit code
-		shouldRetry := len(step.RetryOnExitCodes) == 0
-		if !shouldRetry {
-			for _, code := range step.RetryOnExitCodes {
-				if result.ReturnCode == code {
-					shouldRetry = true
-					break
-				}
-			}
-		}
-
-		if attempt >= maxAttempts || !shouldRetry {
-			if !shouldRetry {
-				log.Printf("Exit code %d not in retry list, not retrying", result.ReturnCode)
-			}
-			break
-		}
-	}
-
-	return result
-}
-
 // ExecuteCommandStep executes a single command step with all its components
 func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
 	log.Printf("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
