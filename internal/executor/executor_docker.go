@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"dev-tools/internal/config"
 )
@@ -25,70 +24,71 @@ func getPasswordFromEnv(envVar, defaultPassword, serviceName string) string {
 	return defaultPassword
 }
 
-// buildDockerRunCommand builds a docker run command from a ContainerConfig
-func buildDockerRunCommand(cfg *config.ContainerConfig) string {
-	cmdParts := []string{"docker", "run", "-d"}
+// buildDockerRunCommand builds docker run command arguments from a ContainerConfig
+// Returns command name and arguments separately for secure execution without shell
+func buildDockerRunCommand(cfg *config.ContainerConfig) (string, []string) {
+	args := []string{"run", "-d"}
 
 	// Add environment variables
 	for key, value := range cfg.Environment {
-		cmdParts = append(cmdParts, "-e", fmt.Sprintf("%s=%s", key, value))
+		args = append(args, "-e", fmt.Sprintf("%s=%s", key, value))
 	}
 
 	// Add volumes
 	for _, vol := range cfg.Volumes {
-		cmdParts = append(cmdParts, "-v", vol)
+		args = append(args, "-v", vol)
 	}
 
 	// Add ports
 	for _, port := range cfg.Ports {
-		cmdParts = append(cmdParts, "-p", port)
+		args = append(args, "-p", port)
 	}
 
 	// Add networks
 	for _, network := range cfg.Networks {
-		cmdParts = append(cmdParts, "--network", network)
+		args = append(args, "--network", network)
 	}
 
 	// Add restart policy
 	if cfg.Restart != "" {
-		cmdParts = append(cmdParts, "--restart", cfg.Restart)
+		args = append(args, "--restart", cfg.Restart)
 	}
 
 	// Add memory limit
 	if cfg.Memory != "" {
-		cmdParts = append(cmdParts, "--memory", cfg.Memory)
+		args = append(args, "--memory", cfg.Memory)
 	}
 
 	// Add CPU limit
 	if cfg.CPUs != "" {
-		cmdParts = append(cmdParts, "--cpus", cfg.CPUs)
+		args = append(args, "--cpus", cfg.CPUs)
 	}
 
 	// Add health check
 	if cfg.HealthCheck != nil {
 		if cfg.HealthCheck.Test != "" {
-			cmdParts = append(cmdParts, "--health-cmd", cfg.HealthCheck.Test)
+			args = append(args, "--health-cmd", cfg.HealthCheck.Test)
 		}
 		if cfg.HealthCheck.Interval != "" {
-			cmdParts = append(cmdParts, "--health-interval", cfg.HealthCheck.Interval)
+			args = append(args, "--health-interval", cfg.HealthCheck.Interval)
 		}
 		if cfg.HealthCheck.Timeout != "" {
-			cmdParts = append(cmdParts, "--health-timeout", cfg.HealthCheck.Timeout)
+			args = append(args, "--health-timeout", cfg.HealthCheck.Timeout)
 		}
 		if cfg.HealthCheck.Retries != "" {
-			cmdParts = append(cmdParts, "--health-retries", cfg.HealthCheck.Retries)
+			args = append(args, "--health-retries", cfg.HealthCheck.Retries)
 		}
 	}
 
 	// Add container name and image
-	cmdParts = append(cmdParts, "--name", cfg.Name, cfg.Image)
+	args = append(args, "--name", cfg.Name, cfg.Image)
 
 	// Add custom command if specified
 	if cfg.Command != "" {
-		cmdParts = append(cmdParts, "sh", "-c", cfg.Command)
+		args = append(args, "sh", "-c", cfg.Command)
 	}
 
-	return strings.Join(cmdParts, " ")
+	return "docker", args
 }
 
 // getContainerName extracts container name from service definition
@@ -115,11 +115,13 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 	log.Printf("Starting Docker service: %s", ref.GetName())
 
 	var containerName string
-	var runCmd string
+	var dockerCmd string
+	var dockerArgs []string
 
 	if ref.IsSimple() {
 		// Simple string service name
 		containerName = ref.Simple
+		dockerCmd = "docker"
 
 		// Predefined service configurations with environment variable support
 		// SECURITY NOTE: Default passwords are "password" for development only.
@@ -128,16 +130,16 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 		//   - MYSQL_ROOT_PASSWORD for mysql
 		switch ref.Simple {
 		case "redis":
-			runCmd = "docker run -d --name redis -p 6379:6379 redis:latest"
+			dockerArgs = []string{"run", "-d", "--name", "redis", "-p", "6379:6379", "redis:latest"}
 		case "postgres":
 			postgresPassword := getPasswordFromEnv("POSTGRES_PASSWORD", "password", "postgres")
-			runCmd = fmt.Sprintf("docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=%s postgres:latest", postgresPassword)
+			dockerArgs = []string{"run", "-d", "--name", "postgres", "-p", "5432:5432", "-e", fmt.Sprintf("POSTGRES_PASSWORD=%s", postgresPassword), "postgres:latest"}
 		case "mysql":
 			mysqlPassword := getPasswordFromEnv("MYSQL_ROOT_PASSWORD", "password", "mysql")
-			runCmd = fmt.Sprintf("docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=%s mysql:latest", mysqlPassword)
+			dockerArgs = []string{"run", "-d", "--name", "mysql", "-p", "3306:3306", "-e", fmt.Sprintf("MYSQL_ROOT_PASSWORD=%s", mysqlPassword), "mysql:latest"}
 		default:
 			// Default format for unknown services
-			runCmd = fmt.Sprintf("docker run -d --name %s %s:latest", containerName, ref.Simple)
+			dockerArgs = []string{"run", "-d", "--name", containerName, fmt.Sprintf("%s:latest", ref.Simple)}
 		}
 	} else if ref.Complex != nil {
 		// Complex service configuration
@@ -149,7 +151,7 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 		}
 
 		containerName = ref.Complex.Name
-		runCmd = buildDockerRunCommand(ref.Complex)
+		dockerCmd, dockerArgs = buildDockerRunCommand(ref.Complex)
 	} else {
 		return ExecutionResult{
 			Success: false,
@@ -169,8 +171,8 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 		return startExistingContainer(containerName)
 	}
 
-	// Container doesn't exist, create and start it
-	return createAndStartContainer(runCmd)
+	// Container doesn't exist, create and start it using direct execution (no shell)
+	return createAndStartContainer(dockerCmd, dockerArgs)
 }
 
 // StartDockerService starts a Docker service container (legacy interface{} support)
@@ -210,11 +212,11 @@ func StopDockerService(service interface{}) ExecutionResult {
 		return ExecutionResult{Success: true, Stdout: "Container not running"}
 	}
 
-	// Stop the container
-	stopCmd := fmt.Sprintf("docker stop %s", containerName)
-	log.Printf("Stopping container: %s", stopCmd)
-	stopResult := ExecuteShellCommand(ExecuteOptions{
-		Command:       stopCmd,
+	// Stop the container using direct execution (no shell)
+	log.Printf("Stopping container: docker stop %s", containerName)
+	stopResult := ExecuteCommandDirect(DirectExecuteOptions{
+		Command:       "docker",
+		Args:          []string{"stop", containerName},
 		CaptureOutput: true,
 	})
 

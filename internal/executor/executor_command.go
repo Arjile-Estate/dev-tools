@@ -23,6 +23,83 @@ type ExecuteOptions struct {
 	CommandName   string
 }
 
+// DirectExecuteOptions contains options for direct command execution (no shell)
+type DirectExecuteOptions struct {
+	Command       string   // Command name (e.g., "docker")
+	Args          []string // Command arguments
+	CaptureOutput bool
+	WorkingDir    string
+}
+
+// ExecuteCommandDirect executes a command directly without shell interpretation
+// This is safer than ExecuteShellCommand for commands with user-provided arguments
+// as it prevents shell injection attacks
+func ExecuteCommandDirect(opts DirectExecuteOptions) ExecutionResult {
+	cmd := exec.Command(opts.Command, opts.Args...)
+
+	if opts.WorkingDir != "" {
+		cmd.Dir = opts.WorkingDir
+	}
+
+	if opts.CaptureOutput {
+		output, err := cmd.CombinedOutput()
+		success := err == nil
+		returnCode := 0
+		stderr := ""
+
+		if err != nil {
+			if exitError, ok := err.(*exec.ExitError); ok {
+				returnCode = exitError.ExitCode()
+			} else {
+				returnCode = -1
+			}
+			stderr = err.Error()
+		}
+
+		return ExecutionResult{
+			Success:    success,
+			Stdout:     string(output),
+			Stderr:     stderr,
+			ReturnCode: returnCode,
+		}
+	}
+
+	// Stream output directly to stdout/stderr
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Start()
+	if err != nil {
+		log.Printf("Failed to start command: %v", err)
+		return ExecutionResult{
+			Success:    false,
+			Stderr:     err.Error(),
+			ReturnCode: -1,
+		}
+	}
+
+	waitError := waitForProcessWithSignalHandling(cmd)
+
+	success := waitError == nil
+	returnCode := 0
+
+	if waitError != nil {
+		if exitError, ok := waitError.(*exec.ExitError); ok {
+			returnCode = exitError.ExitCode()
+		} else {
+			returnCode = -1
+		}
+		log.Printf("Command failed with return code %d", returnCode)
+	} else {
+		log.Print("Command completed successfully")
+	}
+
+	return ExecutionResult{
+		Success:    success,
+		ReturnCode: returnCode,
+	}
+}
+
 // ExecuteShellCommand executes a shell command with the given options
 func ExecuteShellCommand(opts ExecuteOptions) ExecutionResult {
 	cmd := exec.Command("sh", "-c", opts.Command)

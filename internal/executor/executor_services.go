@@ -105,26 +105,27 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 
 	composeCmd := getDockerComposeCommand()
 
-	// Build command
-	cmdParts := []string{composeCmd, "-f", compose.File}
+	// Build command arguments (no shell, direct execution for security)
+	args := []string{"-f", compose.File}
 
 	// Add profiles if specified
 	for _, profile := range compose.Profiles {
-		cmdParts = append(cmdParts, "--profile", profile)
+		args = append(args, "--profile", profile)
 	}
 
-	cmdParts = append(cmdParts, "up", "-d")
+	args = append(args, "up", "-d")
 
 	// Add specific services if specified
 	if len(compose.Services) > 0 {
-		cmdParts = append(cmdParts, compose.Services...)
+		args = append(args, compose.Services...)
 	}
 
-	finalCmd := strings.Join(cmdParts, " ")
-	log.Printf("Running compose command: %s", finalCmd)
+	log.Printf("Running compose command: %s %v", composeCmd, args)
 
-	result := ExecuteShellCommand(ExecuteOptions{
-		Command:       finalCmd,
+	// Use direct execution to avoid shell injection vulnerabilities
+	result := ExecuteCommandDirect(DirectExecuteOptions{
+		Command:       composeCmd,
+		Args:          args,
 		CaptureOutput: true,
 	})
 
@@ -186,26 +187,27 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 
 	composeCmd := getDockerComposeCommand()
 
-	// Build command
-	cmdParts := []string{composeCmd, "-f", compose.File}
+	// Build command arguments (no shell, direct execution for security)
+	args := []string{"-f", compose.File}
 
 	// Add profiles if specified
 	for _, profile := range compose.Profiles {
-		cmdParts = append(cmdParts, "--profile", profile)
+		args = append(args, "--profile", profile)
 	}
 
-	cmdParts = append(cmdParts, "down")
+	args = append(args, "down")
 
 	// Add specific services if specified
 	if len(compose.Services) > 0 {
-		cmdParts = append(cmdParts, compose.Services...)
+		args = append(args, compose.Services...)
 	}
 
-	finalCmd := strings.Join(cmdParts, " ")
-	log.Printf("Running compose down command: %s", finalCmd)
+	log.Printf("Running compose down command: %s %v", composeCmd, args)
 
-	result := ExecuteShellCommand(ExecuteOptions{
-		Command:       finalCmd,
+	// Use direct execution to avoid shell injection vulnerabilities
+	result := ExecuteCommandDirect(DirectExecuteOptions{
+		Command:       composeCmd,
+		Args:          args,
 		CaptureOutput: true,
 	})
 
