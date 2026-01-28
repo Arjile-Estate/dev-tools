@@ -61,3 +61,4 @@ docker-compose.override.yml
 build/
 dist/
 .gocache/
+.beads/daemon.lock
