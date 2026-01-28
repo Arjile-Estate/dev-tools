@@ -1,6 +1,8 @@
 package mocks
 
 import (
+	"context"
+
 	"dev-tools/internal/config"
 	"dev-tools/internal/executor"
 
@@ -35,6 +37,20 @@ func (_m *Executor) LoadEnvironmentVariables(envFile string) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(envFile)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// WatchAndExecute provides a mock function with given fields: ctx, commandName, steps, workingDir, passthroughArgs
+func (_m *Executor) WatchAndExecute(ctx context.Context, commandName string, steps []config.CommandStep, workingDir string, passthroughArgs []string) error {
+	ret := _m.Called(ctx, commandName, steps, workingDir, passthroughArgs)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []config.CommandStep, string, []string) error); ok {
+		r0 = rf(ctx, commandName, steps, workingDir, passthroughArgs)
 	} else {
 		r0 = ret.Error(0)
 	}
