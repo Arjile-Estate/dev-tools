@@ -560,9 +560,26 @@ start_services: ["redis", "postgres", "mysql"]
 
 # Predefined service configurations:
 # redis → docker run -d --name redis -p 6379:6379 redis:latest
-# postgres → docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest
-# mysql → docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest
+# postgres → docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=<env or default> postgres:latest
+# mysql → docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=<env or default> mysql:latest
 ```
+
+**Security: Environment Variable Support**
+
+⚠️ **IMPORTANT**: The predefined `postgres` and `mysql` services use default passwords (`password`) for development convenience.
+
+**Always set environment variables in production:**
+
+```bash
+# Set before running dev-tools
+export POSTGRES_PASSWORD="your-secure-password"
+export MYSQL_ROOT_PASSWORD="your-secure-password"
+
+# Then run your command
+dev-tools dev
+```
+
+When using default passwords, dev-tools will log a **warning** to remind you to set environment variables for production use.
 
 #### Custom Service Examples
 

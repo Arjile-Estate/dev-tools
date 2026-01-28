@@ -3,6 +3,7 @@ package executor
 import (
 	"fmt"
 	"log"
+	"os"
 	"strings"
 )
 
@@ -11,6 +12,16 @@ const (
 	// DockerCommand is the base docker CLI command
 	DockerCommand = "docker"
 )
+
+// getPasswordFromEnv gets a password from environment variable or returns a default
+// Logs a warning when using default passwords for security awareness
+func getPasswordFromEnv(envVar, defaultPassword, serviceName string) string {
+	if password := os.Getenv(envVar); password != "" {
+		return password
+	}
+	log.Printf("WARNING: Using default password for %s. Set %s environment variable for production use.", serviceName, envVar)
+	return defaultPassword
+}
 
 // getContainerName extracts container name from service definition
 func getContainerName(service interface{}) (string, error) {
@@ -38,19 +49,22 @@ func StartDockerService(service interface{}) ExecutionResult {
 	case string:
 		// Simple string service name
 		containerName = s
-		// Predefined service configurations with default development credentials
-		// WARNING: These use hardcoded passwords ("password") for development convenience only.
-		// In production environments, always use secure passwords and proper secrets management.
-		// Consider using environment variables or Docker secrets for sensitive data.
-		serviceConfigs := map[string]string{
-			"redis":    "docker run -d --name redis -p 6379:6379 redis:latest",
-			"postgres": "docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:latest",
-			"mysql":    "docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password mysql:latest",
-		}
 
-		var exists bool
-		runCmd, exists = serviceConfigs[s]
-		if !exists {
+		// Predefined service configurations with environment variable support
+		// SECURITY NOTE: Default passwords are "password" for development only.
+		// ALWAYS set environment variables in production:
+		//   - POSTGRES_PASSWORD for postgres
+		//   - MYSQL_ROOT_PASSWORD for mysql
+		switch s {
+		case "redis":
+			runCmd = "docker run -d --name redis -p 6379:6379 redis:latest"
+		case "postgres":
+			postgresPassword := getPasswordFromEnv("POSTGRES_PASSWORD", "password", "postgres")
+			runCmd = fmt.Sprintf("docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=%s postgres:latest", postgresPassword)
+		case "mysql":
+			mysqlPassword := getPasswordFromEnv("MYSQL_ROOT_PASSWORD", "password", "mysql")
+			runCmd = fmt.Sprintf("docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=%s mysql:latest", mysqlPassword)
+		default:
 			// Default format for unknown services
 			runCmd = fmt.Sprintf("docker run -d --name %s %s:latest", containerName, s)
 		}
