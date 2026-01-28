@@ -21,6 +21,14 @@ type CommandStep struct {
 	Retry            int            `yaml:"retry,omitempty"`              // Number of retry attempts (0 = no retry, default)
 	RetryDelay       string         `yaml:"retry_delay,omitempty"`        // Delay between retries (e.g., "5s", "1m")
 	RetryOnExitCodes []int          `yaml:"retry_on_exit_codes,omitempty"` // Only retry on specific exit codes (empty = retry on any failure)
+	Watch            *WatchConfig   `yaml:"watch,omitempty"`              // Watch mode configuration
+}
+
+// WatchConfig represents file watching configuration
+type WatchConfig struct {
+	Patterns []string `yaml:"patterns,omitempty"` // File patterns to watch (e.g., "**/*.go", "src/**/*.ts")
+	Debounce string   `yaml:"debounce,omitempty"` // Debounce delay (e.g., "300ms", "1s", default: "300ms")
+	Ignore   []string `yaml:"ignore,omitempty"`   // Patterns to ignore (e.g., "**/node_modules/**", "**/.git/**")
 }
 
 // ContainerConfig represents configuration for a Docker container

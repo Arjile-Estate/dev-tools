@@ -23,7 +23,7 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "0.23.0", cmd.Version)
+		assert.Equal(t, "0.25.0", cmd.Version)
 		assert.False(t, cmd.SilenceUsage)
 		assert.False(t, cmd.SilenceErrors)
 

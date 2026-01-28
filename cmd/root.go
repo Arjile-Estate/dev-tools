@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +24,7 @@ var (
 	projectDir   string
 	noColor      bool
 	format       string
+	watch        bool
 	configLoader config.ConfigLoader
 	exec         executor.Executor
 )
@@ -57,8 +62,9 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVarP(&projectDir, "project-dir", "p", ".", "Project directory to run commands in")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
+	rootCmd.PersistentFlags().BoolVarP(&watch, "watch", "w", false, "Watch mode: re-run command on file changes")
 
-	rootCmd.Version = "0.24.0"
+	rootCmd.Version = "0.25.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -151,6 +157,9 @@ func extractDevToolsFlags(args []string) ([]string, map[string]string) {
 			// Check for dev-tools flags
 			if arg == "-v" || arg == "--verbose" {
 				flags["verbose"] = "true"
+				continue // Don't add to filtered
+			} else if arg == "-w" || arg == "--watch" {
+				flags["watch"] = "true"
 				continue // Don't add to filtered
 			} else if arg == "--no-color" {
 				flags["no-color"] = "true"
@@ -269,6 +278,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	if v, ok := devToolsFlags["verbose"]; ok && v == "true" {
 		verbose = true
 	}
+	if v, ok := devToolsFlags["watch"]; ok && v == "true" {
+		watch = true
+	}
 	if v, ok := devToolsFlags["no-color"]; ok && v == "true" {
 		noColor = true
 	}
@@ -329,7 +341,29 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			commandName, strings.Join(availableCommands, ", ")))
 	}
 
-	// Execute command
+	// Handle watch mode
+	if watch {
+		// Create context with cancellation for watch mode
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Handle Ctrl+C gracefully
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			log.Printf("Received interrupt signal, stopping watch mode")
+			cancel()
+		}()
+
+		// Run in watch mode
+		if err := executor.WatchAndExecute(ctx, commandName, steps, projectDir, parsedArgs.PassthroughArgs); err != nil {
+			return fmt.Errorf("%s: %w", colors.Error("watch mode failed"), err)
+		}
+		return nil
+	}
+
+	// Execute command (non-watch mode)
 	var result executor.ExecutionResult
 	if exec != nil {
 		result = exec.ExecuteCommandWithSteps(commandName, steps, projectDir, parsedArgs.PassthroughArgs)
