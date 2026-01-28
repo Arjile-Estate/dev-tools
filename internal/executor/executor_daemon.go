@@ -192,12 +192,12 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	}
 
 	// Wait for process to terminate (with timeout)
-	for i := 0; i < 30; i++ {
+	for i := 0; i < DaemonStopMaxRetries; i++ {
 		if !IsProcessRunning(daemon.PID) {
 			logger.Infof("Daemon %s (PID %d) stopped successfully", daemon.CommandName, daemon.PID)
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(DaemonStopCheckInterval)
 	}
 
 	// Force kill if still running
@@ -208,7 +208,7 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 			return fmt.Errorf("failed to send SIGKILL to process %d: %w", daemon.PID, err)
 		}
 		// Wait a bit more for SIGKILL to take effect
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(DaemonForceKillWaitTime)
 	}
 
 	// Remove PID file
@@ -233,7 +233,7 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 			return fmt.Errorf("failed to stop daemon for restart: %w", err)
 		}
 		// Wait a moment for the process to fully terminate
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(DaemonRestartDelay)
 	} else {
 		// If the process is not running, just remove the stale PID file
 		pidFilePath := filepath.Join(projectDir, daemon.PIDFile)

@@ -163,8 +163,8 @@ func generateOnboardingDoc(projectType, projectDir string, builtInCmds, customCm
 func getBuiltInDescription(name string, steps []config.CommandStep) string {
 	if len(steps) > 0 && len(steps[0].Run) > 0 {
 		cmd := string(steps[0].Run[0])
-		if len(cmd) > 50 {
-			cmd = cmd[:47] + "..."
+		if len(cmd) > OnboardBuiltInCmdMaxLen {
+			cmd = cmd[:OnboardBuiltInCmdMaxLen-3] + "..."
 		}
 		return fmt.Sprintf("Run %s", cmd)
 	}
@@ -195,8 +195,8 @@ func getCustomDescription(steps []config.CommandStep) string {
 
 	if runCount == 1 && len(steps[0].Run) > 0 {
 		cmd := string(steps[0].Run[0])
-		if len(cmd) > 40 {
-			cmd = cmd[:37] + "..."
+		if len(cmd) > OnboardCustomCmdMaxLen {
+			cmd = cmd[:OnboardCustomCmdMaxLen-3] + "..."
 		}
 		return "Run " + cmd
 	} else if runCount > 0 {

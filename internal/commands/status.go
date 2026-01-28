@@ -123,8 +123,8 @@ func outputStatusText(cmd *cobra.Command, daemons []executor.DaemonInfo, service
 			if command == "" {
 				command = "(unknown)"
 			}
-			if len(command) > 38 {
-				command = command[:35] + "..."
+			if len(command) > StatusCommandMaxLen {
+				command = command[:StatusCommandMaxLen-3] + "..."
 			}
 
 			row := fmt.Sprintf("  %-20s %-10s %-8d %-12s %s",
@@ -158,16 +158,16 @@ func outputStatusText(cmd *cobra.Command, daemons []executor.DaemonInfo, service
 			}
 
 			image := service.Image
-			if len(image) > 15 {
-				image = image[:12] + "..."
+			if len(image) > StatusImageMaxLen {
+				image = image[:StatusImageMaxLen-3] + "..."
 			}
 
 			ports := service.Ports
 			if ports == "" {
 				ports = "none"
 			}
-			if len(ports) > 20 {
-				ports = ports[:17] + "..."
+			if len(ports) > StatusPortsMaxLen {
+				ports = ports[:StatusPortsMaxLen-3] + "..."
 			}
 
 			row := fmt.Sprintf("  %-25s %-15s %-15s %s",
@@ -212,7 +212,7 @@ func getRunningDockerContainers() []DockerService {
 			continue
 		}
 		parts := strings.Split(line, "|")
-		if len(parts) >= 4 {
+		if len(parts) >= DockerPSFieldCount {
 			services = append(services, DockerService{
 				Name:   parts[0],
 				Status: parts[1],
