@@ -8,14 +8,19 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 
 ## Features
 
-- **Smart Project Detection**: Automatically detects project type from files like `go.mod`, `pyproject.toml`, `package.json`, `Cargo.toml`
+- **Smart Project Detection**: Automatically detects project type (Go, Python, Node.js, Rust, Java, .NET, PHP, Ruby)
 - **Consistent Interface**: Same commands work across all project types
 - **YAML Schema Validation**: Built-in configuration validation with detailed error messages
+- **Retry Logic**: Configurable retry with delays and exit code filtering for transient failures
+- **Watch Mode**: Automatic command re-execution on file changes with debouncing
 - **Advanced Service Management**: Full Docker Compose and Docker container support with health checks
 - **Intelligent Docker Service Management**: Automatically detects existing containers and restarts stopped ones
 - **Advanced Daemon Support**: SHA1-based PID tracking prevents duplicate daemon instances
-- **Enhanced Logging**: Detailed execution logs with command options and Docker commands
+- **Structured Logging**: High-performance JSON logging with zerolog for easy parsing
+- **JSON Output**: Machine-readable output (`--format json`) for automation and monitoring
+- **Security Hardening**: Shell injection prevention, POSIX escaping, thread-safe operations
 - **Dynamic Help System**: Context-aware help showing available commands from configuration
+- **Shell Completion**: Bash, Zsh, and Fish completion with dynamic command discovery
 - **Container Naming**: Smart container naming from complex image paths (e.g., `registry.com/user/app` → `app`)
 - **Environment Handling**: Automatically loads `.env` files
 - **Parallel Execution**: Handle multiple commands and services efficiently
@@ -72,6 +77,9 @@ dev-tools cleanup-all
 
 # View daemon status
 dev-tools status
+
+# View status in JSON format (machine-readable)
+dev-tools status --format json
 
 # Restart a specific daemon
 dev-tools restart <daemon-name>
@@ -257,6 +265,24 @@ Detected by presence of `Cargo.toml`:
 - `lint`: `cargo clippy`
 - `dev`: `cargo run`
 - `build`: `cargo build`
+
+#### Java/Maven Projects
+Detected by presence of `pom.xml`:
+- `test`: `mvn test`
+- `build`: `mvn package`
+
+#### .NET Projects
+Detected by presence of `*.csproj` or `*.sln`:
+- `test`: `dotnet test`
+- `build`: `dotnet build`
+
+#### PHP Projects
+Detected by presence of `composer.json`:
+- `test`: `composer test`
+
+#### Ruby Projects
+Detected by presence of `Gemfile`:
+- `test`: `bundle exec rspec`
 
 ## Configuration
 
@@ -535,6 +561,84 @@ directory: "/opt/myproject/backend"
 
 **Note:** PID files are always stored in the project root regardless of the directory option.
 
+##### `retry` (Integer)
+Number of times to retry a command if it fails. Useful for handling transient failures.
+
+```yaml
+run: "./flaky-script.sh"
+retry: 3  # Retry up to 3 times on failure
+```
+
+##### `retry_delay` (String)
+Delay between retry attempts. Supports time units: `ms` (milliseconds), `s` (seconds), `m` (minutes), `h` (hours).
+
+```yaml
+run: "curl https://api.example.com/health"
+retry: 5
+retry_delay: "10s"  # Wait 10 seconds between retries
+```
+
+##### `retry_on_exit_codes` (Array of Integers)
+Only retry if the command exits with specific exit codes. Useful for retrying only on certain failures.
+
+```yaml
+run: "npm install"
+retry: 3
+retry_delay: "5s"
+retry_on_exit_codes: [1, 2]  # Only retry on exit codes 1 and 2
+```
+
+**Retry Example:**
+```yaml
+commands:
+  flaky-test:
+    - run: "go test -race ./..."
+      retry: 3
+      retry_delay: "2s"
+      retry_on_exit_codes: [1]  # Retry only on test failures, not on compilation errors
+
+  deploy:
+    - run: "./deploy.sh"
+      retry: 5
+      retry_delay: "30s"  # Retry with longer delays for deployment
+```
+
+##### `watch` (Object)
+Enable file watching mode that automatically re-runs the command when files change. Perfect for development workflows.
+
+**Watch Configuration:**
+```yaml
+watch:
+  patterns: ["**/*.go", "**/*.ts"]     # Glob patterns for files to watch
+  debounce: "300ms"                     # Debounce delay (ms, s, m)
+  ignore: ["**/node_modules/**", "**/dist/**"]  # Patterns to ignore
+```
+
+**Watch Example:**
+```yaml
+commands:
+  test-watch:
+    - run: "go test ./..."
+      watch:
+        patterns: ["**/*.go"]
+        debounce: "500ms"
+        ignore: ["**/*_test.go", "**/vendor/**"]
+
+  dev-watch:
+    - run: "npm run build"
+      watch:
+        patterns: ["src/**/*.ts", "src/**/*.tsx"]
+        debounce: "300ms"
+        ignore: ["**/node_modules/**", "**/dist/**"]
+```
+
+**Watch Mode Features:**
+- **Automatic re-execution**: Commands run automatically when matching files change
+- **Debouncing**: Prevents rapid re-runs during multiple file changes
+- **Glob pattern support**: Flexible file matching with `**`, `*`, `?`
+- **Ignore patterns**: Exclude directories like node_modules, vendor, build outputs
+- **Real-time feedback**: See test results immediately as you save files
+
 ### Advanced Service Management
 
 #### Docker Compose Integration
@@ -640,6 +744,51 @@ start_services:
 
 ### Configuration Examples by Use Case
 
+#### Test-Driven Development with Watch Mode
+```yaml
+commands:
+  test-watch:
+    - run: "go test ./... -v"
+      watch:
+        patterns: ["**/*.go"]
+        debounce: "500ms"
+        ignore: ["**/vendor/**", "**/.git/**"]
+
+  lint-watch:
+    - run:
+        - "golangci-lint run"
+        - "go fmt ./..."
+      watch:
+        patterns: ["**/*.go"]
+        debounce: "300ms"
+        ignore: ["**/vendor/**"]
+```
+
+#### Handling Flaky Tests with Retry Logic
+```yaml
+commands:
+  test:
+    - run: "go test -race ./..."
+      retry: 3
+      retry_delay: "2s"
+      retry_on_exit_codes: [1]  # Only retry test failures
+
+  integration-test:
+    - services:
+        containers: ["postgres", "redis"]
+        wait_for_health: true
+    - run: "go test ./integration/..."
+      retry: 5
+      retry_delay: "10s"  # Network issues may need longer delays
+
+  e2e-test:
+    - run: "npm run test:e2e"
+      directory: "frontend"
+      retry: 3
+      retry_delay: "5s"
+      retry_on_exit_codes: [1, 2]  # Retry on specific failures
+```
+
 #### Microservices Development with Docker Compose
 ```yaml
 commands:
@@ -744,6 +893,48 @@ REDIS_URL=redis://localhost:6379
 DEBUG=true
 ```
 
+## Security Features
+
+Dev Tools includes multiple security hardening measures to protect against common vulnerabilities:
+
+### Shell Injection Prevention
+
+**POSIX Argument Escaping**: All command arguments are properly escaped using POSIX shell quoting rules to prevent shell injection attacks.
+
+```yaml
+# Safe: Arguments are properly escaped
+commands:
+  deploy:
+    - run: "deploy.sh --target=${TARGET}"  # ${TARGET} is safely escaped
+```
+
+**Command Execution**: Commands are executed with proper argument separation, preventing shell metacharacter injection.
+
+### Thread-Safe Operations
+
+**Atomic Operations**: Color output and logging use atomic operations to prevent race conditions in concurrent environments.
+
+### Secure Defaults
+
+- **No Shell Interpolation**: Commands are executed directly without shell interpretation unless explicitly required
+- **PID File Integrity**: Daemon PID files use SHA1 hashing to prevent name collisions and ensure uniqueness
+- **Environment Isolation**: Each command runs in its own process with controlled environment variables
+- **Error Handling**: Comprehensive error handling prevents crashes and ensures proper cleanup
+
+### Docker Security
+
+**Password Management**:
+- Default development passwords trigger warnings
+- Support for environment variables to override defaults
+- Never hardcode production credentials in configuration files
+
+```bash
+# Secure way to use Docker services
+export POSTGRES_PASSWORD="your-secure-password"
+export MYSQL_ROOT_PASSWORD="your-secure-password"
+dev-tools dev
+```
+
 ## Activity Logging
 
 Dev Tools logs all its activity to help you monitor and debug your development workflow.
@@ -763,6 +954,67 @@ Dev Tools provides comprehensive logging with detailed execution information:
 - **`--verbose` flag**: Output logs to stdout in addition to the log file
 - **`dev-tools logs`**: View the last 50 lines of activity from the log file
 - **Manual access**: `./activity.log` in the project directory
+
+### Structured Logging
+
+Dev Tools uses **zerolog** for high-performance structured logging:
+
+- **JSON Format**: Logs are structured as JSON for easy parsing and analysis
+- **Context-Rich**: Each log entry includes timestamps, levels, and contextual data
+- **Performance**: Minimal overhead with zero-allocation JSON encoding
+- **Filtering**: Easy to filter and search with tools like `jq`
+
+**Example log entry:**
+```json
+{"level":"info","time":"2024-01-15T10:30:45Z","message":"Executing command","command":"test","step":1}
+```
+
+**Parse logs with jq:**
+```bash
+# View only error logs
+cat activity.log | jq 'select(.level=="error")'
+
+# View logs for specific command
+cat activity.log | jq 'select(.command=="test")'
+
+# Extract all executed commands
+cat activity.log | jq -r 'select(.message=="Executing command") | .command'
+```
+
+## Machine-Readable Output
+
+The `status` command supports JSON output for integration with automation tools:
+
+```bash
+# Get status in JSON format
+dev-tools status --format json
+
+# Example output
+{
+  "daemons": [
+    {
+      "command": "dev",
+      "pid": 12345,
+      "status": "running",
+      "uptime": "2h15m30s"
+    }
+  ],
+  "docker_services": [
+    {
+      "name": "postgres",
+      "status": "running",
+      "ports": ["5432:5432"],
+      "image": "postgres:15"
+    }
+  ]
+}
+```
+
+**Use cases:**
+- **Monitoring**: Integrate with monitoring tools (Prometheus, Datadog)
+- **CI/CD**: Validate service health in pipelines
+- **Automation**: Script daemon management and health checks
+- **Dashboards**: Build custom development environment dashboards
 
 ## Development
 
@@ -1059,6 +1311,78 @@ The `start_services` configuration continues to work but shows deprecation warni
 ```
 WARNING: 'start_services' is deprecated. Please migrate to 'services' configuration.
 ```
+
+## Version History
+
+### v0.35.0 - YAML Schema Validation
+- Added JSON schema validation for `.dev-config.yaml` files
+- New `dev-tools validate` command for explicit configuration validation
+- Automatic validation on config load with detailed error messages
+- Schema enforces correct types, required fields, and patterns
+
+### v0.34.0 - Code Quality Improvements
+- Extracted magic numbers to named constants
+- Improved code maintainability and readability
+- Better timeout and display width management
+
+### v0.33.0 - Code Organization
+- Split monolithic `built_in.go` into focused modules
+- Separated commands: logs, cleanup, daemon, status, onboard
+- Improved single-responsibility principle adherence
+
+### v0.32.0 - Structured Logging
+- Implemented zerolog for high-performance structured logging
+- JSON-formatted logs for easy parsing and analysis
+- Context-rich log entries with timestamps and metadata
+- Zero-allocation JSON encoding for minimal overhead
+
+### v0.31.0 - Error Handling Standardization
+- Standardized error handling patterns across codebase
+- Custom error types for better error context
+- Improved error messages and debugging information
+- Replaced `os.Exit()` with proper error returns
+
+### v0.23.0 - Watch Mode & Context Support
+- File watch mode with automatic command re-execution
+- Debouncing to prevent rapid re-runs
+- Glob pattern support for file matching
+- Added `context.Context` support for command cancellation
+- Graceful shutdown and cleanup on interrupts
+
+### v0.22.0 - Security Hardening
+- Eliminated shell injection vulnerabilities
+- Implemented POSIX shell argument escaping
+- Thread-safe color output with atomic operations
+- Secure command execution without shell interpolation
+
+### v0.21.0 - Code Refactoring
+- Split `executor_shell.go` into focused modules
+- Extracted helper functions for better modularity
+- Improved test coverage and code organization
+
+### v0.20.0 - Type Safety & Configuration
+- Replaced `map[string]interface{}` with typed Docker config structs
+- Type-safe configuration handling
+- Better IDE support and compile-time checking
+
+### v0.19.0 - Retry Logic
+- Implemented configurable retry logic for transient failures
+- Retry delays with configurable time units
+- Selective retry based on exit codes
+- Helpful for flaky tests and network operations
+
+### v0.16.0 - Extended Project Support & JSON Output
+- Added support for Java/Maven, .NET, PHP, and Ruby projects
+- JSON output format for `status` command (`--format json`)
+- Machine-readable output for automation and monitoring
+- Enhanced status command with comprehensive system information
+
+### Earlier Versions
+- v0.15.0: Onboard command for AI assistant documentation
+- v0.14.0: Shell completion for Bash, Zsh, and Fish
+- v0.13.0: Docker Compose integration
+- v0.12.0: Enhanced service management with health checks
+- v0.11.0: Daemon process management with PID tracking
 
 ## Contributing
 
