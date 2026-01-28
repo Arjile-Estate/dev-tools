@@ -64,7 +64,7 @@ sensible defaults, while allowing customization through configuration files.`,
 	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format: text or json")
 	rootCmd.PersistentFlags().BoolVarP(&watch, "watch", "w", false, "Watch mode: re-run command on file changes")
 
-	rootCmd.Version = "0.27.0"
+	rootCmd.Version = "0.28.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -364,11 +364,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute command (non-watch mode)
+	execOpts := executor.CommandExecutionOptions{
+		CommandName:     commandName,
+		Steps:           steps,
+		WorkingDir:      projectDir,
+		PassthroughArgs: parsedArgs.PassthroughArgs,
+	}
+
 	var result executor.ExecutionResult
 	if exec != nil {
-		result = exec.ExecuteCommandWithSteps(commandName, steps, projectDir, parsedArgs.PassthroughArgs)
+		result = exec.ExecuteCommandWithOptions(execOpts)
 	} else {
-		result = executor.ExecuteCommandWithSteps(commandName, steps, projectDir, parsedArgs.PassthroughArgs)
+		result = executor.ExecuteCommandWithOptions(execOpts)
 	}
 
 	// Output based on format

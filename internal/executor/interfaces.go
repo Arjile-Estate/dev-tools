@@ -12,7 +12,10 @@ import (
 //
 //go:generate mockery --name Executor --output ../mocks --outpkg mocks
 type Executor interface {
-	// ExecuteCommandWithSteps executes a command consisting of multiple steps
+	// ExecuteCommandWithOptions executes a command using the options struct pattern (preferred)
+	ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult
+
+	// ExecuteCommandWithSteps executes a command consisting of multiple steps (deprecated, use ExecuteCommandWithOptions)
 	ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string, passthroughArgs []string) ExecutionResult
 
 	// LoadEnvironmentVariables loads environment variables from a .env file

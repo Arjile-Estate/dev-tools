@@ -14,6 +14,22 @@ type Executor struct {
 	mock.Mock
 }
 
+// ExecuteCommandWithOptions provides a mock function with given fields: opts
+func (_m *Executor) ExecuteCommandWithOptions(opts executor.CommandExecutionOptions) executor.ExecutionResult {
+	ret := _m.Called(opts)
+
+	var r0 executor.ExecutionResult
+	if rf, ok := ret.Get(0).(func(executor.CommandExecutionOptions) executor.ExecutionResult); ok {
+		r0 = rf(opts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(executor.ExecutionResult)
+		}
+	}
+
+	return r0
+}
+
 // ExecuteCommandWithSteps provides a mock function with given fields: commandName, steps, projectDir, passthroughArgs
 func (_m *Executor) ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string, passthroughArgs []string) executor.ExecutionResult {
 	ret := _m.Called(commandName, steps, projectDir, passthroughArgs)

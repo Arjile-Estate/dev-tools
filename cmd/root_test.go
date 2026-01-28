@@ -23,7 +23,7 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "0.27.0", cmd.Version)
+		assert.Equal(t, "0.28.0", cmd.Version)
 		assert.False(t, cmd.SilenceUsage)
 		assert.False(t, cmd.SilenceErrors)
 
@@ -158,7 +158,7 @@ func TestRunCommand_WithMocks(t *testing.T) {
 	mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 
 	// Set up the mock executor to return a successful result
-	mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", mock.Anything).Return(executor.ExecutionResult{Success: true})
+	mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(executor.ExecutionResult{Success: true})
 	mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
 
 	// Execute the command
@@ -305,7 +305,7 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		}
 		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
-		mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", mock.Anything).Return(
+		mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(
 			executor.ExecutionResult{
 				Success:    false,
 				ReturnCode: 1,
@@ -346,7 +346,7 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		}
 		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
-		mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", mock.Anything).Return(
+		mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(
 			executor.ExecutionResult{
 				Success: true,
 				Stdout:  "hello world\n",
@@ -443,9 +443,12 @@ func TestRunCommand_WithPassthroughArgs(t *testing.T) {
 			mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 			mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
 
-			// The key assertion: verify that ExecuteCommandWithSteps is called with the correct passthrough args
-			mockExecutor.On("ExecuteCommandWithSteps", "test", mock.Anything, ".", tt.expectedPassthrough).Return(
-				executor.ExecutionResult{Success: true})
+			// The key assertion: verify that ExecuteCommandWithOptions is called with the correct passthrough args
+			mockExecutor.On("ExecuteCommandWithOptions", mock.MatchedBy(func(opts executor.CommandExecutionOptions) bool {
+				return opts.CommandName == "test" &&
+					len(opts.PassthroughArgs) == len(tt.expectedPassthrough) &&
+					(len(tt.expectedPassthrough) == 0 || opts.PassthroughArgs[0] == tt.expectedPassthrough[0])
+			})).Return(executor.ExecutionResult{Success: true})
 
 			rootCmd := NewRootCommand()
 			var buf bytes.Buffer

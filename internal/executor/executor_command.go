@@ -32,6 +32,14 @@ type DirectExecuteOptions struct {
 	WorkingDir    string
 }
 
+// CommandExecutionOptions contains options for command execution with steps
+type CommandExecutionOptions struct {
+	CommandName      string                 // Name of the command being executed
+	Steps            []config.CommandStep   // Steps to execute
+	WorkingDir       string                 // Working directory
+	PassthroughArgs  []string               // Arguments to pass through to commands
+}
+
 // ExecuteCommandDirect executes a command directly without shell interpretation
 // This is safer than ExecuteShellCommand for commands with user-provided arguments
 // as it prevents shell injection attacks. Context allows for cancellation and timeouts.
@@ -491,17 +499,17 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 	return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
 }
 
-// ExecuteCommandWithSteps executes a command consisting of multiple steps
-func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string, passthroughArgs []string) ExecutionResult {
+// ExecuteCommandWithOptions executes a command using the options struct pattern
+func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 	startTime := time.Now()
-	log.Printf("Executing command '%s' with %d steps and passthrough args: %v", commandName, len(steps), passthroughArgs)
+	log.Printf("Executing command '%s' with %d steps and passthrough args: %v", opts.CommandName, len(opts.Steps), opts.PassthroughArgs)
 
 	var servicesStarted []string
 	var finalResult ExecutionResult
 
-	for i, step := range steps {
-		log.Printf("Executing step %d/%d", i+1, len(steps))
-		result := ExecuteCommandStep(step, commandName, workingDir, passthroughArgs)
+	for i, step := range opts.Steps {
+		log.Printf("Executing step %d/%d", i+1, len(opts.Steps))
+		result := ExecuteCommandStep(step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs)
 
 		// Track services started in this step
 		if len(result.ServicesStarted) > 0 {
@@ -510,7 +518,7 @@ func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, wor
 
 		if !result.Success {
 			log.Printf("Step %d failed, aborting command execution", i+1)
-			result.CommandName = commandName
+			result.CommandName = opts.CommandName
 			result.DurationMs = time.Since(startTime).Milliseconds()
 			result.ServicesStarted = servicesStarted
 			result.StartTime = startTime
@@ -522,11 +530,11 @@ func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, wor
 	}
 
 	duration := time.Since(startTime).Milliseconds()
-	log.Printf("Command '%s' completed successfully in %dms", commandName, duration)
+	log.Printf("Command '%s' completed successfully in %dms", opts.CommandName, duration)
 
 	return ExecutionResult{
 		Success:         true,
-		CommandName:     commandName,
+		CommandName:     opts.CommandName,
 		DurationMs:      duration,
 		ServicesStarted: servicesStarted,
 		StartTime:       startTime,
@@ -534,6 +542,17 @@ func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, wor
 		Stderr:          finalResult.Stderr,
 		PID:             finalResult.PID,
 	}
+}
+
+// ExecuteCommandWithSteps executes a command consisting of multiple steps
+// Deprecated: Use ExecuteCommandWithOptions for better API clarity
+func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string, passthroughArgs []string) ExecutionResult {
+	return ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:     commandName,
+		Steps:           steps,
+		WorkingDir:      workingDir,
+		PassthroughArgs: passthroughArgs,
+	})
 }
 
 // getContainerName extracts container name from service definition
