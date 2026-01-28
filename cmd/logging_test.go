@@ -3,11 +3,11 @@ package cmd
 import (
 	"bytes"
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"dev-tools/internal/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,8 +127,8 @@ func TestSetupLogging(t *testing.T) {
 
 		setupLogging(true, "/project")
 
-		// Write a test log message
-		log.Print("test message")
+		// Write a test log message using the new logger
+		logger.Info("test message")
 
 		// Close write end and read from read end
 		_ = w.Close()
@@ -190,10 +190,6 @@ func TestSetupLogging(t *testing.T) {
 			return "", errors.New("failed to get executable")
 		}
 
-		var buf bytes.Buffer
-		log.SetOutput(&buf)
-		defer log.SetOutput(os.Stderr)
-
 		setupLogging(false, tempDir)
 
 		// Should fallback to project directory and create log file there
@@ -213,18 +209,23 @@ func TestSetupLogging(t *testing.T) {
 		// Set HOME to a read-only directory to cause mkdir to fail
 		_ = os.Setenv("HOME", "/")
 
-		// Save original stdout
+		// Save original stdout and stderr
 		originalStdout := os.Stdout
-		defer func() { os.Stdout = originalStdout }()
+		originalStderr := os.Stderr
+		defer func() {
+			os.Stdout = originalStdout
+			os.Stderr = originalStderr
+		}()
 
-		// Create a pipe to capture stdout
+		// Create a pipe to capture stdout and stderr
 		r, w, _ := os.Pipe()
 		os.Stdout = w
+		os.Stderr = w
 
 		setupLogging(false, "/project")
 
-		// Write a test log message
-		log.Print("test message")
+		// Write a test log message using the new logger
+		logger.Info("test message")
 
 		// Close write end and read from read end
 		_ = w.Close()
@@ -250,18 +251,23 @@ func TestSetupLogging(t *testing.T) {
 			return "/tmp/go-build123/b001/exe/main", nil
 		}
 
-		// Save original stdout
+		// Save original stdout and stderr
 		originalStdout := os.Stdout
-		defer func() { os.Stdout = originalStdout }()
+		originalStderr := os.Stderr
+		defer func() {
+			os.Stdout = originalStdout
+			os.Stderr = originalStderr
+		}()
 
-		// Create a pipe to capture stdout
+		// Create a pipe to capture stdout and stderr
 		r, w, _ := os.Pipe()
 		os.Stdout = w
+		os.Stderr = w
 
 		setupLogging(false, tempDir)
 
-		// Write a test log message
-		log.Print("test message")
+		// Write a test log message using the new logger
+		logger.Info("test message")
 
 		// Close write end and read from read end
 		_ = w.Close()

@@ -5,7 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -119,7 +119,7 @@ func IsProcessRunning(pid int) bool {
 
 // ListDaemonProcesses returns information about all daemon processes in the project directory
 func ListDaemonProcesses(projectDir string) ([]DaemonInfo, error) {
-	log.Printf("Listing daemon processes in %s", projectDir)
+	logger.Infof("Listing daemon processes in %s", projectDir)
 
 	pidFiles, err := filepath.Glob(filepath.Join(projectDir, "*.pid"))
 	if err != nil {
@@ -131,7 +131,7 @@ func ListDaemonProcesses(projectDir string) ([]DaemonInfo, error) {
 	for _, pidFile := range pidFiles {
 		pidInfo, err := ReadEnhancedPIDFile(pidFile)
 		if err != nil {
-			log.Printf("Could not read PID file %s: %v", pidFile, err)
+			logger.Infof("Could not read PID file %s: %v", pidFile, err)
 			continue
 		}
 
@@ -172,10 +172,10 @@ func FindDaemonByCommandName(projectDir, commandName string) (*DaemonInfo, error
 
 // StopDaemonProcess stops a daemon process by PID and removes its PID file
 func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
-	log.Printf("Stopping daemon process %s (PID %d)", daemon.CommandName, daemon.PID)
+	logger.Infof("Stopping daemon process %s (PID %d)", daemon.CommandName, daemon.PID)
 
 	if !daemon.IsRunning {
-		log.Printf("Daemon %s is not running, removing stale PID file", daemon.CommandName)
+		logger.Infof("Daemon %s is not running, removing stale PID file", daemon.CommandName)
 		pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 		return RemovePIDFile(pidFilePath)
 	}
@@ -194,7 +194,7 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	// Wait for process to terminate (with timeout)
 	for i := 0; i < 30; i++ {
 		if !IsProcessRunning(daemon.PID) {
-			log.Printf("Daemon %s (PID %d) stopped successfully", daemon.CommandName, daemon.PID)
+			logger.Infof("Daemon %s (PID %d) stopped successfully", daemon.CommandName, daemon.PID)
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -202,7 +202,7 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 
 	// Force kill if still running
 	if IsProcessRunning(daemon.PID) {
-		log.Printf("Daemon %s (PID %d) did not stop gracefully, force killing", daemon.CommandName, daemon.PID)
+		logger.Infof("Daemon %s (PID %d) did not stop gracefully, force killing", daemon.CommandName, daemon.PID)
 		err = process.Signal(syscall.SIGKILL)
 		if err != nil {
 			return fmt.Errorf("failed to send SIGKILL to process %d: %w", daemon.PID, err)
@@ -216,7 +216,7 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	err = RemovePIDFile(pidFilePath)
 	if err != nil {
 		// Log with proper error type but don't fail - process is stopped
-		log.Printf("Warning: %v", NewDaemonError(daemon.PID, pidFilePath, fmt.Errorf("failed to remove PID file: %w", err)))
+		logger.Infof("Warning: %v", NewDaemonError(daemon.PID, pidFilePath, fmt.Errorf("failed to remove PID file: %w", err)))
 		// Don't return error for PID file removal failure
 	}
 
@@ -225,7 +225,7 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 
 // RestartDaemonProcess restarts a daemon process
 func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
-	log.Printf("Restarting daemon process %s", daemon.CommandName)
+	logger.Infof("Restarting daemon process %s", daemon.CommandName)
 
 	// Stop the existing process if running
 	if daemon.IsRunning {
@@ -239,7 +239,7 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 		pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 		if err := RemovePIDFile(pidFilePath); err != nil {
 			// Log with proper error type - not critical since process not running
-			log.Printf("Warning: %v", NewDaemonError(0, pidFilePath, fmt.Errorf("failed to remove stale PID file: %w", err)))
+			logger.Infof("Warning: %v", NewDaemonError(0, pidFilePath, fmt.Errorf("failed to remove stale PID file: %w", err)))
 		}
 	}
 
@@ -264,17 +264,17 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	pidFilePath := filepath.Join(projectDir, pidFile)
 	if err := CreateEnhancedPIDFile(pidFilePath, result.PID, daemon.CommandName, daemon.Command); err != nil {
 		// Log with proper error type but don't fail - process is running
-		log.Printf("Warning: %v", NewDaemonError(result.PID, pidFilePath, fmt.Errorf("failed to create PID file: %w", err)))
+		logger.Infof("Warning: %v", NewDaemonError(result.PID, pidFilePath, fmt.Errorf("failed to create PID file: %w", err)))
 		// Don't return an error, as the process is running, but log it.
 	}
 
-	log.Printf("Daemon %s restarted successfully with PID %d", daemon.CommandName, result.PID)
+	logger.Infof("Daemon %s restarted successfully with PID %d", daemon.CommandName, result.PID)
 	return nil
 }
 
 // CleanupStalePIDFilesWithTermination cleans up PID files and optionally terminates running processes
 func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning bool) ExecutionResult {
-	log.Print("Starting PID file cleanup")
+	logger.Info("Starting PID file cleanup")
 
 	pidFiles, err := filepath.Glob(filepath.Join(projectDir, "*.pid"))
 	if err != nil {
@@ -286,7 +286,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 
 	if len(pidFiles) == 0 {
 		message := "No PID files found to clean up"
-		log.Print(message)
+		logger.Info(message)
 		return ExecutionResult{
 			Success: true,
 			Stdout:  message,
@@ -309,25 +309,25 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 	for _, daemon := range daemons {
 		if daemon.IsRunning {
 			if terminateRunning {
-				log.Printf("Terminating running daemon %s (PID %d)", daemon.CommandName, daemon.PID)
+				logger.Infof("Terminating running daemon %s (PID %d)", daemon.CommandName, daemon.PID)
 				err := StopDaemonProcess(projectDir, &daemon)
 				if err != nil {
 					errorMsg := fmt.Sprintf("Failed to terminate %s (PID %d): %v", daemon.CommandName, daemon.PID, err)
-					log.Print(errorMsg)
+					logger.Info(errorMsg)
 					errors = append(errors, errorMsg)
 				} else {
 					terminatedProcesses = append(terminatedProcesses, fmt.Sprintf("%s (PID %d)", daemon.CommandName, daemon.PID))
 				}
 			} else {
-				log.Printf("Process %d from %s is still running", daemon.PID, daemon.PIDFile)
+				logger.Infof("Process %d from %s is still running", daemon.PID, daemon.PIDFile)
 				activeProcesses = append(activeProcesses, fmt.Sprintf("%s (PID %d)", daemon.CommandName, daemon.PID))
 			}
 		} else {
-			log.Printf("Process %d from %s is not running, removing PID file", daemon.PID, daemon.PIDFile)
+			logger.Infof("Process %d from %s is not running, removing PID file", daemon.PID, daemon.PIDFile)
 			pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 			if err := RemovePIDFile(pidFilePath); err != nil {
 				errorMsg := fmt.Sprintf("Failed to remove %s: %v", daemon.PIDFile, err)
-				log.Print(errorMsg)
+				logger.Info(errorMsg)
 				errors = append(errors, errorMsg)
 			} else {
 				cleanedFiles = append(cleanedFiles, fmt.Sprintf("%s (PID %d)", daemon.CommandName, daemon.PID))
@@ -379,7 +379,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 		summary.WriteString(colors.Info("No PID files found to process"))
 	}
 
-	log.Printf("PID cleanup completed. Summary: %s", summary.String())
+	logger.Infof("PID cleanup completed. Summary: %s", summary.String())
 
 	// Return success if we cleaned files or terminated processes, error only if all operations failed
 	success := len(errors) == 0 || len(cleanedFiles) > 0 || len(terminatedProcesses) > 0 || len(activeProcesses) > 0

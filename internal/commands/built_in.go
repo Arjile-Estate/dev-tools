@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,7 +18,7 @@ import (
 )
 
 func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
-	log.Print("Displaying recent activity logs")
+	logger.Info("Displaying recent activity logs")
 
 	logFile := filepath.Join(projectDir, "activity.log")
 
@@ -50,7 +50,7 @@ func HandleCleanupPidsCommand(cmd *cobra.Command, projectDir string) error {
 }
 
 func HandleCleanupAllCommand(cmd *cobra.Command, projectDir string) error {
-	log.Print("Cleaning up all daemon processes and PID files")
+	logger.Info("Cleaning up all daemon processes and PID files")
 
 	result := executor.CleanupStalePIDFilesWithTermination(projectDir, true)
 	if !result.Success {
@@ -62,7 +62,7 @@ func HandleCleanupAllCommand(cmd *cobra.Command, projectDir string) error {
 }
 
 func HandleStatusCommand(cmd *cobra.Command, args []string, projectDir string) error {
-	log.Print("Displaying comprehensive system status")
+	logger.Info("Displaying comprehensive system status")
 
 	// Check for --format flag
 	useJSONFormat := false
@@ -280,7 +280,7 @@ func HandleRestartCommand(cmd *cobra.Command, args []string, projectDir string) 
 	}
 
 	daemonName := args[1]
-	log.Printf("Restarting daemon: %s", daemonName)
+	logger.Infof("Restarting daemon: %s", daemonName)
 
 	daemon, err := executor.FindDaemonByCommandName(projectDir, daemonName)
 	if err != nil {
@@ -302,7 +302,7 @@ func HandleStopCommand(cmd *cobra.Command, args []string, projectDir string) err
 	}
 
 	daemonName := args[1]
-	log.Printf("Stopping daemon: %s", daemonName)
+	logger.Infof("Stopping daemon: %s", daemonName)
 
 	daemon, err := executor.FindDaemonByCommandName(projectDir, daemonName)
 	if err != nil {
@@ -319,7 +319,7 @@ func HandleStopCommand(cmd *cobra.Command, args []string, projectDir string) err
 }
 
 func HandleOnboardCommand(cmd *cobra.Command, args []string, projectDir string) error {
-	log.Print("Generating onboarding documentation for AI assistants")
+	logger.Info("Generating onboarding documentation for AI assistants")
 
 	// Check for --output-file flag
 	var outputFile string
@@ -342,7 +342,7 @@ func HandleOnboardCommand(cmd *cobra.Command, args []string, projectDir string) 
 	cfg, err := config.LoadConfigFromFile(configPath)
 	var customCommands map[string][]config.CommandStep
 	if err != nil {
-		log.Printf("No custom config found, using defaults only: %v", err)
+		logger.Infof("No custom config found, using defaults only: %v", err)
 		customCommands = make(map[string][]config.CommandStep)
 	} else {
 		customCommands = cfg.Commands

@@ -2,7 +2,7 @@ package executor
 
 import (
 	"context"
-	"log"
+	"dev-tools/internal/logger"
 	"time"
 
 	"dev-tools/internal/config"
@@ -23,14 +23,14 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 		if parsed, err := time.ParseDuration(step.RetryDelay); err == nil {
 			retryDelay = parsed
 		} else {
-			log.Printf("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
+			logger.Infof("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
 		}
 	}
 
 	var result ExecutionResult
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
-			log.Printf("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
+			logger.Infof("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
 			time.Sleep(retryDelay)
 		}
 
@@ -60,7 +60,7 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 
 		if attempt >= maxAttempts || !shouldRetry {
 			if !shouldRetry {
-				log.Printf("Exit code %d not in retry list, not retrying", result.ReturnCode)
+				logger.Infof("Exit code %d not in retry list, not retrying", result.ReturnCode)
 			}
 			break
 		}

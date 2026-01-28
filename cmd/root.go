@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -62,7 +62,7 @@ sensible defaults, while allowing customization through configuration files.`,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.31.0"
+	rootCmd.Version = "0.32.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -312,7 +312,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	parsedArgs := parseArgs(filteredArgs)
 	commandName := parsedArgs.CommandName
 
-	log.Printf("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
+	logger.Infof("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
 	// Handle special built-in commands
 	builtInCommands := getBuiltInCommands(cmdCfg.ProjectDir, cmd.Version)
@@ -366,7 +366,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigChan
-			log.Printf("Received interrupt signal, stopping watch mode")
+			logger.Infof("Received interrupt signal, stopping watch mode")
 			cancel()
 		}()
 
@@ -408,14 +408,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if !result.Success {
-		log.Printf("Command completed with exit code %d", result.ReturnCode)
+		logger.Infof("Command completed with exit code %d", result.ReturnCode)
 		return &ExitError{
 			Code:    result.ReturnCode,
 			Message: fmt.Sprintf("command failed with exit code %d", result.ReturnCode),
 		}
 	}
 
-	log.Print("Command completed successfully")
+	logger.Info("Command completed successfully")
 	return nil
 }
 

@@ -3,7 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +36,7 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 		if parsed, err := time.ParseDuration(watchConfig.Debounce); err == nil {
 			debounceDelay = parsed
 		} else {
-			log.Printf("Invalid debounce delay '%s', using default 300ms: %v", watchConfig.Debounce, err)
+			logger.Infof("Invalid debounce delay '%s', using default 300ms: %v", watchConfig.Debounce, err)
 		}
 	}
 
@@ -55,9 +55,9 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 
 	for _, dir := range watchDirs {
 		if err := watcher.Add(dir); err != nil {
-			log.Printf("Warning: failed to watch directory %s: %v", dir, err)
+			logger.Infof("Warning: failed to watch directory %s: %v", dir, err)
 		} else {
-			log.Printf("Watching directory: %s", dir)
+			logger.Infof("Watching directory: %s", dir)
 		}
 	}
 
@@ -92,7 +92,7 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 				continue
 			}
 
-			log.Printf("File changed: %s (%s)", event.Name, event.Op.String())
+			logger.Infof("File changed: %s (%s)", event.Name, event.Op.String())
 			pendingEvent = true
 
 			// Reset or create debounce timer
@@ -117,7 +117,7 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 			if !ok {
 				return fmt.Errorf("watcher error channel closed")
 			}
-			log.Printf("Watcher error: %v", err)
+			logger.Infof("Watcher error: %v", err)
 		}
 	}
 }

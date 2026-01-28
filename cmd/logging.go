@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"dev-tools/internal/logger"
 )
 
 var osExecutable = os.Executable
@@ -37,33 +38,42 @@ func getLogFilePath(projectDir string) (string, error) {
 	return filepath.Join(homeDir, "Library", "Logs", "dev-tools.log"), nil
 }
 
-// setupLogging initializes the logger for the application.
+// setupLogging initializes the structured logger for the application.
 func setupLogging(verbose bool, projectDir string) {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
+	// Determine log output destination
+	var logWriter *os.File
 	if verbose {
-		log.SetOutput(os.Stdout)
-		return
+		logWriter = os.Stdout
+	} else {
+		logFile, err := getLogFilePath(projectDir)
+		if err != nil {
+			// Fallback to project directory (use fmt since logger not yet initialized)
+			fmt.Fprintf(os.Stderr, "Warning: Error getting log file path: %v. Defaulting to project directory.\n", err)
+			logFile = filepath.Join(projectDir, "activity.log")
+		}
+
+		// Create log directory
+		if err := os.MkdirAll(filepath.Dir(logFile), 0755); err != nil {
+			// Fallback to stdout
+			fmt.Fprintf(os.Stderr, "Warning: Error creating log directory: %v. Defaulting to stdout.\n", err)
+			logWriter = os.Stdout
+		} else {
+			// Open log file
+			file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Error opening log file: %v. Defaulting to stdout.\n", err)
+				logWriter = os.Stdout
+			} else {
+				logWriter = file
+			}
+		}
 	}
 
-	logFile, err := getLogFilePath(projectDir)
-	if err != nil {
-		log.Printf("Error getting log file path: %v. Defaulting to project directory.", err)
-		logFile = filepath.Join(projectDir, "activity.log")
+	// Initialize structured logger with appropriate level
+	level := logger.InfoLevel
+	if verbose {
+		level = logger.DebugLevel
 	}
 
-	if err := os.MkdirAll(filepath.Dir(logFile), 0755); err != nil {
-		log.Printf("Error creating log directory: %v. Defaulting to stdout.", err)
-		log.SetOutput(os.Stdout)
-		return
-	}
-
-	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		log.Printf("Error opening log file: %v. Defaulting to stdout.", err)
-		log.SetOutput(os.Stdout)
-		return
-	}
-
-	log.SetOutput(file)
+	logger.Init(logWriter, level, verbose)
 }

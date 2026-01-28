@@ -2,7 +2,7 @@ package commands
 
 import (
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"sort"
 	"strings"
 	"sync"
@@ -227,16 +227,16 @@ func HandleCompleteCommand(cmd *cobra.Command, args []string, projectDir string)
 	}
 
 	commandLine := strings.Join(args[1:], " ")
-	log.Printf("Handling completion for: %q", commandLine)
-	log.Printf("Args received: %v", args)
+	logger.Infof("Handling completion for: %q", commandLine)
+	logger.Infof("Args received: %v", args)
 
 	// Parse completion context
 	ctx := parseCompletionContext(commandLine, projectDir)
 	if ctx == nil {
-		log.Printf("No completion context generated")
+		logger.Infof("No completion context generated")
 		return nil // Invalid context
 	}
-	log.Printf("Completion context: WordIndex=%d, CurrentWord=%q, CommandName=%q, IsFlag=%v",
+	logger.Infof("Completion context: WordIndex=%d, CurrentWord=%q, CommandName=%q, IsFlag=%v",
 		ctx.WordIndex, ctx.CurrentWord, ctx.CommandName, ctx.IsFlag)
 
 	// Check cache first using thread-safe cache
@@ -248,13 +248,13 @@ func HandleCompleteCommand(cmd *cobra.Command, args []string, projectDir string)
 	// Load configuration
 	config, err := loadConfigForCompletion(projectDir)
 	if err != nil {
-		log.Printf("Failed to load config for completion: %v", err)
+		logger.Infof("Failed to load config for completion: %v", err)
 		return nil // Don't error on completion failures
 	}
 
 	// Generate completions
 	completions := generateCompletions(ctx, config)
-	log.Printf("Generated %d completions: %v", len(completions), completions)
+	logger.Infof("Generated %d completions: %v", len(completions), completions)
 
 	// Cache the results using thread-safe cache
 	globalCompletionCache.Set(ctx, completions)
@@ -395,7 +395,7 @@ func getDaemonNames(projectDir string) []string {
 	// Get names from running daemon processes
 	daemons, err := executor.ListDaemonProcesses(projectDir)
 	if err != nil {
-		log.Printf("Failed to list daemon processes: %v", err)
+		logger.Infof("Failed to list daemon processes: %v", err)
 	} else {
 		for _, daemon := range daemons {
 			if daemon.CommandName != "" {

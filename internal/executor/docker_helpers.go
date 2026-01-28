@@ -3,7 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"strings"
 )
 
@@ -20,7 +20,7 @@ func buildDockerPsArgs(containerName string, allContainers bool) []string {
 // containerExists checks if a container exists (running or stopped) using direct execution
 func containerExists(containerName string) bool {
 	args := buildDockerPsArgs(containerName, true)
-	log.Printf("Checking if container exists: docker %v", args)
+	logger.Infof("Checking if container exists: docker %v", args)
 
 	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
@@ -34,7 +34,7 @@ func containerExists(containerName string) bool {
 // containerIsRunning checks if a container is currently running using direct execution
 func containerIsRunning(containerName string) bool {
 	args := buildDockerPsArgs(containerName, false)
-	log.Printf("Checking container status: docker %v", args)
+	logger.Infof("Checking container status: docker %v", args)
 
 	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
@@ -56,7 +56,7 @@ func getContainerStatus(containerName string) (exists bool, running bool) {
 
 // startExistingContainer starts a stopped container using direct execution (no shell)
 func startExistingContainer(containerName string) ExecutionResult {
-	log.Printf("Starting existing container: docker start %s", containerName)
+	logger.Infof("Starting existing container: docker start %s", containerName)
 	return ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
 		Args:          []string{"start", containerName},
@@ -67,7 +67,7 @@ func startExistingContainer(containerName string) ExecutionResult {
 // createAndStartContainer creates a new container using direct execution (no shell)
 // Accepts command name and arguments separately for security
 func createAndStartContainer(command string, args []string) ExecutionResult {
-	log.Printf("Creating new container: %s %v", command, args)
+	logger.Infof("Creating new container: %s %v", command, args)
 	return ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       command,
 		Args:          args,

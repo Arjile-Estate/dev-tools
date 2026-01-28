@@ -2,7 +2,7 @@ package executor
 
 import (
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"path/filepath"
 )
@@ -38,6 +38,6 @@ func validateAndResolveDirectory(stepDir, workingDir string) (string, error) {
 		return "", NewValidationError("directory", stepDir, fmt.Errorf("not accessible: %w", err))
 	}
 
-	log.Printf("Using directory: %s", stepDir)
+	logger.Infof("Using directory: %s", stepDir)
 	return stepDir, nil
 }

@@ -3,7 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 
 	"dev-tools/internal/config"
@@ -21,7 +21,7 @@ func getPasswordFromEnv(envVar, defaultPassword, serviceName string) string {
 	if password := os.Getenv(envVar); password != "" {
 		return password
 	}
-	log.Printf("WARNING: Using default password for %s. Set %s environment variable for production use.", serviceName, envVar)
+	logger.Infof("WARNING: Using default password for %s. Set %s environment variable for production use.", serviceName, envVar)
 	return defaultPassword
 }
 
@@ -113,7 +113,7 @@ func getContainerName(service interface{}) (string, error) {
 
 // StartDockerServiceTyped starts a Docker service container using typed configuration
 func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
-	log.Printf("Starting Docker service: %s", ref.GetName())
+	logger.Infof("Starting Docker service: %s", ref.GetName())
 
 	var containerName string
 	var dockerCmd string
@@ -165,7 +165,7 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 
 	if exists {
 		if running {
-			log.Printf("Container %s is already running", containerName)
+			logger.Infof("Container %s is already running", containerName)
 			return ExecutionResult{Success: true, Stdout: "Container already running"}
 		}
 		// Container exists but is stopped, start it
@@ -197,7 +197,7 @@ func StartDockerService(service interface{}) ExecutionResult {
 
 // StopDockerService stops a Docker service container
 func StopDockerService(service interface{}) ExecutionResult {
-	log.Printf("Stopping Docker service: %v", service)
+	logger.Infof("Stopping Docker service: %v", service)
 
 	containerName, err := getContainerName(service)
 	if err != nil {
@@ -209,12 +209,12 @@ func StopDockerService(service interface{}) ExecutionResult {
 
 	// Check if container is running
 	if !containerIsRunning(containerName) {
-		log.Printf("Container %s is not running", containerName)
+		logger.Infof("Container %s is not running", containerName)
 		return ExecutionResult{Success: true, Stdout: "Container not running"}
 	}
 
 	// Stop the container using direct execution (no shell)
-	log.Printf("Stopping container: docker stop %s", containerName)
+	logger.Infof("Stopping container: docker stop %s", containerName)
 	stopResult := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
 		Command:       "docker",
 		Args:          []string{"stop", containerName},
@@ -222,17 +222,17 @@ func StopDockerService(service interface{}) ExecutionResult {
 	})
 
 	if !stopResult.Success {
-		log.Printf("Failed to stop container %s: %s", containerName, stopResult.Stderr)
+		logger.Infof("Failed to stop container %s: %s", containerName, stopResult.Stderr)
 		return stopResult
 	}
 
-	log.Printf("Container %s stopped successfully", containerName)
+	logger.Infof("Container %s stopped successfully", containerName)
 	return ExecutionResult{Success: true}
 }
 
 // WaitForServiceHealth waits for a service to become healthy
 func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
-	log.Printf("Waiting for service health check: %v (timeout: %d seconds)", service, timeout)
+	logger.Infof("Waiting for service health check: %v (timeout: %d seconds)", service, timeout)
 
 	containerName, err := getContainerName(service)
 	if err != nil {
@@ -244,7 +244,7 @@ func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
 
 	// Wait for container to be healthy
 	healthCmd := fmt.Sprintf("timeout %d bash -c 'while [ \"$(docker inspect --format=\"{{.State.Health.Status}}\" %s 2>/dev/null || echo \"no-health\")\" != \"healthy\" ]; do sleep 1; done'", timeout, containerName)
-	log.Printf("Running health check: %s", healthCmd)
+	logger.Infof("Running health check: %s", healthCmd)
 
 	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
 		Command:       healthCmd,
@@ -253,10 +253,10 @@ func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
 
 	if !result.Success {
 		errorMsg := fmt.Sprintf("Health check failed for container %s: %s", containerName, result.Stderr)
-		log.Print(errorMsg)
+		logger.Info(errorMsg)
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
-	log.Printf("Container %s is healthy", containerName)
+	logger.Infof("Container %s is healthy", containerName)
 	return ExecutionResult{Success: true}
 }

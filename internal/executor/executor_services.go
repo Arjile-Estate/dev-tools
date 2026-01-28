@@ -3,7 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"strings"
 
@@ -20,7 +20,7 @@ const (
 
 // HandleServicesConfiguration handles the new services configuration
 func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult {
-	log.Printf("Handling services configuration (compose: %v, containers: %d)",
+	logger.Infof("Handling services configuration (compose: %v, containers: %d)",
 		services.Compose != nil, len(services.Containers))
 
 	var servicesStarted []string
@@ -39,7 +39,7 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 
 		// Wait for health checks if enabled
 		if services.WaitForHealth {
-			log.Printf("Waiting for compose services to be healthy")
+			logger.Infof("Waiting for compose services to be healthy")
 			// For compose services, we'll check general container health
 			// This is a simplified approach since compose services don't have individual names
 		}
@@ -62,7 +62,7 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 		if services.WaitForHealth {
 			healthResult := WaitForServiceHealth(container, services.Timeout)
 			if !healthResult.Success {
-				log.Printf("Health check failed for service %v: %s", container, healthResult.Stderr)
+				logger.Infof("Health check failed for service %v: %s", container, healthResult.Stderr)
 				// Continue with other services but log the failure
 			}
 		}
@@ -70,7 +70,7 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 
 	// Cleanup is now handled via defer in ExecuteCommandStep
 	if services.Cleanup {
-		log.Printf("Cleanup enabled for services - will be cleaned up after command execution")
+		logger.Infof("Cleanup enabled for services - will be cleaned up after command execution")
 	}
 
 	return ExecutionResult{
@@ -95,12 +95,12 @@ func getDockerComposeCommand() string {
 
 // StartDockerCompose starts services using Docker Compose
 func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
-	log.Printf("Starting Docker Compose services from file: %s", compose.File)
+	logger.Infof("Starting Docker Compose services from file: %s", compose.File)
 
 	// Check if compose file exists
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
-		log.Print(errorMsg)
+		logger.Info(errorMsg)
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
@@ -121,7 +121,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 		args = append(args, compose.Services...)
 	}
 
-	log.Printf("Running compose command: %s %v", composeCmd, args)
+	logger.Infof("Running compose command: %s %v", composeCmd, args)
 
 	// Use direct execution to avoid shell injection vulnerabilities
 	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
@@ -131,17 +131,17 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	})
 
 	if !result.Success {
-		log.Printf("Docker Compose command failed: %s", result.Stderr)
+		logger.Infof("Docker Compose command failed: %s", result.Stderr)
 		return result
 	}
 
-	log.Print("Docker Compose services started successfully")
+	logger.Info("Docker Compose services started successfully")
 	return result
 }
 
 // StopServices stops and cleans up services based on configuration
 func StopServices(services config.ServicesConfig) ExecutionResult {
-	log.Printf("Stopping services (compose: %v, containers: %d)",
+	logger.Infof("Stopping services (compose: %v, containers: %d)",
 		services.Compose != nil, len(services.Containers))
 
 	var errors []string
@@ -164,25 +164,25 @@ func StopServices(services config.ServicesConfig) ExecutionResult {
 
 	if len(errors) > 0 {
 		errorMsg := strings.Join(errors, "; ")
-		log.Printf("Service cleanup completed with errors: %s", errorMsg)
+		logger.Infof("Service cleanup completed with errors: %s", errorMsg)
 		return ExecutionResult{
 			Success: false,
 			Stderr:  errorMsg,
 		}
 	}
 
-	log.Print("Service cleanup completed successfully")
+	logger.Info("Service cleanup completed successfully")
 	return ExecutionResult{Success: true}
 }
 
 // StopDockerCompose stops services using Docker Compose
 func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
-	log.Printf("Stopping Docker Compose services from file: %s", compose.File)
+	logger.Infof("Stopping Docker Compose services from file: %s", compose.File)
 
 	// Check if compose file exists
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
-		log.Print(errorMsg)
+		logger.Info(errorMsg)
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
@@ -203,7 +203,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 		args = append(args, compose.Services...)
 	}
 
-	log.Printf("Running compose down command: %s %v", composeCmd, args)
+	logger.Infof("Running compose down command: %s %v", composeCmd, args)
 
 	// Use direct execution to avoid shell injection vulnerabilities
 	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
@@ -213,10 +213,10 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	})
 
 	if !result.Success {
-		log.Printf("Docker Compose down command failed: %s", result.Stderr)
+		logger.Infof("Docker Compose down command failed: %s", result.Stderr)
 		return result
 	}
 
-	log.Print("Docker Compose services stopped successfully")
+	logger.Info("Docker Compose services stopped successfully")
 	return result
 }

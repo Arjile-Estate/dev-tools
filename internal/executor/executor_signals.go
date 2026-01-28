@@ -1,7 +1,7 @@
 package executor
 
 import (
-	"log"
+	"dev-tools/internal/logger"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -23,12 +23,12 @@ func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
 	case err := <-done:
 		return err
 	case sig := <-signalChan:
-		log.Printf("Received signal %v, terminating process", sig)
+		logger.Infof("Received signal %v, terminating process", sig)
 		if cmd.Process != nil {
 			if sigErr := cmd.Process.Signal(sig); sigErr != nil {
-				log.Printf("Failed to forward signal to child process: %v", sigErr)
+				logger.Infof("Failed to forward signal to child process: %v", sigErr)
 				if killErr := cmd.Process.Kill(); killErr != nil {
-					log.Printf("Failed to kill child process: %v", killErr)
+					logger.Infof("Failed to kill child process: %v", killErr)
 				}
 			}
 		}
