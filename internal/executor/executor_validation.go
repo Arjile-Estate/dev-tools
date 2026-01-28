@@ -9,6 +9,7 @@ import (
 
 // validateAndResolveDirectory validates and resolves a directory path
 // It handles relative paths, checks existence, and verifies accessibility
+// Returns ValidationError for consistency in error handling
 func validateAndResolveDirectory(stepDir, workingDir string) (string, error) {
 	if stepDir == "" {
 		return workingDir, nil
@@ -23,18 +24,18 @@ func validateAndResolveDirectory(stepDir, workingDir string) (string, error) {
 	info, err := os.Stat(stepDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("directory '%s' does not exist", stepDir)
+			return "", NewValidationError("directory", stepDir, fmt.Errorf("does not exist"))
 		}
-		return "", fmt.Errorf("directory '%s' is not accessible: %w", stepDir, err)
+		return "", NewValidationError("directory", stepDir, fmt.Errorf("not accessible: %w", err))
 	}
 
 	if !info.IsDir() {
-		return "", fmt.Errorf("path '%s' is not a directory", stepDir)
+		return "", NewValidationError("directory", stepDir, fmt.Errorf("path is not a directory"))
 	}
 
 	// Test directory accessibility
 	if _, err := os.ReadDir(stepDir); err != nil {
-		return "", fmt.Errorf("directory '%s' is not accessible: %w", stepDir, err)
+		return "", NewValidationError("directory", stepDir, fmt.Errorf("not accessible: %w", err))
 	}
 
 	log.Printf("Using directory: %s", stepDir)

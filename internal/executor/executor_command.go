@@ -221,7 +221,8 @@ func handleServicesStartup(services config.ServicesConfig) ([]string, error) {
 
 	result := HandleServicesConfiguration(services)
 	if !result.Success {
-		return nil, fmt.Errorf("failed to start services: %s", result.Stderr)
+		// Wrap in ServiceError for better error categorization
+		return nil, NewServiceError("multiple", "start", fmt.Errorf("%s", result.Stderr))
 	}
 
 	return result.ServicesStarted, nil
@@ -232,7 +233,7 @@ func checkDaemonAlreadyRunning(commandName, command string) error {
 	pidFile := GeneratePIDFilename(commandName, command)
 	if _, err := os.Stat(pidFile); err == nil {
 		if existingPID, err := ReadPIDFile(pidFile); err == nil && IsProcessRunning(existingPID) {
-			return fmt.Errorf("daemon process already running with PID %d (pid file: %s)", existingPID, pidFile)
+			return NewDaemonError(existingPID, pidFile, fmt.Errorf("process already running"))
 		}
 		// Clean up stale PID file
 		log.Printf("Removing stale PID file %s", pidFile)
@@ -249,14 +250,14 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 	// Validate and resolve execution directory
 	executionDir, err := validateAndResolveDirectory(step.Directory, workingDir)
 	if err != nil {
-		log.Print(err.Error())
+		// Don't double-log: caller will log if needed
 		return ExecutionResult{Success: false, Stderr: err.Error()}
 	}
 
 	// Start services if configured
 	servicesStarted, err := handleServicesStartup(step.Services)
 	if err != nil {
-		log.Print(err.Error())
+		// Don't double-log: caller will log if needed
 		return ExecutionResult{Success: false, Stderr: err.Error()}
 	}
 
@@ -285,7 +286,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		// Check if daemon already running
 		if step.Daemon {
 			if err := checkDaemonAlreadyRunning(commandName, command); err != nil {
-				log.Print(err.Error())
+				// Don't double-log: caller will log if needed
 				return ExecutionResult{Success: false, Stderr: err.Error()}
 			}
 		}

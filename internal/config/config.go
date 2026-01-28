@@ -102,12 +102,12 @@ func LoadConfigFromFile(configPath string) (*Config, error) {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file %s: %w", configPath, err)
+		return nil, NewConfigError(configPath, fmt.Errorf("failed to read file: %w", err))
 	}
 
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse YAML config %s: %w", configPath, err)
+		return nil, NewConfigError(configPath, fmt.Errorf("failed to parse YAML: %w", err))
 	}
 
 	// Initialize commands map if it's nil
