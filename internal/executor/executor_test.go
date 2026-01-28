@@ -821,11 +821,12 @@ func TestServicesConfiguration(t *testing.T) {
 		{
 			name: "containers only",
 			services: config.ServicesConfig{
-				Containers: []interface{}{
-					"redis",
-					map[string]interface{}{
-						"test-service": map[string]interface{}{
-							"image": "alpine:latest",
+				Containers: []config.ContainerReference{
+					{Simple: "redis"},
+					{
+						Complex: &config.ContainerConfig{
+							Name:  "test-service",
+							Image: "alpine:latest",
 						},
 					},
 				},
@@ -1155,7 +1156,7 @@ func TestWaitForServiceHealth(t *testing.T) {
 			service:     123,
 			timeout:     5,
 			expectError: true,
-			errorMsg:    "service must be a string or object",
+			errorMsg:    "service must be a string or ContainerReference",
 		},
 		{
 			name:        "string service name",
@@ -1399,7 +1400,7 @@ func TestExecuteCommandStep_ServicesConfiguration(t *testing.T) {
 			step: config.CommandStep{
 				Run: config.RunCommand{"echo hello"},
 				Services: config.ServicesConfig{
-					Containers:    []interface{}{"redis"},
+					Containers:    []config.ContainerReference{{Simple: "redis"}},
 					WaitForHealth: false,
 				},
 			},
@@ -1450,7 +1451,7 @@ func TestHandleServicesConfiguration(t *testing.T) {
 		{
 			name: "services with containers only",
 			services: config.ServicesConfig{
-				Containers:    []interface{}{"redis", "postgres"},
+				Containers:    []config.ContainerReference{{Simple: "redis"}, {Simple: "postgres"}},
 				WaitForHealth: false,
 			},
 			setupFiles:    func() error { return nil },
@@ -1475,7 +1476,7 @@ func TestHandleServicesConfiguration(t *testing.T) {
 		{
 			name: "services with both containers and compose",
 			services: config.ServicesConfig{
-				Containers: []interface{}{"postgres"},
+				Containers: []config.ContainerReference{{Simple: "postgres"}},
 				Compose: &config.ComposeConfig{
 					File: filepath.Join(tmpDir, "docker-compose.yml"),
 				},
@@ -1566,7 +1567,7 @@ func TestStopServices(t *testing.T) {
 		{
 			name: "stop container services",
 			services: config.ServicesConfig{
-				Containers:    []interface{}{"redis"},
+				Containers:    []config.ContainerReference{{Simple: "redis"}},
 				WaitForHealth: false,
 			},
 			setupFiles:  func() error { return nil },
@@ -1731,28 +1732,29 @@ func TestStartDockerService_ErrorHandling(t *testing.T) {
 	}{
 		{
 			name: "service without image field",
-			service: map[string]interface{}{
-				"bad-service": map[string]interface{}{
-					"ports": []interface{}{"8080:80"},
-					// Missing required "image" field
+			service: config.ContainerReference{
+				Complex: &config.ContainerConfig{
+					Name:  "bad-service",
+					Image: "", // Missing required image field
+					Ports: []string{"8080:80"},
 				},
 			},
 			expectError: true,
-			errorMsg:    "Service bad-service must have an 'image' field",
+			errorMsg:    "container bad-service must have an 'image' field",
 			description: "should fail when service lacks required image field",
 		},
 		{
 			name:        "invalid service type - number",
 			service:     12345,
 			expectError: true,
-			errorMsg:    "Service must be a string or object",
+			errorMsg:    "Service must be a string or ContainerReference",
 			description: "should fail with invalid service type",
 		},
 		{
 			name:        "invalid service type - array",
 			service:     []string{"invalid"},
 			expectError: true,
-			errorMsg:    "Service must be a string or object",
+			errorMsg:    "Service must be a string or ContainerReference",
 			description: "should fail with array service type",
 		},
 		{
@@ -1981,7 +1983,7 @@ func TestExecuteCommandStep_ServiceCleanup(t *testing.T) {
 			name: "services with cleanup enabled",
 			step: config.CommandStep{
 				Services: config.ServicesConfig{
-					Containers:    []interface{}{"redis"},
+					Containers:    []config.ContainerReference{{Simple: "redis"}},
 					Cleanup:       true,
 					WaitForHealth: false,
 				},
@@ -1993,7 +1995,7 @@ func TestExecuteCommandStep_ServiceCleanup(t *testing.T) {
 			name: "services without cleanup",
 			step: config.CommandStep{
 				Services: config.ServicesConfig{
-					Containers:    []interface{}{"redis"},
+					Containers:    []config.ContainerReference{{Simple: "redis"}},
 					Cleanup:       false,
 					WaitForHealth: false,
 				},

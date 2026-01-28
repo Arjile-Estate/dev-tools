@@ -57,7 +57,10 @@ func TestLoadConfigFromFile(t *testing.T) {
 					"dev": {
 						{
 							Services: ServicesConfig{
-								Containers:    []interface{}{"redis", "postgres"},
+								Containers: []ContainerReference{
+									{Simple: "redis"},
+									{Simple: "postgres"},
+								},
 								Cleanup:       false,
 								WaitForHealth: true,
 								Timeout:       30,
@@ -332,16 +335,17 @@ func TestServicesConfig_UnmarshalYAML(t *testing.T) {
           POSTGRES_PASSWORD: "password"
         volumes: ["./data:/var/lib/postgresql/data"]`,
 			want: ServicesConfig{
-				Containers: []interface{}{
-					"redis",
-					map[string]interface{}{
-						"database": map[string]interface{}{
-							"image": "postgres:15",
-							"ports": []interface{}{"5432:5432"},
-							"environment": map[string]interface{}{
+				Containers: []ContainerReference{
+					{Simple: "redis"},
+					{
+						Complex: &ContainerConfig{
+							Name:  "database",
+							Image: "postgres:15",
+							Ports: []string{"5432:5432"},
+							Environment: map[string]string{
 								"POSTGRES_PASSWORD": "password",
 							},
-							"volumes": []interface{}{"./data:/var/lib/postgresql/data"},
+							Volumes: []string{"./data:/var/lib/postgresql/data"},
 						},
 					},
 				},
@@ -367,8 +371,8 @@ func TestServicesConfig_UnmarshalYAML(t *testing.T) {
 					File:     "docker-compose.dev.yml",
 					Services: []string{"api", "database"},
 				},
-				Containers: []interface{}{
-					"redis",
+				Containers: []ContainerReference{
+					{Simple: "redis"},
 				},
 				Cleanup:       true,
 				WaitForHealth: false,
@@ -538,21 +542,92 @@ func compareComposeConfig(a, b ComposeConfig) bool {
 	return true
 }
 
-func compareContainerInterface(a, b interface{}) bool {
-	switch aVal := a.(type) {
-	case string:
-		if bVal, ok := b.(string); ok {
-			return aVal == bVal
-		}
-		return false
-	case map[string]interface{}:
-		if bVal, ok := b.(map[string]interface{}); ok {
-			return compareMapInterface(aVal, bVal)
-		}
-		return false
-	default:
+func compareContainerInterface(a, b ContainerReference) bool {
+	// Compare simple references
+	if a.IsSimple() && b.IsSimple() {
+		return a.Simple == b.Simple
+	}
+
+	// Compare complex references
+	if a.Complex != nil && b.Complex != nil {
+		return compareContainerConfig(a.Complex, b.Complex)
+	}
+
+	// One is simple, other is complex - not equal
+	return false
+}
+
+func compareContainerConfig(a, b *ContainerConfig) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
 		return false
 	}
+
+	// Compare all fields
+	if a.Name != b.Name || a.Image != b.Image || a.Command != b.Command {
+		return false
+	}
+	if a.Restart != b.Restart || a.Memory != b.Memory || a.CPUs != b.CPUs {
+		return false
+	}
+
+	// Compare maps
+	if !compareStringMap(a.Environment, b.Environment) {
+		return false
+	}
+
+	// Compare slices
+	if !compareStringSlice(a.Volumes, b.Volumes) {
+		return false
+	}
+	if !compareStringSlice(a.Ports, b.Ports) {
+		return false
+	}
+	if !compareStringSlice(a.Networks, b.Networks) {
+		return false
+	}
+
+	// Compare health check
+	return compareHealthCheck(a.HealthCheck, b.HealthCheck)
+}
+
+func compareStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func compareStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func compareHealthCheck(a, b *HealthCheckConfig) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Test == b.Test &&
+		a.Interval == b.Interval &&
+		a.Timeout == b.Timeout &&
+		a.Retries == b.Retries
 }
 
 func compareMapInterface(a, b map[string]interface{}) bool {

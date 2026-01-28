@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"dev-tools/internal/config"
 )
 
 // Docker command strings
@@ -23,39 +25,108 @@ func getPasswordFromEnv(envVar, defaultPassword, serviceName string) string {
 	return defaultPassword
 }
 
+// buildDockerRunCommand builds a docker run command from a ContainerConfig
+func buildDockerRunCommand(cfg *config.ContainerConfig) string {
+	cmdParts := []string{"docker", "run", "-d"}
+
+	// Add environment variables
+	for key, value := range cfg.Environment {
+		cmdParts = append(cmdParts, "-e", fmt.Sprintf("%s=%s", key, value))
+	}
+
+	// Add volumes
+	for _, vol := range cfg.Volumes {
+		cmdParts = append(cmdParts, "-v", vol)
+	}
+
+	// Add ports
+	for _, port := range cfg.Ports {
+		cmdParts = append(cmdParts, "-p", port)
+	}
+
+	// Add networks
+	for _, network := range cfg.Networks {
+		cmdParts = append(cmdParts, "--network", network)
+	}
+
+	// Add restart policy
+	if cfg.Restart != "" {
+		cmdParts = append(cmdParts, "--restart", cfg.Restart)
+	}
+
+	// Add memory limit
+	if cfg.Memory != "" {
+		cmdParts = append(cmdParts, "--memory", cfg.Memory)
+	}
+
+	// Add CPU limit
+	if cfg.CPUs != "" {
+		cmdParts = append(cmdParts, "--cpus", cfg.CPUs)
+	}
+
+	// Add health check
+	if cfg.HealthCheck != nil {
+		if cfg.HealthCheck.Test != "" {
+			cmdParts = append(cmdParts, "--health-cmd", cfg.HealthCheck.Test)
+		}
+		if cfg.HealthCheck.Interval != "" {
+			cmdParts = append(cmdParts, "--health-interval", cfg.HealthCheck.Interval)
+		}
+		if cfg.HealthCheck.Timeout != "" {
+			cmdParts = append(cmdParts, "--health-timeout", cfg.HealthCheck.Timeout)
+		}
+		if cfg.HealthCheck.Retries != "" {
+			cmdParts = append(cmdParts, "--health-retries", cfg.HealthCheck.Retries)
+		}
+	}
+
+	// Add container name and image
+	cmdParts = append(cmdParts, "--name", cfg.Name, cfg.Image)
+
+	// Add custom command if specified
+	if cfg.Command != "" {
+		cmdParts = append(cmdParts, "sh", "-c", cfg.Command)
+	}
+
+	return strings.Join(cmdParts, " ")
+}
+
 // getContainerName extracts container name from service definition
 func getContainerName(service interface{}) (string, error) {
 	switch s := service.(type) {
 	case string:
 		return s, nil
+	case config.ContainerReference:
+		return s.GetName(), nil
+	case *config.ContainerReference:
+		return s.GetName(), nil
 	case map[string]interface{}:
 		for name := range s {
 			return name, nil
 		}
 		return "", fmt.Errorf("empty service configuration")
 	default:
-		return "", fmt.Errorf("service must be a string or object")
+		return "", fmt.Errorf("service must be a string or ContainerReference")
 	}
 }
 
-// StartDockerService starts a Docker service container
-func StartDockerService(service interface{}) ExecutionResult {
-	log.Printf("Starting Docker service: %v", service)
+// StartDockerServiceTyped starts a Docker service container using typed configuration
+func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
+	log.Printf("Starting Docker service: %s", ref.GetName())
 
 	var containerName string
 	var runCmd string
 
-	switch s := service.(type) {
-	case string:
+	if ref.IsSimple() {
 		// Simple string service name
-		containerName = s
+		containerName = ref.Simple
 
 		// Predefined service configurations with environment variable support
 		// SECURITY NOTE: Default passwords are "password" for development only.
 		// ALWAYS set environment variables in production:
 		//   - POSTGRES_PASSWORD for postgres
 		//   - MYSQL_ROOT_PASSWORD for mysql
-		switch s {
+		switch ref.Simple {
 		case "redis":
 			runCmd = "docker run -d --name redis -p 6379:6379 redis:latest"
 		case "postgres":
@@ -66,115 +137,23 @@ func StartDockerService(service interface{}) ExecutionResult {
 			runCmd = fmt.Sprintf("docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=%s mysql:latest", mysqlPassword)
 		default:
 			// Default format for unknown services
-			runCmd = fmt.Sprintf("docker run -d --name %s %s:latest", containerName, s)
+			runCmd = fmt.Sprintf("docker run -d --name %s %s:latest", containerName, ref.Simple)
+		}
+	} else if ref.Complex != nil {
+		// Complex service configuration
+		if err := ref.Complex.Validate(); err != nil {
+			return ExecutionResult{
+				Success: false,
+				Stderr:  err.Error(),
+			}
 		}
 
-	case map[string]interface{}:
-		// Complex service definition - assume first key is service name
-		for name, config := range s {
-			containerName = name
-			configMap, ok := config.(map[string]interface{})
-			if !ok {
-				return ExecutionResult{
-					Success: false,
-					Stderr:  fmt.Sprintf("Invalid service configuration for %s", name),
-				}
-			}
-
-			image, ok := configMap["image"].(string)
-			if !ok {
-				return ExecutionResult{
-					Success: false,
-					Stderr:  fmt.Sprintf("Service %s must have an 'image' field", name),
-				}
-			}
-
-			// Build docker run command
-			cmdParts := []string{"docker", "run", "-d"}
-
-			// Add environment variables
-			if env, ok := configMap["environment"].(map[string]interface{}); ok {
-				for key, value := range env {
-					if valueStr, ok := value.(string); ok {
-						cmdParts = append(cmdParts, "-e", fmt.Sprintf("%s=%s", key, valueStr))
-					}
-				}
-			}
-
-			// Add volumes
-			if volumes, ok := configMap["volumes"].([]interface{}); ok {
-				for _, vol := range volumes {
-					if volStr, ok := vol.(string); ok {
-						cmdParts = append(cmdParts, "-v", volStr)
-					}
-				}
-			}
-
-			// Add ports
-			if ports, ok := configMap["ports"].([]interface{}); ok {
-				for _, port := range ports {
-					if portStr, ok := port.(string); ok {
-						cmdParts = append(cmdParts, "-p", portStr)
-					}
-				}
-			}
-
-			// Add networks
-			if networks, ok := configMap["networks"].([]interface{}); ok {
-				for _, network := range networks {
-					if networkStr, ok := network.(string); ok {
-						cmdParts = append(cmdParts, "--network", networkStr)
-					}
-				}
-			}
-
-			// Add restart policy
-			if restart, ok := configMap["restart"].(string); ok {
-				cmdParts = append(cmdParts, "--restart", restart)
-			}
-
-			// Add memory limit
-			if memory, ok := configMap["memory"].(string); ok {
-				cmdParts = append(cmdParts, "--memory", memory)
-			}
-
-			// Add CPU limit
-			if cpus, ok := configMap["cpus"].(string); ok {
-				cmdParts = append(cmdParts, "--cpus", cpus)
-			}
-
-			// Add health check
-			if healthCheck, ok := configMap["healthcheck"].(map[string]interface{}); ok {
-				if test, ok := healthCheck["test"].(string); ok {
-					cmdParts = append(cmdParts, "--health-cmd", test)
-				}
-				if interval, ok := healthCheck["interval"].(string); ok {
-					cmdParts = append(cmdParts, "--health-interval", interval)
-				}
-				if timeout, ok := healthCheck["timeout"].(string); ok {
-					cmdParts = append(cmdParts, "--health-timeout", timeout)
-				}
-				if retries, ok := healthCheck["retries"].(string); ok {
-					cmdParts = append(cmdParts, "--health-retries", retries)
-				}
-			}
-
-			// Add container name and image
-			cmdParts = append(cmdParts, "--name", containerName, image)
-
-			// Add custom command if specified
-			if command, ok := configMap["command"].(string); ok {
-				cmdParts = append(cmdParts, "sh", "-c", command)
-			}
-
-			runCmd = strings.Join(cmdParts, " ")
-			break // Only process first service for now
-		}
-
-	default:
+		containerName = ref.Complex.Name
+		runCmd = buildDockerRunCommand(ref.Complex)
+	} else {
 		return ExecutionResult{
 			Success: false,
-			Stderr:  "Service must be a string or object",
+			Stderr:  "Invalid container reference: neither simple nor complex",
 		}
 	}
 
@@ -192,6 +171,25 @@ func StartDockerService(service interface{}) ExecutionResult {
 
 	// Container doesn't exist, create and start it
 	return createAndStartContainer(runCmd)
+}
+
+// StartDockerService starts a Docker service container (legacy interface{} support)
+// Deprecated: Use StartDockerServiceTyped with config.ContainerReference for type safety
+func StartDockerService(service interface{}) ExecutionResult {
+	// Convert interface{} to ContainerReference for backward compatibility
+	switch s := service.(type) {
+	case string:
+		return StartDockerServiceTyped(config.ContainerReference{Simple: s})
+	case config.ContainerReference:
+		return StartDockerServiceTyped(s)
+	case *config.ContainerReference:
+		return StartDockerServiceTyped(*s)
+	default:
+		return ExecutionResult{
+			Success: false,
+			Stderr:  "Service must be a string or ContainerReference",
+		}
+	}
 }
 
 // StopDockerService stops a Docker service container

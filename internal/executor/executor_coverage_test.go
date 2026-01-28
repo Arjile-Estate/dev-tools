@@ -335,8 +335,8 @@ services:
 				File:     composeFile,
 				Services: []string{"test"},
 			},
-			Containers: []interface{}{
-				"redis", // Simple string container
+			Containers: []config.ContainerReference{
+				{Simple: "redis"}, // Simple string container
 			},
 			WaitForHealth: false,
 			Timeout:       10,

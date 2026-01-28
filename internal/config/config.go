@@ -66,11 +66,11 @@ type ComposeConfig struct {
 
 // ServicesConfig represents the new services configuration
 type ServicesConfig struct {
-	Compose       *ComposeConfig `yaml:"compose,omitempty"`
-	Containers    []interface{}  `yaml:"containers,omitempty"`
-	Cleanup       bool           `yaml:"cleanup,omitempty"`
-	WaitForHealth bool           `yaml:"wait_for_health,omitempty"`
-	Timeout       int            `yaml:"timeout,omitempty"`
+	Compose       *ComposeConfig        `yaml:"compose,omitempty"`
+	Containers    []ContainerReference  `yaml:"containers,omitempty"`
+	Cleanup       bool                  `yaml:"cleanup,omitempty"`
+	WaitForHealth bool                  `yaml:"wait_for_health,omitempty"`
+	Timeout       int                   `yaml:"timeout,omitempty"`
 }
 
 // UnmarshalYAML implements custom unmarshaling for ServicesConfig with defaults
