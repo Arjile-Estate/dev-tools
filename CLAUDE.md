@@ -112,6 +112,8 @@ Generate shell completion script
 ### Flags
 - `--verbose` or `-v`: Enable detailed logging
 - `--project-dir <path>` or `-p <path>`: Run commands in a different directory
+- `--watch` or `-w`: Watch mode - re-run command on file changes (requires watch config)
+- `--format <format>`: Output format - text or json (default: text, currently status command only)
 - `--no-color`: Disable colored output (useful for parsing)
 
 ### Debugging
@@ -130,11 +132,19 @@ This project uses Docker services that are automatically managed:
 
 ## Custom Configuration
 
-This project has custom commands defined in `.dev-config.yaml`. These commands may:
-- Start Docker containers or Docker Compose services
+This project has custom commands defined in `.dev-config.yaml`. Commands can:
+- Start Docker containers or Docker Compose services with health checks
 - Run multiple commands in sequence
 - Execute commands in specific directories
 - Run background daemons
+- **Retry on failures** with configurable delays and exit code filters
+- **Watch files** and re-run automatically on changes (debounced)
+- Define service timeouts and cleanup behaviors
+
+Check `.dev-config.yaml` for:
+- `retry`, `retry_delay`, `retry_on_exit_codes` - Retry configuration
+- `watch.patterns`, `watch.debounce`, `watch.ignore` - Watch mode configuration
+- `services.wait_for_health`, `services.timeout`, `services.cleanup` - Service management
 
 Always check the configuration file for detailed command behavior.
 
@@ -151,14 +161,37 @@ dev-tools test
 dev-tools dev
 ```
 
+### Watch Mode for TDD
+```bash
+dev-tools --watch test  # Re-runs on file changes
+```
+
 ### Checking Running Processes
 ```bash
-dev-tools status
+dev-tools status                # Human-readable
+dev-tools status --format json  # Machine-readable
 ```
 
 ### Viewing Logs
 ```bash
 dev-tools logs
+```
+
+### Shell Completion Setup
+```bash
+# Bash
+source <(dev-tools completion bash)
+
+# Zsh
+source <(dev-tools completion zsh)
+
+# Fish
+dev-tools completion fish | source
+```
+
+### Debugging Commands
+```bash
+dev-tools --verbose test  # See detailed execution
 ```
 
 ## Notes

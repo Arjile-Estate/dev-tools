@@ -62,7 +62,7 @@ sensible defaults, while allowing customization through configuration files.`,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.40.0"
+	rootCmd.Version = "0.40.1"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
