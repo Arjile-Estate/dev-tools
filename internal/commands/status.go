@@ -111,7 +111,7 @@ func outputStatusText(cmd *cobra.Command, daemons []executor.DaemonInfo, service
 
 			commandName := daemon.CommandName
 			if commandName == "" {
-				commandName = "(legacy)"
+				commandName = "(unknown)"
 			}
 
 			uptime := daemon.Uptime

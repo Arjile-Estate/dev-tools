@@ -539,7 +539,7 @@ func TestExecuteCommandStepWithDirectory(t *testing.T) {
 	}
 }
 
-func TestExecuteCommandWithSteps(t *testing.T) {
+func TestExecuteCommandWithOptions(t *testing.T) {
 	tests := []struct {
 		name        string
 		commandName string
@@ -583,7 +583,12 @@ func TestExecuteCommandWithSteps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExecuteCommandWithSteps(tt.commandName, tt.steps, "", nil)
+			result := ExecuteCommandWithOptions(CommandExecutionOptions{
+				CommandName:     tt.commandName,
+				Steps:           tt.steps,
+				WorkingDir:      "",
+				PassthroughArgs: nil,
+			})
 
 			assert.Equal(t, tt.wantSuccess, result.Success)
 		})
@@ -668,23 +673,24 @@ func TestLoadEnvironmentVariables(t *testing.T) {
 func TestDockerServiceOperations(t *testing.T) {
 	tests := []struct {
 		name        string
-		service     interface{}
+		service     config.ContainerReference
 		expectError bool
 		description string
 	}{
 		{
 			name:        "simple string service",
-			service:     "redis",
+			service:     config.ContainerReference{Simple: "redis"},
 			expectError: false,
 			description: "should handle simple string service names",
 		},
 		{
 			name: "complex service configuration",
-			service: map[string]interface{}{
-				"testbox": map[string]interface{}{
-					"image":   "alpine",
-					"volumes": []interface{}{"./:/data"},
-					"ports":   []interface{}{"8080:80"},
+			service: config.ContainerReference{
+				Complex: &config.ContainerConfig{
+					Name:    "testbox",
+					Image:   "alpine",
+					Volumes: []string{"./:/data"},
+					Ports:   []string{"8080:80"},
 				},
 			},
 			expectError: false,
@@ -692,25 +698,21 @@ func TestDockerServiceOperations(t *testing.T) {
 		},
 		{
 			name: "service without image",
-			service: map[string]interface{}{
-				"badservice": map[string]interface{}{
-					"volumes": []interface{}{"./:/data"},
+			service: config.ContainerReference{
+				Complex: &config.ContainerConfig{
+					Name:    "badservice",
+					Volumes: []string{"./:/data"},
+					Image:   "", // Missing required image
 				},
 			},
 			expectError: true,
 			description: "should fail when service lacks required image field",
 		},
-		{
-			name:        "invalid service type",
-			service:     123,
-			expectError: true,
-			description: "should fail with invalid service type",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := StartDockerService(tt.service)
+			result := StartDockerServiceTyped(tt.service)
 
 			if result.Success {
 				t.Cleanup(func() {
@@ -1307,38 +1309,39 @@ func TestExecuteCommandStep_ErrorHandling(t *testing.T) {
 func TestStartDockerService_ComplexConfiguration(t *testing.T) {
 	tests := []struct {
 		name        string
-		service     interface{}
+		service     config.ContainerReference
 		expectError bool
 		description string
 	}{
 		{
 			name: "service with all configuration options",
-			service: map[string]interface{}{
-				"complex-service": map[string]interface{}{
-					"image": "alpine:latest",
-					"environment": []interface{}{
-						"VAR1=value1",
-						"VAR2=value2",
+			service: config.ContainerReference{
+				Complex: &config.ContainerConfig{
+					Name: "complex-service",
+					Image: "alpine:latest",
+					Environment: map[string]string{
+						"VAR1": "value1",
+						"VAR2": "value2",
 					},
-					"volumes": []interface{}{
+					Volumes: []string{
 						"./data:/app/data",
 						"/tmp:/app/tmp",
 					},
-					"ports": []interface{}{
+					Ports: []string{
 						"8080:80",
 						"9090:90",
 					},
-					"networks": []interface{}{
+					Networks: []string{
 						"custom-network",
 					},
-					"restart": "unless-stopped",
-					"memory":  "512m",
-					"cpus":    "0.5",
-					"healthcheck": map[string]interface{}{
-						"test":     []interface{}{"CMD", "curl", "-f", "http://localhost/health"},
-						"interval": "30s",
-						"timeout":  "10s",
-						"retries":  3,
+					Restart: "unless-stopped",
+					Memory:  "512m",
+					CPUs:    "0.5",
+					HealthCheck: &config.HealthCheckConfig{
+						Test:     "curl -f http://localhost/health",
+						Interval: "30s",
+						Timeout:  "10s",
+						Retries:  "3",
 					},
 				},
 			},
@@ -1346,35 +1349,25 @@ func TestStartDockerService_ComplexConfiguration(t *testing.T) {
 			description: "should handle complex service with all options",
 		},
 		{
-			name: "service with environment as map",
-			service: map[string]interface{}{
-				"env-service": map[string]interface{}{
-					"image": "alpine:latest",
-					"environment": map[string]interface{}{
+			name: "service with environment variables",
+			service: config.ContainerReference{
+				Complex: &config.ContainerConfig{
+					Name:  "env-service",
+					Image: "alpine:latest",
+					Environment: map[string]string{
 						"KEY1": "value1",
 						"KEY2": "value2",
 					},
 				},
 			},
 			expectError: false,
-			description: "should handle environment as map",
-		},
-		{
-			name: "service with invalid healthcheck",
-			service: map[string]interface{}{
-				"bad-health-service": map[string]interface{}{
-					"image":       "alpine:latest",
-					"healthcheck": "invalid-healthcheck",
-				},
-			},
-			expectError: false, // Should handle gracefully
-			description: "should handle invalid healthcheck configuration",
+			description: "should handle environment variables",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := StartDockerService(tt.service)
+			result := StartDockerServiceTyped(tt.service)
 
 			if result.Success {
 				t.Cleanup(func() {
@@ -1726,7 +1719,7 @@ func TestReadEnhancedPIDFile_LegacyFormat(t *testing.T) {
 func TestStartDockerService_ErrorHandling(t *testing.T) {
 	tests := []struct {
 		name        string
-		service     interface{}
+		service     config.ContainerReference
 		expectError bool
 		errorMsg    string
 		description string
@@ -1744,36 +1737,11 @@ func TestStartDockerService_ErrorHandling(t *testing.T) {
 			errorMsg:    "container bad-service must have an 'image' field",
 			description: "should fail when service lacks required image field",
 		},
-		{
-			name:        "invalid service type - number",
-			service:     12345,
-			expectError: true,
-			errorMsg:    "Service must be a string or ContainerReference",
-			description: "should fail with invalid service type",
-		},
-		{
-			name:        "invalid service type - array",
-			service:     []string{"invalid"},
-			expectError: true,
-			errorMsg:    "Service must be a string or ContainerReference",
-			description: "should fail with array service type",
-		},
-		{
-			name: "service with invalid environment format",
-			service: map[string]interface{}{
-				"env-service": map[string]interface{}{
-					"image":       "alpine:latest",
-					"environment": 123, // Invalid type
-				},
-			},
-			expectError: false, // Should handle gracefully
-			description: "should handle invalid environment format gracefully",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := StartDockerService(tt.service)
+			result := StartDockerServiceTyped(tt.service)
 
 			if tt.expectError && tt.errorMsg != "" {
 				assert.False(t, result.Success)

@@ -176,25 +176,6 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 	return createAndStartContainer(dockerCmd, dockerArgs)
 }
 
-// StartDockerService starts a Docker service container (legacy interface{} support)
-// Deprecated: Use StartDockerServiceTyped with config.ContainerReference for type safety
-func StartDockerService(service interface{}) ExecutionResult {
-	// Convert interface{} to ContainerReference for backward compatibility
-	switch s := service.(type) {
-	case string:
-		return StartDockerServiceTyped(config.ContainerReference{Simple: s})
-	case config.ContainerReference:
-		return StartDockerServiceTyped(s)
-	case *config.ContainerReference:
-		return StartDockerServiceTyped(*s)
-	default:
-		return ExecutionResult{
-			Success: false,
-			Stderr:  "Service must be a string or ContainerReference",
-		}
-	}
-}
-
 // StopDockerService stops a Docker service container
 func StopDockerService(service interface{}) ExecutionResult {
 	logger.Infof("Stopping Docker service: %v", service)

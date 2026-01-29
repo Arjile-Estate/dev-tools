@@ -10,13 +10,8 @@ import (
 	"dev-tools/internal/config"
 )
 
-// Docker Compose command variants
-const (
-	// DockerComposeV2 is the modern docker compose command (built into docker CLI)
-	DockerComposeV2 = "docker compose"
-	// DockerComposeV1 is the legacy docker-compose command (standalone binary)
-	DockerComposeV1 = "docker-compose"
-)
+// Docker Compose command (built into modern docker CLI)
+const DockerComposeCmd = "docker compose"
 
 // HandleServicesConfiguration handles the new services configuration
 func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult {
@@ -47,7 +42,7 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 
 	// Handle individual container services
 	for _, container := range services.Containers {
-		result := StartDockerService(container)
+		result := StartDockerServiceTyped(container)
 		if !result.Success {
 			return result
 		}
@@ -79,20 +74,6 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 	}
 }
 
-// getDockerComposeCommand determines which docker compose command to use
-func getDockerComposeCommand() string {
-	checkNewCmd := DockerComposeV2 + " version"
-	checkResult := ExecuteShellCommand(context.Background(), ExecuteOptions{
-		Command:       checkNewCmd,
-		CaptureOutput: true,
-	})
-
-	if checkResult.Success {
-		return DockerComposeV2
-	}
-	return DockerComposeV1
-}
-
 // StartDockerCompose starts services using Docker Compose
 func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	logger.Infof("Starting Docker Compose services from file: %s", compose.File)
@@ -104,7 +85,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
-	composeCmd := getDockerComposeCommand()
+	composeCmd := DockerComposeCmd
 
 	// Build command arguments (no shell, direct execution for security)
 	args := []string{"-f", compose.File}
@@ -186,7 +167,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
-	composeCmd := getDockerComposeCommand()
+	composeCmd := DockerComposeCmd
 
 	// Build command arguments (no shell, direct execution for security)
 	args := []string{"-f", compose.File}

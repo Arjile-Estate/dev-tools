@@ -550,17 +550,6 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 	}
 }
 
-// ExecuteCommandWithSteps executes a command consisting of multiple steps
-// Deprecated: Use ExecuteCommandWithOptions for better API clarity
-func ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, workingDir string, passthroughArgs []string) ExecutionResult {
-	return ExecuteCommandWithOptions(CommandExecutionOptions{
-		CommandName:     commandName,
-		Steps:           steps,
-		WorkingDir:      workingDir,
-		PassthroughArgs: passthroughArgs,
-	})
-}
-
 // getContainerName extracts container name from service definition
 
 // LoadEnvironmentVariables loads environment variables from a .env file

@@ -236,7 +236,7 @@ func TestHandleStatusCommand(t *testing.T) {
 
 		require.NoError(t, err)
 		output := buf.String()
-		assert.Contains(t, output, "(legacy)") // Should show "(legacy)" for empty command name
+		assert.Contains(t, output, "(unknown)") // Should show "(unknown)" for empty command name
 	})
 
 	t.Run("handle daemon with empty uptime", func(t *testing.T) {

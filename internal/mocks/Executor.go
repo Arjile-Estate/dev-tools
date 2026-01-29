@@ -30,22 +30,6 @@ func (_m *Executor) ExecuteCommandWithOptions(opts executor.CommandExecutionOpti
 	return r0
 }
 
-// ExecuteCommandWithSteps provides a mock function with given fields: commandName, steps, projectDir, passthroughArgs
-func (_m *Executor) ExecuteCommandWithSteps(commandName string, steps []config.CommandStep, projectDir string, passthroughArgs []string) executor.ExecutionResult {
-	ret := _m.Called(commandName, steps, projectDir, passthroughArgs)
-
-	var r0 executor.ExecutionResult
-	if rf, ok := ret.Get(0).(func(string, []config.CommandStep, string, []string) executor.ExecutionResult); ok {
-		r0 = rf(commandName, steps, projectDir, passthroughArgs)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(executor.ExecutionResult)
-		}
-	}
-
-	return r0
-}
-
 // LoadEnvironmentVariables provides a mock function with given fields: envFile
 func (_m *Executor) LoadEnvironmentVariables(envFile string) error {
 	ret := _m.Called(envFile)

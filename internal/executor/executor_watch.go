@@ -66,7 +66,12 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 
 	// Run initial execution
 	fmt.Printf("\n%s\n", colors.Success(">>> Initial execution"))
-	result := ExecuteCommandWithSteps(commandName, steps, workingDir, passthroughArgs)
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:     commandName,
+		Steps:           steps,
+		WorkingDir:      workingDir,
+		PassthroughArgs: passthroughArgs,
+	})
 	if !result.Success {
 		fmt.Printf("%s\n", colors.Warning("Initial execution failed"))
 	}
@@ -103,7 +108,12 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 				if pendingEvent {
 					pendingEvent = false
 					fmt.Printf("\n%s\n", colors.Success(">>> Change detected, re-running command..."))
-					result := ExecuteCommandWithSteps(commandName, steps, workingDir, passthroughArgs)
+					result := ExecuteCommandWithOptions(CommandExecutionOptions{
+						CommandName:     commandName,
+						Steps:           steps,
+						WorkingDir:      workingDir,
+						PassthroughArgs: passthroughArgs,
+					})
 					if result.Success {
 						fmt.Printf("%s\n", colors.Success("✓ Command completed successfully"))
 					} else {

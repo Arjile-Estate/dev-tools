@@ -36,10 +36,18 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 ### Build from Source
 
 ```bash
-git clone <repository-url>
+git clone git@github.com:slaanesh/dev-tools.git
 cd dev-tools
 go mod tidy
 go build -o dev-tools .
+```
+
+### Install Locally
+
+We recommend installing it into your `~/.local/bin` folder - make sure ~/.local/bin is in your shell `PATH`!
+
+```bash
+cp dev-tools ~/.local/bin/
 ```
 
 ### Install Globally
@@ -216,7 +224,7 @@ dev-tools <TAB>
 # Shows: build test lint dev logs status version completion ...
 
 # Complete daemon names for restart
-dev-tools restart <TAB>  
+dev-tools restart <TAB>
 # Shows: web-server worker api-daemon ...
 
 # Complete flags
@@ -498,24 +506,6 @@ healthcheck:
   retries: "3"                                 # Retry attempts
 ```
 
-##### `start_services` (Array) - **Legacy (Deprecated)**
-⚠️ **DEPRECATED**: Use `services` configuration instead. This option will be removed in a future version.
-
-**String Format (Simple):**
-```yaml
-start_services: ["redis", "postgres", "mysql"]
-```
-
-**Named Service Format (Advanced):**
-```yaml
-start_services:
-  - database:
-      image: postgres:15
-      command: "postgres -c log_statement=all"
-      volumes: ["./data:/var/lib/postgresql/data"]
-      ports: ["5432:5432"]
-```
-
 ##### `run` (String or Array)
 Commands to execute. Can be a single command or multiple commands.
 
@@ -699,8 +689,10 @@ Services are automatically managed with smart container lifecycle handling:
 The following services have predefined configurations for convenience:
 
 ```yaml
-# These are equivalent to the detailed configurations below
-start_services: ["redis", "postgres", "mysql"]
+# Simple predefined services
+services:
+  containers: ["redis", "postgres", "mysql"]
+  wait_for_health: true
 
 # Predefined service configurations:
 # redis → docker run -d --name redis -p 6379:6379 redis:latest
@@ -729,17 +721,21 @@ When using default passwords, dev-tools will log a **warning** to remind you to 
 
 **Simple Custom Service:**
 ```yaml
-start_services: ["myuser/myapp"]  # Uses myuser/myapp:latest, container name: myapp
+services:
+  containers: ["myuser/myapp"]  # Uses myuser/myapp:latest, container name: myapp
+  wait_for_health: true
 ```
 
 **Advanced Custom Service:**
 ```yaml
-start_services:
-  - api:
-      image: "myregistry.com/api:v1.2.3"
-      command: "gunicorn app:app --workers 4"
-      volumes: ["./app:/app", "./logs:/var/log/app"]
-      ports: ["8000:8000", "9000:127.0.0.1:9090"]
+services:
+  containers:
+    - api:
+        image: "myregistry.com/api:v1.2.3"
+        command: "gunicorn app:app --workers 4"
+        volumes: ["./app:/app", "./logs:/var/log/app"]
+        ports: ["8000:8000", "9000:127.0.0.1:9090"]
+  wait_for_health: true
 ```
 
 ### Configuration Examples by Use Case
@@ -1233,86 +1229,15 @@ commands:
     - run: "cargo build --release"
 ```
 
-## Migration Guide: `start_services` to `services`
-
-### Why Migrate?
-
-The new `services` configuration provides:
-- **Docker Compose support**: Full integration with compose files
-- **Health checks**: Wait for services to be ready before proceeding
-- **Service cleanup**: Automatic cleanup after command completion
-- **Enhanced container options**: Environment variables, resource limits, networking
-- **Better error handling**: More robust service management
-
-### Migration Examples
-
-#### Simple Migration
-```yaml
-# Old (deprecated)
-start_services: ["redis", "postgres"]
-
-# New (recommended)
-services:
-  containers: ["redis", "postgres"]
-  wait_for_health: true
-```
-
-#### Complex Migration
-```yaml
-# Old (deprecated)
-start_services:
-  - database:
-      image: postgres:15
-      volumes: ["./data:/var/lib/postgresql/data"]
-      ports: ["5432:5432"]
-
-# New (recommended)
-services:
-  containers:
-    - database:
-        image: postgres:15
-        environment:
-          POSTGRES_PASSWORD: "password"
-          POSTGRES_DB: "myapp"
-        volumes: ["./data:/var/lib/postgresql/data"]
-        ports: ["5432:5432"]
-        healthcheck:
-          test: "pg_isready -U postgres"
-          interval: "30s"
-  wait_for_health: true
-  timeout: 60
-```
-
-#### Docker Compose Migration
-```yaml
-# Old (not possible with start_services)
-# Had to manage each service individually
-
-# New (recommended)
-services:
-  compose:
-    file: "docker-compose.yml"
-    services: ["redis", "postgres", "nginx"]
-    profiles: ["dev"]
-  wait_for_health: true
-  timeout: 45
-```
-
-### Migration Strategy
-
-1. **Gradual migration**: Both `start_services` and `services` can coexist
-2. **Test thoroughly**: Ensure services start correctly with new configuration
-3. **Leverage new features**: Add health checks and environment variables
-4. **Consider Docker Compose**: Migrate complex setups to compose files
-
-### Backward Compatibility
-
-The `start_services` configuration continues to work but shows deprecation warnings:
-```
-WARNING: 'start_services' is deprecated. Please migrate to 'services' configuration.
-```
-
 ## Version History
+
+### v0.40.0 - Deprecated Feature Removal
+- **BREAKING**: Removed deprecated `ExecuteCommandWithSteps` method (use `ExecuteCommandWithOptions`)
+- **BREAKING**: Removed deprecated `start_services` configuration (use `services` configuration)
+- **BREAKING**: Removed deprecated `StartDockerService` function (use `StartDockerServiceTyped`)
+- **BREAKING**: Removed Docker Compose V1 (`docker-compose`) fallback support (use Docker Compose V2 built into Docker CLI)
+- Changed legacy daemon status marker from "(legacy)" to "(unknown)"
+- Removed migration guide for `start_services` as it is no longer supported
 
 ### v0.35.0 - YAML Schema Validation
 - Added JSON schema validation for `.dev-config.yaml` files

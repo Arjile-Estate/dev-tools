@@ -245,7 +245,7 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 
 	// Start the daemon again with the same command
 	if daemon.Command == "" {
-		return fmt.Errorf("cannot restart daemon %s: no command information available (legacy PID file)", daemon.CommandName)
+		return fmt.Errorf("cannot restart daemon %s: no command information available in PID file", daemon.CommandName)
 	}
 
 	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
