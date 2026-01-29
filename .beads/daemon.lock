@@ -1,7 +1,7 @@
 {
-  "pid": 27603,
-  "parent_pid": 27594,
+  "pid": 41412,
+  "parent_pid": 41403,
   "database": "/Users/olivier.sirven/dev/dev-tools/.beads/beads.db",
   "version": "0.49.0",
-  "started_at": "2026-01-28T10:19:29.728421Z"
+  "started_at": "2026-01-29T11:39:55.595548Z"
 }
