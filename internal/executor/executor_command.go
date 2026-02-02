@@ -2,8 +2,8 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"dev-tools/internal/logger"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -34,10 +34,10 @@ type DirectExecuteOptions struct {
 
 // CommandExecutionOptions contains options for command execution with steps
 type CommandExecutionOptions struct {
-	CommandName      string                 // Name of the command being executed
-	Steps            []config.CommandStep   // Steps to execute
-	WorkingDir       string                 // Working directory
-	PassthroughArgs  []string               // Arguments to pass through to commands
+	CommandName     string               // Name of the command being executed
+	Steps           []config.CommandStep // Steps to execute
+	WorkingDir      string               // Working directory
+	PassthroughArgs []string             // Arguments to pass through to commands
 }
 
 // ExecuteCommandDirect executes a command directly without shell interpretation
@@ -471,7 +471,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		// Execute with retry logic
 		result := executeWithRetry(context.Background(), step, command, executionDir, commandName)
 
-		if !result.Success && !step.Background {
+		if !result.Success && !step.Background && !step.ContinueOnError {
 			result.ServicesStarted = servicesStarted
 			return result
 		}

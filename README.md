@@ -629,6 +629,23 @@ commands:
 - **Ignore patterns**: Exclude directories like node_modules, vendor, build outputs
 - **Real-time feedback**: See test results immediately as you save files
 
+##### `continue_on_error` (Boolean)
+Continue executing subsequent commands even if this step fails. Useful for running multiple independent checks.
+
+```yaml
+commands:
+  lint:
+    - run:
+        - "golangci-lint run"
+        - "go fmt ./..."
+      continue_on_error: true  # Run formatter even if linter fails
+```
+
+**Use cases:**
+- Running multiple linters/formatters where you want all to run
+- Cleanup tasks that should always execute
+- Non-critical validation steps
+
 ### Advanced Service Management
 
 #### Docker Compose Integration

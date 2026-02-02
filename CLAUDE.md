@@ -139,11 +139,13 @@ This project has custom commands defined in `.dev-config.yaml`. Commands can:
 - Run background daemons
 - **Retry on failures** with configurable delays and exit code filters
 - **Watch files** and re-run automatically on changes (debounced)
+- **Continue on error** to run subsequent commands even when a step fails
 - Define service timeouts and cleanup behaviors
 
 Check `.dev-config.yaml` for:
 - `retry`, `retry_delay`, `retry_on_exit_codes` - Retry configuration
 - `watch.patterns`, `watch.debounce`, `watch.ignore` - Watch mode configuration
+- `continue_on_error` - Continue execution even if a command fails
 - `services.wait_for_health`, `services.timeout`, `services.cleanup` - Service management
 
 Always check the configuration file for detailed command behavior.

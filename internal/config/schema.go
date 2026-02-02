@@ -109,6 +109,10 @@ const ConfigSchema = `{
               "description": "Patterns to ignore"
             }
           }
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "description": "Continue execution even if this command fails"
         }
       }
     }
@@ -122,7 +126,7 @@ func ValidateConfig(cfg *Config) error {
 	}
 
 	// Validate that commands is not empty
-	if cfg.Commands == nil || len(cfg.Commands) == 0 {
+	if len(cfg.Commands) == 0 {
 		return fmt.Errorf("configuration must have at least one command defined")
 	}
 

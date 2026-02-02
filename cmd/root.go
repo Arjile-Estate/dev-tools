@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"context"
+	"dev-tools/internal/logger"
 	"encoding/json"
 	"fmt"
-	"dev-tools/internal/logger"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -62,7 +62,7 @@ sensible defaults, while allowing customization through configuration files.`,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.41.0"
+	rootCmd.Version = "0.42.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -96,8 +96,8 @@ Flags:
 // configFromFlags creates a CommandConfig from parsed flag values
 func configFromFlags(flags map[string]string) CommandConfig {
 	cfg := CommandConfig{
-		ProjectDir: ".",      // default
-		Format:     "text",   // default
+		ProjectDir: ".",    // default
+		Format:     "text", // default
 	}
 
 	if v, ok := flags["verbose"]; ok && v == "true" {

@@ -18,10 +18,11 @@ type CommandStep struct {
 	Background       bool           `yaml:"background,omitempty"`
 	Daemon           bool           `yaml:"daemon,omitempty"`
 	Directory        string         `yaml:"directory,omitempty"`
-	Retry            int            `yaml:"retry,omitempty"`              // Number of retry attempts (0 = no retry, default)
-	RetryDelay       string         `yaml:"retry_delay,omitempty"`        // Delay between retries (e.g., "5s", "1m")
+	Retry            int            `yaml:"retry,omitempty"`               // Number of retry attempts (0 = no retry, default)
+	RetryDelay       string         `yaml:"retry_delay,omitempty"`         // Delay between retries (e.g., "5s", "1m")
 	RetryOnExitCodes []int          `yaml:"retry_on_exit_codes,omitempty"` // Only retry on specific exit codes (empty = retry on any failure)
-	Watch            *WatchConfig   `yaml:"watch,omitempty"`              // Watch mode configuration
+	Watch            *WatchConfig   `yaml:"watch,omitempty"`               // Watch mode configuration
+	ContinueOnError  bool           `yaml:"continue_on_error,omitempty"`   // Continue execution even if this command fails
 }
 
 // WatchConfig represents file watching configuration
@@ -33,16 +34,16 @@ type WatchConfig struct {
 
 // ContainerConfig represents configuration for a Docker container
 type ContainerConfig struct {
-	Name        string            `yaml:"-"`                    // Container name (set from map key)
-	Image       string            `yaml:"image"`                // Required: Docker image
-	Command     string            `yaml:"command,omitempty"`    // Optional: Command to run
-	Environment map[string]string `yaml:"environment,omitempty"` // Environment variables
-	Volumes     []string          `yaml:"volumes,omitempty"`    // Volume mounts
-	Ports       []string          `yaml:"ports,omitempty"`      // Port mappings
-	Networks    []string          `yaml:"networks,omitempty"`   // Network attachments
-	Restart     string            `yaml:"restart,omitempty"`    // Restart policy
-	Memory      string            `yaml:"memory,omitempty"`     // Memory limit
-	CPUs        string            `yaml:"cpus,omitempty"`       // CPU limit
+	Name        string             `yaml:"-"`                     // Container name (set from map key)
+	Image       string             `yaml:"image"`                 // Required: Docker image
+	Command     string             `yaml:"command,omitempty"`     // Optional: Command to run
+	Environment map[string]string  `yaml:"environment,omitempty"` // Environment variables
+	Volumes     []string           `yaml:"volumes,omitempty"`     // Volume mounts
+	Ports       []string           `yaml:"ports,omitempty"`       // Port mappings
+	Networks    []string           `yaml:"networks,omitempty"`    // Network attachments
+	Restart     string             `yaml:"restart,omitempty"`     // Restart policy
+	Memory      string             `yaml:"memory,omitempty"`      // Memory limit
+	CPUs        string             `yaml:"cpus,omitempty"`        // CPU limit
 	HealthCheck *HealthCheckConfig `yaml:"healthcheck,omitempty"` // Health check configuration
 }
 
