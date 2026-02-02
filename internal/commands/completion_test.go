@@ -110,6 +110,26 @@ func TestGenerateBashCompletion(t *testing.T) {
 	assert.Contains(t, output, "__ltrim_colon_completions")
 }
 
+func TestGenerateBashCompletionAliasSupport(t *testing.T) {
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := generateBashCompletion(cmd)
+
+	require.NoError(t, err)
+	output := buf.String()
+
+	// Verify alias detection function is present
+	assert.Contains(t, output, "_dev_tools_register_aliases")
+	// Verify it scans aliases
+	assert.Contains(t, output, "alias 2>/dev/null")
+	// Verify it checks for dev-tools alias
+	assert.Contains(t, output, `"$alias_value" == "dev-tools"`)
+	// Verify it registers completion for aliases
+	assert.Contains(t, output, `complete -o nospace -F _dev_tools_completion "$alias_name"`)
+}
+
 func TestGenerateZshCompletion(t *testing.T) {
 	cmd := &cobra.Command{}
 	var buf bytes.Buffer
@@ -126,6 +146,26 @@ func TestGenerateZshCompletion(t *testing.T) {
 	assert.Contains(t, output, "restart|stop")
 }
 
+func TestGenerateZshCompletionAliasSupport(t *testing.T) {
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := generateZshCompletion(cmd)
+
+	require.NoError(t, err)
+	output := buf.String()
+
+	// Verify alias detection is present
+	assert.Contains(t, output, "Auto-register completion for aliases")
+	// Verify it iterates over aliases
+	assert.Contains(t, output, "${(kv)aliases}")
+	// Verify it checks for dev-tools alias
+	assert.Contains(t, output, `"$value" == "dev-tools"`)
+	// Verify it registers compdef for aliases
+	assert.Contains(t, output, `compdef _dev_tools "$name"`)
+}
+
 func TestGenerateFishCompletion(t *testing.T) {
 	cmd := &cobra.Command{}
 	var buf bytes.Buffer
@@ -140,6 +180,26 @@ func TestGenerateFishCompletion(t *testing.T) {
 	assert.Contains(t, output, "__dev_tools_complete")
 	assert.Contains(t, output, "complete -c dev-tools")
 	assert.Contains(t, output, "-l verbose")
+}
+
+func TestGenerateFishCompletionAliasSupport(t *testing.T) {
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := generateFishCompletion(cmd)
+
+	require.NoError(t, err)
+	output := buf.String()
+
+	// Verify alias/abbreviation detection is present
+	assert.Contains(t, output, "Auto-register completion for abbreviations")
+	// Verify it uses abbr --show
+	assert.Contains(t, output, "abbr --show")
+	// Verify it checks for dev-tools abbreviation
+	assert.Contains(t, output, `string match -q "dev-tools*"`)
+	// Verify it registers completion for abbreviations using -w flag
+	assert.Contains(t, output, "complete -c $name -w dev-tools")
 }
 
 func TestHandleCompleteCommand(t *testing.T) {

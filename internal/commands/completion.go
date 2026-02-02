@@ -144,6 +144,25 @@ _dev_tools_completion() {
 }
 
 complete -o nospace -F _dev_tools_completion dev-tools
+
+# Auto-register completion for any aliases pointing to dev-tools
+_dev_tools_register_aliases() {
+    local alias_name alias_value
+    while IFS='=' read -r alias_name alias_value; do
+        # Strip "alias " prefix and quotes from value
+        alias_name="${alias_name#alias }"
+        alias_value="${alias_value%\'}"
+        alias_value="${alias_value#\'}"
+        alias_value="${alias_value%\"}"
+        alias_value="${alias_value#\"}"
+
+        # Check if alias points to dev-tools (exact match or with args)
+        if [[ "$alias_value" == "dev-tools" || "$alias_value" == "dev-tools "* ]]; then
+            complete -o nospace -F _dev_tools_completion "$alias_name"
+        fi
+    done < <(alias 2>/dev/null)
+}
+_dev_tools_register_aliases
 `
 
 	_, _ = fmt.Fprint(cmd.OutOrStdout(), script)
@@ -178,18 +197,27 @@ _dev_tools() {
 
 _dev_tools_commands() {
     local completions
-    completions=(${(f)"$(dev-tools __dev_complete "dev-tools " 2>/dev/null)"}) 
+    completions=(${(f)"$(dev-tools __dev_complete "dev-tools " 2>/dev/null)"})
     _describe 'commands' completions
 }
 
 _dev_tools_daemon_names() {
     local completions
-    completions=(${(f)"$(dev-tools __dev_complete "dev-tools ${words[1]} " 2>/dev/null)"}) 
+    completions=(${(f)"$(dev-tools __dev_complete "dev-tools ${words[1]} " 2>/dev/null)"})
     _describe 'daemon names' completions
 }
 
-_dev_tools "$@"
+compdef _dev_tools dev-tools
 
+# Auto-register completion for aliases
+() {
+    local name value
+    for name value in ${(kv)aliases}; do
+        if [[ "$value" == "dev-tools" || "$value" == "dev-tools "* ]]; then
+            compdef _dev_tools "$name"
+        fi
+    done
+}
 `
 
 	_, _ = fmt.Fprint(cmd.OutOrStdout(), script)
@@ -214,6 +242,17 @@ complete -c dev-tools -s p -l project-dir -d 'Project directory' -r
 complete -c dev-tools -l no-color -d 'Disable colored output'
 complete -c dev-tools -l version -d 'Show version'
 
+# Auto-register completion for abbreviations and aliases
+for abbr_line in (abbr --show 2>/dev/null)
+    set -l parts (string split " -- " $abbr_line)
+    if test (count $parts) -ge 2
+        set -l name (string replace "abbr -a " "" $parts[1])
+        set -l value (string trim -c "'" $parts[2])
+        if string match -q "dev-tools*" "$value"
+            complete -c $name -w dev-tools
+        end
+    end
+end
 `
 
 	_, _ = fmt.Fprint(cmd.OutOrStdout(), script)
