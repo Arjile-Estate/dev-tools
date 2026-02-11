@@ -14,6 +14,22 @@ const ConfigSchema = `{
   "description": "Configuration schema for dev-tools command runner",
   "type": "object",
   "properties": {
+    "logs": {
+      "type": "object",
+      "description": "Logging configuration",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Custom log file path. Supports ~ for home directory. Default: ~/.local/state/dev-tools/activity.log"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of log lines to display with dev-tools logs. Default: 20"
+        }
+      },
+      "additionalProperties": false
+    },
     "commands": {
       "type": "object",
       "description": "Command definitions",

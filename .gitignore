@@ -42,8 +42,7 @@ Thumbs.db
 *.bak
 
 # Logs
-*.log
-activity.log
+logs/*
 
 # PID files
 *.pid

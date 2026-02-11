@@ -59,6 +59,13 @@ func Init(writer io.Writer, level Level, verbose bool) {
 	log.Logger = Logger
 }
 
+// SetContext enriches the global logger with execution directory and command fields.
+// These fields will be included in every subsequent log entry.
+func SetContext(execDir, command string) {
+	Logger = Logger.With().Str("exec_dir", execDir).Str("command", command).Logger()
+	log.Logger = Logger
+}
+
 // Debug logs a debug message
 func Debug(msg string) {
 	Logger.Debug().Msg(msg)

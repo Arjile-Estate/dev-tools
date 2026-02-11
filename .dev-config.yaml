@@ -1,3 +1,7 @@
+logs:
+  file: logs/activity.log
+  size: 10
+
 commands:
   # Standard Go project commands with modern services configuration
   test:

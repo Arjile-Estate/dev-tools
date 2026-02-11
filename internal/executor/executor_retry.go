@@ -23,7 +23,7 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 		if parsed, err := time.ParseDuration(step.RetryDelay); err == nil {
 			retryDelay = parsed
 		} else {
-			logger.Infof("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
+			logger.Warnf("Invalid retry_delay '%s', using 1s: %v", step.RetryDelay, err)
 		}
 	}
 
@@ -60,7 +60,7 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 
 		if attempt >= maxAttempts || !shouldRetry {
 			if !shouldRetry {
-				logger.Infof("Exit code %d not in retry list, not retrying", result.ReturnCode)
+				logger.Warnf("Exit code %d not in retry list, not retrying", result.ReturnCode)
 			}
 			break
 		}

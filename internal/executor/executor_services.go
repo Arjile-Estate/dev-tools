@@ -57,7 +57,7 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 		if services.WaitForHealth {
 			healthResult := WaitForServiceHealth(container, services.Timeout)
 			if !healthResult.Success {
-				logger.Infof("Health check failed for service %v: %s", container, healthResult.Stderr)
+				logger.Warnf("Health check failed for service %v: %s", container, healthResult.Stderr)
 				// Continue with other services but log the failure
 			}
 		}
@@ -81,7 +81,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	// Check if compose file exists
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
-		logger.Info(errorMsg)
+		logger.Warn(errorMsg)
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
@@ -112,7 +112,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	})
 
 	if !result.Success {
-		logger.Infof("Docker Compose command failed: %s", result.Stderr)
+		logger.Warnf("Docker Compose command failed: %s", result.Stderr)
 		return result
 	}
 
@@ -145,7 +145,7 @@ func StopServices(services config.ServicesConfig) ExecutionResult {
 
 	if len(errors) > 0 {
 		errorMsg := strings.Join(errors, "; ")
-		logger.Infof("Service cleanup completed with errors: %s", errorMsg)
+		logger.Warnf("Service cleanup completed with errors: %s", errorMsg)
 		return ExecutionResult{
 			Success: false,
 			Stderr:  errorMsg,
@@ -163,7 +163,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	// Check if compose file exists
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
-		logger.Info(errorMsg)
+		logger.Warn(errorMsg)
 		return ExecutionResult{Success: false, Stderr: errorMsg}
 	}
 
@@ -194,7 +194,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	})
 
 	if !result.Success {
-		logger.Infof("Docker Compose down command failed: %s", result.Stderr)
+		logger.Warnf("Docker Compose down command failed: %s", result.Stderr)
 		return result
 	}
 

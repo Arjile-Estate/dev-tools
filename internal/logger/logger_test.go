@@ -159,6 +159,43 @@ func TestGetGlobalLevel(t *testing.T) {
 	assert.Equal(t, zerolog.DebugLevel, level)
 }
 
+func TestSetContext(t *testing.T) {
+	t.Run("adds exec_dir and command fields to log entries", func(t *testing.T) {
+		var buf bytes.Buffer
+		Init(&buf, InfoLevel, false)
+
+		SetContext("/my/project", "test")
+		Info("hello")
+
+		var entry map[string]interface{}
+		err := json.Unmarshal(buf.Bytes(), &entry)
+		assert.NoError(t, err)
+		assert.Equal(t, "/my/project", entry["exec_dir"])
+		assert.Equal(t, "test", entry["command"])
+		assert.Equal(t, "hello", entry["message"])
+	})
+
+	t.Run("fields persist across multiple log calls", func(t *testing.T) {
+		var buf bytes.Buffer
+		Init(&buf, InfoLevel, false)
+
+		SetContext("/proj", "build")
+		Info("first")
+		Info("second")
+
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		assert.Len(t, lines, 2)
+
+		for _, line := range lines {
+			var entry map[string]interface{}
+			err := json.Unmarshal([]byte(line), &entry)
+			assert.NoError(t, err)
+			assert.Equal(t, "/proj", entry["exec_dir"])
+			assert.Equal(t, "build", entry["command"])
+		}
+	})
+}
+
 func TestLevelConversion(t *testing.T) {
 	tests := []struct {
 		appLevel  Level

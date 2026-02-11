@@ -965,8 +965,20 @@ Dev Tools provides comprehensive logging with detailed execution information:
 ### Viewing Logs
 
 - **`--verbose` flag**: Output logs to stdout in addition to the log file
-- **`dev-tools logs`**: View the last 50 lines of activity from the log file
+- **`dev-tools logs`**: View the last 20 lines of activity from the log file (configurable)
 - **Manual access**: `./activity.log` in the project directory
+
+### Logs Configuration
+
+Configure logging behavior with the `logs` block in `.dev-config.yaml`:
+
+```yaml
+logs:
+  file: logs/activity.log   # Custom log file path (supports ~)
+  size: 50                   # Lines to show in `dev-tools logs` (default: 20)
+```
+
+Both fields are optional. Without `logs.file`, logs go to `~/.local/state/dev-tools/activity.log`.
 
 ### Structured Logging
 

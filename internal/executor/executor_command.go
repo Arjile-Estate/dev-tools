@@ -95,7 +95,7 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 
 	err := cmd.Start()
 	if err != nil {
-		logger.Infof("Failed to start command: %v", err)
+		logger.Warnf("Failed to start command: %v", err)
 		return ExecutionResult{
 			Success:    false,
 			Stderr:     err.Error(),
@@ -130,7 +130,7 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 		} else {
 			returnCode = -1
 		}
-		logger.Infof("Command failed with return code %d", returnCode)
+		logger.Warnf("Command failed with return code %d", returnCode)
 	} else {
 		logger.Info("Command completed successfully")
 	}
@@ -157,7 +157,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 
 		err := cmd.Start()
 		if err != nil {
-			logger.Infof("Failed to start background command: %v", err)
+			logger.Warnf("Failed to start background command: %v", err)
 			return ExecutionResult{
 				Success: false,
 				Stderr:  err.Error(),
@@ -218,7 +218,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 
 		err := cmd.Start()
 		if err != nil {
-			logger.Infof("Failed to start daemon command: %v", err)
+			logger.Warnf("Failed to start daemon command: %v", err)
 			return ExecutionResult{
 				Success: false,
 				Stderr:  err.Error(),
@@ -231,7 +231,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		pidFile := GeneratePIDFilename(opts.CommandName, opts.Command)
 		if pidErr := CreateEnhancedPIDFile(pidFile, cmd.Process.Pid, opts.CommandName, opts.Command); pidErr != nil {
 			// Log with proper error type but don't fail - daemon is running
-			logger.Infof("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, pidErr))
+			logger.Warnf("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, pidErr))
 		} else {
 			logger.Infof("Created enhanced PID file %s for daemon process", pidFile)
 			fmt.Printf("%s\n", colors.Success("Running job '%s' in the foreground. PID: %d, PID file: %s",
@@ -271,7 +271,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 			} else {
 				returnCode = -1
 			}
-			logger.Infof("Daemon command failed with return code %d", returnCode)
+			logger.Warnf("Daemon command failed with return code %d", returnCode)
 		} else {
 			logger.Info("Daemon command completed successfully")
 		}
@@ -279,7 +279,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		// Clean up PID file
 		if pidErr := RemovePIDFile(pidFile); pidErr != nil {
 			// Log with proper error type but don't fail - daemon completed
-			logger.Infof("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, fmt.Errorf("failed to remove PID file: %w", pidErr)))
+			logger.Warnf("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, fmt.Errorf("failed to remove PID file: %w", pidErr)))
 		} else {
 			logger.Infof("Removed PID file %s after daemon completion", pidFile)
 		}
@@ -298,7 +298,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 	// Start the command
 	err := cmd.Start()
 	if err != nil {
-		logger.Infof("Failed to start command: %v", err)
+		logger.Warnf("Failed to start command: %v", err)
 		return ExecutionResult{
 			Success:    false,
 			Stderr:     err.Error(),
@@ -333,7 +333,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		} else {
 			returnCode = -1
 		}
-		logger.Infof("Command failed with return code %d", returnCode)
+		logger.Warnf("Command failed with return code %d", returnCode)
 	} else {
 		logger.Info("Command completed successfully")
 	}
@@ -443,7 +443,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			cleanupResult := StopServices(step.Services)
 			if !cleanupResult.Success {
 				warning := fmt.Sprintf("Service cleanup failed: %s", cleanupResult.Stderr)
-				logger.Infof("Warning: %s", warning)
+				logger.Warnf("%s", warning)
 				result.Warnings = append(result.Warnings, warning)
 			} else {
 				logger.Infof("Services cleaned up successfully")
@@ -483,7 +483,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			pidFile := GeneratePIDFilename(commandName, command)
 			if err := CreateEnhancedPIDFile(pidFile, result.PID, commandName, command); err != nil {
 				warning := fmt.Sprintf("Failed to create PID file: %v", NewDaemonError(result.PID, pidFile, err))
-				logger.Infof("Warning: %s", warning)
+				logger.Warnf("%s", warning)
 				result.Warnings = append(result.Warnings, warning)
 			} else {
 				logger.Infof("Created enhanced PID file %s for background daemon process", pidFile)
@@ -524,7 +524,7 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 		}
 
 		if !result.Success {
-			logger.Infof("Step %d failed, aborting command execution", i+1)
+			logger.Warnf("Step %d failed, aborting command execution", i+1)
 			result.CommandName = opts.CommandName
 			result.DurationMs = time.Since(startTime).Milliseconds()
 			result.ServicesStarted = servicesStarted
@@ -584,7 +584,7 @@ func LoadEnvironmentVariables(envFile string) error {
 
 		if err := os.Setenv(key, value); err != nil {
 			// Log with proper error type - not critical, other vars may still load
-			logger.Infof("Warning: %v", NewValidationError("environment_variable", key, err))
+			logger.Warnf("%v", NewValidationError("environment_variable", key, err))
 		}
 	}
 

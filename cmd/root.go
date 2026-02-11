@@ -62,7 +62,7 @@ sensible defaults, while allowing customization through configuration files.`,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.40.2"
+	rootCmd.Version = "0.50.0"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -307,10 +307,17 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Initialize colors and logging with the parsed flags
 	colors.InitializeColorSupport(cmdCfg.NoColor)
-	setupLogging(cmdCfg.Verbose, cmdCfg.ProjectDir)
+	cleanupLog := setupLogging(cmdCfg.Verbose, cmdCfg.ProjectDir)
+	defer cleanupLog()
 
 	parsedArgs := parseArgs(filteredArgs)
 	commandName := parsedArgs.CommandName
+
+	absProjectDir, err := filepath.Abs(cmdCfg.ProjectDir)
+	if err != nil {
+		absProjectDir = cmdCfg.ProjectDir
+	}
+	logger.SetContext(absProjectDir, commandName)
 
 	logger.Infof("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
@@ -334,7 +341,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Load configuration
 	var cfg *config.Config
-	var err error
 	if configLoader != nil {
 		cfg, err = configLoader.LoadConfig(cmdCfg.ProjectDir)
 	} else {
@@ -416,9 +422,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 		// Log the full output for debugging
 		if result.Stdout != "" || result.Stderr != "" {
-			logger.Infof("Command '%s' failed output - stdout: %s, stderr: %s", failedLabel, result.Stdout, result.Stderr)
+			logger.Warnf("Command '%s' failed output - stdout: %s, stderr: %s", failedLabel, result.Stdout, result.Stderr)
 		}
-		logger.Infof("Command '%s' failed with exit code %d", failedLabel, result.ReturnCode)
+		logger.Warnf("Command '%s' failed with exit code %d", failedLabel, result.ReturnCode)
 
 		return &ExitError{
 			Code:    result.ReturnCode,

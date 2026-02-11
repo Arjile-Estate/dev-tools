@@ -16,54 +16,104 @@ import (
 )
 
 func TestHandleLogsCommand(t *testing.T) {
-	tests := []struct {
-		name           string
-		setupLogFile   bool
-		logContent     string
-		expectedOutput string
-		expectError    bool
-		errorMsg       string
-	}{
-		{
-			name:           "successful log display",
-			setupLogFile:   true,
-			logContent:     "line1\nline2\nline3\n",
-			expectedOutput: "line1\nline2\nline3\n",
-			expectError:    false,
-		},
-		{
-			name:         "log file does not exist",
-			setupLogFile: false,
-			expectError:  true,
-			errorMsg:     "no log file found at",
-		},
-	}
+	t.Run("formats JSON log entries as human-readable output", func(t *testing.T) {
+		tempDir := t.TempDir()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tempDir := t.TempDir()
+		logContent := `{"level":"info","time":"2025-06-15T10:30:00+02:00","exec_dir":"/home/user/project","command":"test","message":"all tests passed"}
+{"level":"warn","time":"2025-06-15T10:31:00+02:00","exec_dir":"/home/user/project","command":"build","message":"deprecated API"}
+`
+		logFile := filepath.Join(tempDir, "custom.log")
+		err := os.WriteFile(logFile, []byte(logContent), 0644)
+		require.NoError(t, err)
 
-			if tt.setupLogFile {
-				logFile := filepath.Join(tempDir, "activity.log")
-				err := os.WriteFile(logFile, []byte(tt.logContent), 0644)
-				require.NoError(t, err)
-			}
+		configContent := "logs:\n  file: " + logFile + "\ncommands:\n  test:\n    - run: echo hi\n"
+		err = os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644)
+		require.NoError(t, err)
 
-			cmd := &cobra.Command{}
-			var buf bytes.Buffer
-			cmd.SetOut(&buf)
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
 
-			err := HandleLogsCommand(cmd, tempDir)
+		err = HandleLogsCommand(cmd, tempDir)
 
-			if tt.expectError {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorMsg)
-			} else {
-				require.NoError(t, err)
-				assert.Contains(t, buf.String(), tt.expectedOutput)
-			}
-		})
-	}
+		require.NoError(t, err)
+		output := buf.String()
+		assert.Contains(t, output, "2025-06-15 10:30:00+02:00 - /home/user/project - test - INFO - all tests passed")
+		assert.Contains(t, output, "2025-06-15 10:31:00+02:00 - /home/user/project - build - WARN - deprecated API")
+	})
+
+	t.Run("old entries missing exec_dir and command show dashes", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		logContent := `{"level":"info","time":"2025-01-01T00:00:00Z","message":"legacy entry"}
+`
+		logFile := filepath.Join(tempDir, "custom.log")
+		err := os.WriteFile(logFile, []byte(logContent), 0644)
+		require.NoError(t, err)
+
+		configContent := "logs:\n  file: " + logFile + "\ncommands:\n  test:\n    - run: echo hi\n"
+		err = os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644)
+		require.NoError(t, err)
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err = HandleLogsCommand(cmd, tempDir)
+
+		require.NoError(t, err)
+		output := buf.String()
+		assert.Contains(t, output, "- - - - -")
+		assert.Contains(t, output, "legacy entry")
+	})
+
+	t.Run("malformed non-JSON lines passed through as-is", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		logContent := "plain text line\n"
+		logFile := filepath.Join(tempDir, "custom.log")
+		err := os.WriteFile(logFile, []byte(logContent), 0644)
+		require.NoError(t, err)
+
+		configContent := "logs:\n  file: " + logFile + "\ncommands:\n  test:\n    - run: echo hi\n"
+		err = os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644)
+		require.NoError(t, err)
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err = HandleLogsCommand(cmd, tempDir)
+
+		require.NoError(t, err)
+		assert.Contains(t, buf.String(), "plain text line")
+	})
+
+	t.Run("uses default path when no config exists", func(t *testing.T) {
+		tempDir := t.TempDir()
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		_ = HandleLogsCommand(cmd, tempDir)
+	})
+
+	t.Run("log file does not exist at configured path", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		configContent := "logs:\n  file: /nonexistent/path/app.log\ncommands:\n  test:\n    - run: echo hi\n"
+		err := os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644)
+		require.NoError(t, err)
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err = HandleLogsCommand(cmd, tempDir)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no log file found at")
+	})
 }
 
 func TestHandleCleanupPidsCommand(t *testing.T) {
@@ -467,31 +517,6 @@ func TestHandleStopCommand(t *testing.T) {
 	})
 }
 
-func TestGetLogFilePath(t *testing.T) {
-	tests := []struct {
-		name         string
-		projectDir   string
-		expectedPath string
-	}{
-		{
-			name:         "basic path construction",
-			projectDir:   "/home/user/project",
-			expectedPath: "/home/user/project/activity.log",
-		},
-		{
-			name:         "relative path",
-			projectDir:   "./project",
-			expectedPath: "project/activity.log",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := filepath.Join(tt.projectDir, "activity.log")
-			assert.Equal(t, tt.expectedPath, result)
-		})
-	}
-}
 func TestOutputStatusJSON(t *testing.T) {
 	t.Run("output daemon status as JSON", func(t *testing.T) {
 		tempDir := t.TempDir()

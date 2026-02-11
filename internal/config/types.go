@@ -6,8 +6,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// LogsConfig represents the logging configuration block
+type LogsConfig struct {
+	File string `yaml:"file,omitempty"`
+	Size int    `yaml:"size,omitempty"`
+}
+
 // Config represents the complete development configuration
 type Config struct {
+	Logs     *LogsConfig              `yaml:"logs,omitempty"`
 	Commands map[string][]CommandStep `yaml:"commands"`
 }
 

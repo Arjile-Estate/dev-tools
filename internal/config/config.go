@@ -244,6 +244,11 @@ func MergeConfigWithDefaults(userConfig, defaults *Config) *Config {
 		Commands: make(map[string][]CommandStep),
 	}
 
+	// Preserve logs config from user
+	if userConfig.Logs != nil {
+		merged.Logs = userConfig.Logs
+	}
+
 	// Start with defaults
 	for cmd, steps := range defaults.Commands {
 		merged.Commands[cmd] = steps

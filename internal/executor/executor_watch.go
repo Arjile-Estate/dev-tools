@@ -36,7 +36,7 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 		if parsed, err := time.ParseDuration(watchConfig.Debounce); err == nil {
 			debounceDelay = parsed
 		} else {
-			logger.Infof("Invalid debounce delay '%s', using default 300ms: %v", watchConfig.Debounce, err)
+			logger.Warnf("Invalid debounce delay '%s', using default 300ms: %v", watchConfig.Debounce, err)
 		}
 	}
 
@@ -55,7 +55,7 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 
 	for _, dir := range watchDirs {
 		if err := watcher.Add(dir); err != nil {
-			logger.Infof("Warning: failed to watch directory %s: %v", dir, err)
+			logger.Warnf("Failed to watch directory %s: %v", dir, err)
 		} else {
 			logger.Infof("Watching directory: %s", dir)
 		}
@@ -127,7 +127,7 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 			if !ok {
 				return fmt.Errorf("watcher error channel closed")
 			}
-			logger.Infof("Watcher error: %v", err)
+			logger.Warnf("Watcher error: %v", err)
 		}
 	}
 }

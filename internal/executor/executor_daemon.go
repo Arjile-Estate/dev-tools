@@ -131,7 +131,7 @@ func ListDaemonProcesses(projectDir string) ([]DaemonInfo, error) {
 	for _, pidFile := range pidFiles {
 		pidInfo, err := ReadEnhancedPIDFile(pidFile)
 		if err != nil {
-			logger.Infof("Could not read PID file %s: %v", pidFile, err)
+			logger.Warnf("Could not read PID file %s: %v", pidFile, err)
 			continue
 		}
 
@@ -216,7 +216,7 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	err = RemovePIDFile(pidFilePath)
 	if err != nil {
 		// Log with proper error type but don't fail - process is stopped
-		logger.Infof("Warning: %v", NewDaemonError(daemon.PID, pidFilePath, fmt.Errorf("failed to remove PID file: %w", err)))
+		logger.Warnf("%v", NewDaemonError(daemon.PID, pidFilePath, fmt.Errorf("failed to remove PID file: %w", err)))
 		// Don't return error for PID file removal failure
 	}
 
@@ -239,7 +239,7 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 		pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 		if err := RemovePIDFile(pidFilePath); err != nil {
 			// Log with proper error type - not critical since process not running
-			logger.Infof("Warning: %v", NewDaemonError(0, pidFilePath, fmt.Errorf("failed to remove stale PID file: %w", err)))
+			logger.Warnf("%v", NewDaemonError(0, pidFilePath, fmt.Errorf("failed to remove stale PID file: %w", err)))
 		}
 	}
 
@@ -264,7 +264,7 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	pidFilePath := filepath.Join(projectDir, pidFile)
 	if err := CreateEnhancedPIDFile(pidFilePath, result.PID, daemon.CommandName, daemon.Command); err != nil {
 		// Log with proper error type but don't fail - process is running
-		logger.Infof("Warning: %v", NewDaemonError(result.PID, pidFilePath, fmt.Errorf("failed to create PID file: %w", err)))
+		logger.Warnf("%v", NewDaemonError(result.PID, pidFilePath, fmt.Errorf("failed to create PID file: %w", err)))
 		// Don't return an error, as the process is running, but log it.
 	}
 
@@ -313,7 +313,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 				err := StopDaemonProcess(projectDir, &daemon)
 				if err != nil {
 					errorMsg := fmt.Sprintf("Failed to terminate %s (PID %d): %v", daemon.CommandName, daemon.PID, err)
-					logger.Info(errorMsg)
+					logger.Warn(errorMsg)
 					errors = append(errors, errorMsg)
 				} else {
 					terminatedProcesses = append(terminatedProcesses, fmt.Sprintf("%s (PID %d)", daemon.CommandName, daemon.PID))
@@ -327,7 +327,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 			pidFilePath := filepath.Join(projectDir, daemon.PIDFile)
 			if err := RemovePIDFile(pidFilePath); err != nil {
 				errorMsg := fmt.Sprintf("Failed to remove %s: %v", daemon.PIDFile, err)
-				logger.Info(errorMsg)
+				logger.Warn(errorMsg)
 				errors = append(errors, errorMsg)
 			} else {
 				cleanedFiles = append(cleanedFiles, fmt.Sprintf("%s (PID %d)", daemon.CommandName, daemon.PID))
