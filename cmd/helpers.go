@@ -23,10 +23,10 @@ sensible defaults, while allowing customization through configuration files.`
 		return baseHelp + `
 
 Examples:
-  dev-tools test        # Run tests
-  dev-tools lint        # Run linting
-  dev-tools build       # Build project
-  dev-tools logs        # Show recent logs
+  dev-tools test         # Run tests
+  dev-tools lint         # Run linting
+  dev-tools build        # Build project
+  dev-tools logs         # Show recent logs
   dev-tools cleanup-pids # Clean up stale PID files`
 	}
 
