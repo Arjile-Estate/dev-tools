@@ -46,7 +46,11 @@ func setupLogging(verbose bool, projectDir string) func() {
 
 	// Return cleanup function that closes the file handle (no-op for stdout)
 	if logWriter != os.Stdout {
-		return func() { logWriter.Close() }
+		return func() {
+			if err := logWriter.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Error closing log file: %v\n", err)
+			}
+		}
 	}
 	return noop
 }

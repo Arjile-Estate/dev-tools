@@ -45,7 +45,11 @@ func WatchAndExecute(ctx context.Context, commandName string, steps []config.Com
 	if err != nil {
 		return fmt.Errorf("failed to create file watcher: %w", err)
 	}
-	defer watcher.Close()
+	defer func() {
+		if err := watcher.Close(); err != nil {
+			logger.Warnf("Failed to close file watcher: %v", err)
+		}
+	}()
 
 	// Add directories to watch based on patterns
 	watchDirs, err := getWatchDirectories(workingDir, watchConfig.Patterns)

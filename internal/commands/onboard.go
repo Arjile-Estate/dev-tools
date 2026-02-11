@@ -173,21 +173,6 @@ func getBuiltInDescription(name string, steps []config.CommandStep) string {
 }
 
 func getCustomDescription(steps []config.CommandStep) string {
-	var parts []string
-
-	// Check for services
-	hasServices := false
-	for _, step := range steps {
-		if step.Services.Compose != nil || len(step.Services.Containers) > 0 {
-			hasServices = true
-			break
-		}
-	}
-
-	if hasServices {
-		parts = append(parts, "with services")
-	}
-
 	// Count run commands
 	runCount := 0
 	for _, step := range steps {

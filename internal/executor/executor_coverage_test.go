@@ -252,7 +252,11 @@ func TestExecuteCommandStep_DirectoryValidation(t *testing.T) {
 		noAccessDir := filepath.Join(tmpDir, "noaccess")
 		err := os.Mkdir(noAccessDir, 0000)
 		require.NoError(t, err)
-		defer os.Chmod(noAccessDir, 0755) // Restore permissions for cleanup
+		defer func() {
+			if err := os.Chmod(noAccessDir, 0755); err != nil {
+				t.Logf("Warning: failed to restore permissions: %v", err)
+			}
+		}()
 
 		step := config.CommandStep{
 			Directory: noAccessDir,

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"dev-tools/internal/colors"
@@ -151,9 +150,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 	}
 
 	if opts.Background {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Setpgid: true,
-		}
+		setProcessGroupAttr(cmd)
 
 		err := cmd.Start()
 		if err != nil {

@@ -565,28 +565,36 @@ func TestProjectTypeToString(t *testing.T) {
 		{
 			name: "go project",
 			setupFiles: func(tmpDir string) {
-				os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test"), 0644)
+				if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test"), 0644); err != nil {
+					t.Fatalf("setup failed: %v", err)
+				}
 			},
 			expectedType: "Go",
 		},
 		{
 			name: "python project",
 			setupFiles: func(tmpDir string) {
-				os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte(""), 0644)
+				if err := os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte(""), 0644); err != nil {
+					t.Fatalf("setup failed: %v", err)
+				}
 			},
 			expectedType: "Python",
 		},
 		{
 			name: "node project",
 			setupFiles: func(tmpDir string) {
-				os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte("{}"), 0644)
+				if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte("{}"), 0644); err != nil {
+					t.Fatalf("setup failed: %v", err)
+				}
 			},
 			expectedType: "Node.js",
 		},
 		{
 			name: "rust project",
 			setupFiles: func(tmpDir string) {
-				os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(""), 0644)
+				if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.toml"), []byte(""), 0644); err != nil {
+					t.Fatalf("setup failed: %v", err)
+				}
 			},
 			expectedType: "Rust",
 		},

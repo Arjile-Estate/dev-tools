@@ -30,7 +30,9 @@ func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 
 	out := cmd.OutOrStdout()
 	for _, line := range lines {
-		fmt.Fprintln(out, formatLogLine(line))
+		if _, err := fmt.Fprintln(out, formatLogLine(line)); err != nil {
+			return fmt.Errorf("failed to write log line: %w", err)
+		}
 	}
 
 	return nil
