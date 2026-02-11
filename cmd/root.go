@@ -57,12 +57,12 @@ It automatically detects project types (Go, Python, Node.js, Rust) and provides
 sensible defaults, while allowing customization through configuration files.`,
 		Args:               cobra.MinimumNArgs(1),
 		RunE:               runCommand,
-		SilenceUsage:       false,
-		SilenceErrors:      false,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.42.0"
+	rootCmd.Version = "0.40.2"
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -408,10 +408,21 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if !result.Success {
-		logger.Infof("Command completed with exit code %d", result.ReturnCode)
+		// Determine which command label to use in the error message
+		failedLabel := result.FailedCommand
+		if failedLabel == "" {
+			failedLabel = result.CommandName
+		}
+
+		// Log the full output for debugging
+		if result.Stdout != "" || result.Stderr != "" {
+			logger.Infof("Command '%s' failed output - stdout: %s, stderr: %s", failedLabel, result.Stdout, result.Stderr)
+		}
+		logger.Infof("Command '%s' failed with exit code %d", failedLabel, result.ReturnCode)
+
 		return &ExitError{
 			Code:    result.ReturnCode,
-			Message: fmt.Sprintf("command failed with exit code %d", result.ReturnCode),
+			Message: fmt.Sprintf("Command '%s' failed with error code: %d", failedLabel, result.ReturnCode),
 		}
 	}
 

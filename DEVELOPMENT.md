@@ -1014,5 +1014,5 @@ git push origin feature/my-feature
 
 ---
 
-**Last Updated**: 2026-01-29
-**Version**: 0.40.1
+**Last Updated**: 2026-02-11
+**Version**: 0.40.2

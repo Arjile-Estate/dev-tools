@@ -10,6 +10,7 @@ type ExecutionResult struct {
 	ReturnCode      int
 	PID             int
 	CommandName     string
+	FailedCommand   string // The actual shell command string that failed (for multi-command steps)
 	DurationMs      int64
 	ServicesStarted []string
 	StartTime       time.Time

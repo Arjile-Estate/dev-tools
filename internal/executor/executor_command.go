@@ -472,6 +472,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		result := executeWithRetry(context.Background(), step, command, executionDir, commandName)
 
 		if !result.Success && !step.Background && !step.ContinueOnError {
+			result.FailedCommand = command
 			result.ServicesStarted = servicesStarted
 			return result
 		}

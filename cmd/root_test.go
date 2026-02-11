@@ -23,9 +23,9 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "0.42.0", cmd.Version)
-		assert.False(t, cmd.SilenceUsage)
-		assert.False(t, cmd.SilenceErrors)
+		assert.Equal(t, "0.40.2", cmd.Version)
+		assert.True(t, cmd.SilenceUsage, "SilenceUsage should be true to prevent printing usage on command execution errors")
+		assert.True(t, cmd.SilenceErrors, "SilenceErrors should be true so we handle error display ourselves")
 		assert.True(t, cmd.DisableFlagParsing, "DisableFlagParsing should be true for manual flag handling")
 	})
 
@@ -265,7 +265,7 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		mockExecutor.AssertExpectations(t)
 	})
 
-	t.Run("command execution failure with mock executor", func(t *testing.T) {
+	t.Run("command execution failure returns ExitError with FailedCommand", func(t *testing.T) {
 		mockLoader := new(mocks.ConfigLoader)
 		mockExecutor := new(mocks.Executor)
 
@@ -285,10 +285,12 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
 		mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(
 			executor.ExecutionResult{
-				Success:    false,
-				ReturnCode: 1,
-				Stdout:     "test output",
-				Stderr:     "test failed",
+				Success:       false,
+				ReturnCode:    1,
+				CommandName:   "test",
+				FailedCommand: "go test ./...",
+				Stdout:        "test output",
+				Stderr:        "test failed",
 			})
 
 		rootCmd := NewRootCommand()
@@ -296,14 +298,59 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		rootCmd.SetOut(&buf)
 		rootCmd.SetArgs([]string{"test"})
 
-		// This will call os.Exit(1), which we can't test directly.
-		// The function is designed to exit on failure, which is expected behavior.
-		// We'll skip the actual execution for this test case and just verify
-		// the mocks would be called correctly in the happy path.
+		err := rootCmd.Execute()
+		require.Error(t, err)
 
-		// Instead, let's just test that mocks are set up correctly
-		assert.NotNil(t, configLoader)
-		assert.NotNil(t, exec)
+		var exitErr *ExitError
+		require.True(t, errors.As(err, &exitErr))
+		assert.Equal(t, 1, exitErr.Code)
+		assert.Contains(t, exitErr.Message, "go test ./...")
+		assert.Contains(t, exitErr.Message, "failed with error code: 1")
+
+		mockLoader.AssertExpectations(t)
+		mockExecutor.AssertExpectations(t)
+	})
+
+	t.Run("command execution failure falls back to CommandName when FailedCommand is empty", func(t *testing.T) {
+		mockLoader := new(mocks.ConfigLoader)
+		mockExecutor := new(mocks.Executor)
+
+		SetConfigLoader(mockLoader)
+		SetExecutor(mockExecutor)
+		defer func() {
+			SetConfigLoader(nil)
+			SetExecutor(nil)
+		}()
+
+		expectedConfig := &config.Config{
+			Commands: map[string][]config.CommandStep{
+				"test": {{Run: config.RunCommand{"go test ./..."}}},
+			},
+		}
+		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
+		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
+		mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(
+			executor.ExecutionResult{
+				Success:     false,
+				ReturnCode:  42,
+				CommandName: "test",
+			})
+
+		rootCmd := NewRootCommand()
+		var buf bytes.Buffer
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"test"})
+
+		err := rootCmd.Execute()
+		require.Error(t, err)
+
+		var exitErr *ExitError
+		require.True(t, errors.As(err, &exitErr))
+		assert.Equal(t, 42, exitErr.Code)
+		assert.Equal(t, "Command 'test' failed with error code: 42", exitErr.Message)
+
+		mockLoader.AssertExpectations(t)
+		mockExecutor.AssertExpectations(t)
 	})
 
 	t.Run("command execution with output", func(t *testing.T) {

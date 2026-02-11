@@ -126,6 +126,7 @@ commands:
   test-multicmd:
     - run:
       - "echo command 1"
+      - "false lo"
       - "echo command 2"
 
   test-directory:

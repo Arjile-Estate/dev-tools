@@ -479,6 +479,57 @@ func TestExecuteCommandStep(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandStep_FailedCommandField(t *testing.T) {
+	t.Run("sets FailedCommand when a foreground command fails", func(t *testing.T) {
+		step := config.CommandStep{
+			Run: config.RunCommand{"echo success", "false"},
+		}
+
+		result := ExecuteCommandStep(step, "test-multicmd", "", nil)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, "false", result.FailedCommand)
+	})
+
+	t.Run("FailedCommand is empty on success", func(t *testing.T) {
+		step := config.CommandStep{
+			Run: config.RunCommand{"echo hello"},
+		}
+
+		result := ExecuteCommandStep(step, "test-command", "", nil)
+
+		assert.True(t, result.Success)
+		assert.Empty(t, result.FailedCommand)
+	})
+
+	t.Run("sets FailedCommand to the first failing command in multi-command step", func(t *testing.T) {
+		step := config.CommandStep{
+			Run: config.RunCommand{"echo first", "exit 42", "echo third"},
+		}
+
+		result := ExecuteCommandStep(step, "test-command", "", nil)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, "exit 42", result.FailedCommand)
+		assert.Equal(t, 42, result.ReturnCode)
+	})
+}
+
+func TestExecuteCommandWithOptions_FailedCommandField(t *testing.T) {
+	t.Run("propagates FailedCommand from failed step", func(t *testing.T) {
+		result := ExecuteCommandWithOptions(CommandExecutionOptions{
+			CommandName: "test-multicmd",
+			Steps: []config.CommandStep{
+				{Run: config.RunCommand{"echo step1-cmd1", "false"}},
+			},
+		})
+
+		assert.False(t, result.Success)
+		assert.Equal(t, "false", result.FailedCommand)
+		assert.Equal(t, "test-multicmd", result.CommandName)
+	})
+}
+
 func TestExecuteCommandStepWithDirectory(t *testing.T) {
 	tests := []struct {
 		name        string
