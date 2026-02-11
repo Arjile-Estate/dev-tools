@@ -10,7 +10,7 @@ func TestGetBuiltInCommandNames(t *testing.T) {
 	names := GetBuiltInCommandNames()
 
 	// Should have all built-in commands except internal ones
-	expectedCommands := []string{"logs", "status", "cleanup-pids", "cleanup-all", "restart", "stop", "version", "onboard", "validate", "completion"}
+	expectedCommands := []string{"logs", "status", "cleanup-pids", "cleanup-all", "restart", "stop", "version", "onboard", "validate", "schema", "completion"}
 
 	assert.Len(t, names, len(expectedCommands), "Should have correct number of built-in commands")
 
@@ -34,7 +34,7 @@ func TestGetBuiltInCommandMap(t *testing.T) {
 	commandMap := GetBuiltInCommandMap()
 
 	// Should include all commands including internal ones
-	expectedCommands := []string{"logs", "status", "cleanup-pids", "cleanup-all", "restart", "stop", "version", "onboard", "validate", "completion", "__dev_complete"}
+	expectedCommands := []string{"logs", "status", "cleanup-pids", "cleanup-all", "restart", "stop", "version", "onboard", "validate", "schema", "completion", "__dev_complete"}
 
 	assert.Len(t, commandMap, len(expectedCommands), "Should have all commands including internal")
 

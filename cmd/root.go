@@ -28,6 +28,9 @@ type CommandConfig struct {
 	Watch      bool
 }
 
+// version is the application version, injected at build time via ldflags
+var version = "1.0.0"
+
 var (
 	// Dependency injection variables (used for testing)
 	configLoader config.ConfigLoader
@@ -62,7 +65,7 @@ sensible defaults, while allowing customization through configuration files.`,
 		DisableFlagParsing: true, // Don't parse flags - pass all args through
 	}
 
-	rootCmd.Version = "0.50.0"
+	rootCmd.Version = version
 
 	// Override help command to show available commands
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {

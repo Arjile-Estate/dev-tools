@@ -29,32 +29,31 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 
 ## Installation
 
-### Prerequisites
+### Quick Install
 
-- Go 1.21 or higher
+```bash
+curl -fsSL https://raw.githubusercontent.com/slaanesh/dev-tools/main/install.sh | bash
+```
+
+This downloads the latest release binary to `~/.local/bin`. Set a custom install directory with `INSTALL_DIR`:
+
+```bash
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/slaanesh/dev-tools/main/install.sh | bash
+```
+
+### Download from Releases
+
+Pre-built binaries for Linux and macOS (amd64/arm64) are available on the [Releases page](https://github.com/slaanesh/dev-tools/releases).
 
 ### Build from Source
+
+Requires Go 1.22 or higher.
 
 ```bash
 git clone git@github.com:slaanesh/dev-tools.git
 cd dev-tools
-go mod tidy
 go build -o dev-tools .
-```
-
-### Install Locally
-
-We recommend installing it into your `~/.local/bin` folder - make sure ~/.local/bin is in your shell `PATH`!
-
-```bash
 cp dev-tools ~/.local/bin/
-```
-
-### Install Globally
-
-```bash
-# Copy binary to your PATH
-sudo cp dev-tools /usr/local/bin/
 ```
 
 ## Usage
@@ -330,7 +329,7 @@ dev-tools validate
 - Catch typos and structural errors before execution
 - Clear error messages pinpointing issues
 - Schema-based validation ensures consistency
-- IDE support with JSON schema integration (coming soon)
+- IDE support with JSON schema integration (run `dev-tools schema` to export)
 
 ### YAML Configuration Format
 
@@ -1260,83 +1259,7 @@ commands:
 
 ## Version History
 
-### v0.40.0 - Deprecated Feature Removal
-- **BREAKING**: Removed deprecated `ExecuteCommandWithSteps` method (use `ExecuteCommandWithOptions`)
-- **BREAKING**: Removed deprecated `start_services` configuration (use `services` configuration)
-- **BREAKING**: Removed deprecated `StartDockerService` function (use `StartDockerServiceTyped`)
-- **BREAKING**: Removed Docker Compose V1 (`docker-compose`) fallback support (use Docker Compose V2 built into Docker CLI)
-- Changed legacy daemon status marker from "(legacy)" to "(unknown)"
-- Removed migration guide for `start_services` as it is no longer supported
-
-### v0.35.0 - YAML Schema Validation
-- Added JSON schema validation for `.dev-config.yaml` files
-- New `dev-tools validate` command for explicit configuration validation
-- Automatic validation on config load with detailed error messages
-- Schema enforces correct types, required fields, and patterns
-
-### v0.34.0 - Code Quality Improvements
-- Extracted magic numbers to named constants
-- Improved code maintainability and readability
-- Better timeout and display width management
-
-### v0.33.0 - Code Organization
-- Split monolithic `built_in.go` into focused modules
-- Separated commands: logs, cleanup, daemon, status, onboard
-- Improved single-responsibility principle adherence
-
-### v0.32.0 - Structured Logging
-- Implemented zerolog for high-performance structured logging
-- JSON-formatted logs for easy parsing and analysis
-- Context-rich log entries with timestamps and metadata
-- Zero-allocation JSON encoding for minimal overhead
-
-### v0.31.0 - Error Handling Standardization
-- Standardized error handling patterns across codebase
-- Custom error types for better error context
-- Improved error messages and debugging information
-- Replaced `os.Exit()` with proper error returns
-
-### v0.23.0 - Watch Mode & Context Support
-- File watch mode with automatic command re-execution
-- Debouncing to prevent rapid re-runs
-- Glob pattern support for file matching
-- Added `context.Context` support for command cancellation
-- Graceful shutdown and cleanup on interrupts
-
-### v0.22.0 - Security Hardening
-- Eliminated shell injection vulnerabilities
-- Implemented POSIX shell argument escaping
-- Thread-safe color output with atomic operations
-- Secure command execution without shell interpolation
-
-### v0.21.0 - Code Refactoring
-- Split `executor_shell.go` into focused modules
-- Extracted helper functions for better modularity
-- Improved test coverage and code organization
-
-### v0.20.0 - Type Safety & Configuration
-- Replaced `map[string]interface{}` with typed Docker config structs
-- Type-safe configuration handling
-- Better IDE support and compile-time checking
-
-### v0.19.0 - Retry Logic
-- Implemented configurable retry logic for transient failures
-- Retry delays with configurable time units
-- Selective retry based on exit codes
-- Helpful for flaky tests and network operations
-
-### v0.16.0 - Extended Project Support & JSON Output
-- Added support for Java/Maven, .NET, PHP, and Ruby projects
-- JSON output format for `status` command (`--format json`)
-- Machine-readable output for automation and monitoring
-- Enhanced status command with comprehensive system information
-
-### Earlier Versions
-- v0.15.0: Onboard command for AI assistant documentation
-- v0.14.0: Shell completion for Bash, Zsh, and Fish
-- v0.13.0: Docker Compose integration
-- v0.12.0: Enhanced service management with health checks
-- v0.11.0: Daemon process management with PID tracking
+See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes across all versions.
 
 ## Contributing
 

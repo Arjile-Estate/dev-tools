@@ -738,7 +738,8 @@ func TestInitBuiltInCommandRegistry(t *testing.T) {
 		// Verify all built-in commands are registered
 		expectedCommands := []string{
 			"logs", "status", "cleanup-pids", "cleanup-all",
-			"restart", "stop", "version", "onboard", "completion", "__dev_complete",
+			"restart", "stop", "version", "onboard", "validate", "schema",
+			"completion", "__dev_complete",
 		}
 
 		for _, cmdName := range expectedCommands {

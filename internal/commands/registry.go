@@ -87,6 +87,13 @@ func initBuiltInCommandRegistry() {
 				},
 			},
 			{
+				Name:        "schema",
+				Description: "Export JSON schema for .dev-config.yaml",
+				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
+					return HandleSchemaCommand(cmd, args, projectDir)
+				},
+			},
+			{
 				Name:        "completion",
 				Description: "Generate shell completion script",
 				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
