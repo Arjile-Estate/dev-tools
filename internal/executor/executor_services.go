@@ -11,7 +11,7 @@ import (
 )
 
 // Docker Compose command (built into modern docker CLI)
-const DockerComposeCmd = "docker compose"
+const DockerComposeCmd = "docker"
 
 // HandleServicesConfiguration handles the new services configuration
 func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult {
@@ -88,7 +88,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	composeCmd := DockerComposeCmd
 
 	// Build command arguments (no shell, direct execution for security)
-	args := []string{"-f", compose.File}
+	args := []string{"compose", "-f", compose.File}
 
 	// Add profiles if specified
 	for _, profile := range compose.Profiles {
@@ -170,7 +170,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	composeCmd := DockerComposeCmd
 
 	// Build command arguments (no shell, direct execution for security)
-	args := []string{"-f", compose.File}
+	args := []string{"compose", "-f", compose.File}
 
 	// Add profiles if specified
 	for _, profile := range compose.Profiles {
