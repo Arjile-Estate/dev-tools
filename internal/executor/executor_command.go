@@ -213,9 +213,8 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		// stop/restart from another terminal can kill the entire tree
 		setProcessGroupAttr(cmd)
 
-		// Stream output directly to stdout/stderr for foreground daemon
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		// Daemon processes should not produce terminal output.
+		// Leaving cmd.Stdout and cmd.Stderr nil connects them to /dev/null.
 
 		err := cmd.Start()
 		if err != nil {

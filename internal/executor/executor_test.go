@@ -436,6 +436,71 @@ func TestExecuteDaemonCommand(t *testing.T) {
 	}
 }
 
+func TestDaemonCommand_SuppressesOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(oldDir))
+	}()
+
+	// Capture stdout/stderr by redirecting os.Stdout/os.Stderr to pipes
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	rOut, wOut, err := os.Pipe()
+	require.NoError(t, err)
+	rErr, wErr, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = wOut
+	os.Stderr = wErr
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+	}()
+
+	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
+		Command:     "echo daemon-stdout-leak && echo daemon-stderr-leak >&2",
+		Background:  false,
+		Daemon:      true,
+		CommandName: "test-daemon-output",
+	})
+
+	// Close write ends so reads don't block
+	wOut.Close()
+	wErr.Close()
+
+	stdoutBytes, _ := io.ReadAll(rOut)
+	stderrBytes, _ := io.ReadAll(rErr)
+	rOut.Close()
+	rErr.Close()
+
+	assert.True(t, result.Success, "Daemon command should succeed")
+
+	// Daemon stderr should be completely empty (daemon's stderr goes to /dev/null,
+	// and dev-tools status messages go to stdout not stderr)
+	assert.Empty(t, string(stderrBytes),
+		"Daemon stderr should not leak to terminal")
+
+	// Stdout may contain dev-tools status messages (e.g. "Running job..."),
+	// but should NOT contain direct daemon output lines.
+	// Filter out status message lines and verify no daemon output remains.
+	var daemonLines []string
+	for _, line := range strings.Split(string(stdoutBytes), "\n") {
+		if line == "" || strings.Contains(line, "Running job") {
+			continue
+		}
+		daemonLines = append(daemonLines, line)
+	}
+	assert.Empty(t, daemonLines,
+		"Daemon stdout should not leak to terminal, but found: %v", daemonLines)
+
+	// Clean up PID file
+	expectedPIDFile := GeneratePIDFilename("test-daemon-output", "echo daemon-stdout-leak && echo daemon-stderr-leak >&2")
+	t.Cleanup(func() {
+		_ = RemovePIDFile(expectedPIDFile)
+	})
+}
+
 func TestExecuteCommandStep(t *testing.T) {
 	tests := []struct {
 		name        string

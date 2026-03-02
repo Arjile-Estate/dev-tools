@@ -29,7 +29,7 @@ type CommandConfig struct {
 }
 
 // version is the application version, injected at build time via ldflags
-var version = "1.1.0"
+var version = "1.1.1"
 
 var (
 	// Dependency injection variables (used for testing)
