@@ -629,4 +629,3 @@ func compareHealthCheck(a, b *HealthCheckConfig) bool {
 		a.Timeout == b.Timeout &&
 		a.Retries == b.Retries
 }
-

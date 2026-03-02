@@ -2,8 +2,8 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"dev-tools/internal/logger"
+	"fmt"
 	"os"
 
 	"dev-tools/internal/config"
