@@ -209,6 +209,10 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 
 	// For daemon processes running in foreground, track PID
 	if opts.Daemon {
+		// Give the foreground daemon its own process group so that
+		// stop/restart from another terminal can kill the entire tree
+		setProcessGroupAttr(cmd)
+
 		// Stream output directly to stdout/stderr for foreground daemon
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -243,8 +247,8 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		if waitErr != nil {
 			// Check if context was cancelled
 			if ctx.Err() == context.Canceled {
-				// Clean up PID file
-				_ = RemovePIDFile(pidFile)
+				// Clean up PID file only if we still own it
+				_, _ = RemovePIDFileIfOwned(pidFile, cmd.Process.Pid)
 				return ExecutionResult{
 					Success:    false,
 					Stderr:     "command cancelled",
@@ -253,8 +257,8 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 				}
 			}
 			if ctx.Err() == context.DeadlineExceeded {
-				// Clean up PID file
-				_ = RemovePIDFile(pidFile)
+				// Clean up PID file only if we still own it
+				_, _ = RemovePIDFileIfOwned(pidFile, cmd.Process.Pid)
 				return ExecutionResult{
 					Success:    false,
 					Stderr:     "command timeout exceeded",
@@ -265,6 +269,12 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 
 			if exitError, ok := waitErr.(*exec.ExitError); ok {
 				returnCode = exitError.ExitCode()
+				// Detect external signal termination and inform the user
+				if sigName := describeExitSignal(exitError); sigName != "" {
+					logger.Infof("Daemon '%s' was terminated by signal: %s", opts.CommandName, sigName)
+					fmt.Printf("%s\n", colors.Warning("Daemon '%s' was terminated by signal: %s",
+						opts.CommandName, sigName))
+				}
 			} else {
 				returnCode = -1
 			}
@@ -273,12 +283,13 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 			logger.Info("Daemon command completed successfully")
 		}
 
-		// Clean up PID file
-		if pidErr := RemovePIDFile(pidFile); pidErr != nil {
-			// Log with proper error type but don't fail - daemon completed
+		// Clean up PID file only if we still own it (avoids race with restart)
+		if removed, pidErr := RemovePIDFileIfOwned(pidFile, cmd.Process.Pid); pidErr != nil {
 			logger.Warnf("Warning: %v", NewDaemonError(cmd.Process.Pid, pidFile, fmt.Errorf("failed to remove PID file: %w", pidErr)))
-		} else {
+		} else if removed {
 			logger.Infof("Removed PID file %s after daemon completion", pidFile)
+		} else {
+			logger.Infof("PID file %s belongs to a restarted daemon, leaving in place", pidFile)
 		}
 
 		return ExecutionResult{

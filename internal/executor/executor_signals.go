@@ -25,10 +25,14 @@ func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
 	case sig := <-signalChan:
 		logger.Infof("Received signal %v, terminating process", sig)
 		if cmd.Process != nil {
-			if sigErr := cmd.Process.Signal(sig); sigErr != nil {
-				logger.Infof("Failed to forward signal to child process: %v", sigErr)
-				if killErr := cmd.Process.Kill(); killErr != nil {
-					logger.Infof("Failed to kill child process: %v", killErr)
+			sysSig, ok := sig.(syscall.Signal)
+			if !ok {
+				sysSig = syscall.SIGTERM
+			}
+			if sigErr := signalProcessGroup(cmd.Process.Pid, sysSig); sigErr != nil {
+				logger.Infof("Failed to forward signal to process group: %v", sigErr)
+				if killErr := signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL); killErr != nil {
+					logger.Infof("Failed to kill process group: %v", killErr)
 				}
 			}
 		}

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-02
+
+### Fixed
+- Daemon restart/stop from another terminal now properly terminates foreground daemon instances
+- Process group signaling: foreground daemons now run in their own process group, allowing `stop` and `restart` to kill the entire process tree (shell + children)
+- PID file race condition: restart no longer causes the old foreground instance to delete the new daemon's PID file
+- Signal forwarding: Ctrl+C now propagates to the entire daemon process group instead of just the shell process
+
+### Added
+- `signalProcessGroup` helper for platform-specific process group signaling (Unix sends to group leader; Windows falls back to single-process signal)
+- `RemovePIDFileIfOwned` function to prevent PID file ownership races during restart
+- Termination feedback: foreground daemons now print a message when killed externally (e.g., "Daemon 'test-daemon' was terminated by signal: terminated")
+
 ## [1.0.0] - 2026-02-11
 
 ### Added
@@ -148,6 +161,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Daemon process management with PID tracking
 
+[1.1.0]: https://github.com/slaanesh/dev-tools/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/slaanesh/dev-tools/compare/v0.50.0...v1.0.0
 [0.50.0]: https://github.com/slaanesh/dev-tools/compare/v0.40.0...v0.50.0
 [0.40.0]: https://github.com/slaanesh/dev-tools/compare/v0.35.0...v0.40.0

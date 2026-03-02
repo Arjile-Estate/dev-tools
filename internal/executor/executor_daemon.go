@@ -3,9 +3,9 @@ package executor
 import (
 	"context"
 	"crypto/sha1"
+	"dev-tools/internal/logger"
 	"encoding/json"
 	"fmt"
-	"dev-tools/internal/logger"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -106,6 +106,35 @@ func RemovePIDFile(pidFile string) error {
 	return os.Remove(pidFile)
 }
 
+// RemovePIDFileIfOwned removes a PID file only if it still belongs to the
+// given PID. This prevents a race where a foreground daemon cleans up a PID
+// file that was already replaced by a restart command.
+// Returns (true, nil) if the file was removed, (false, nil) if skipped or missing.
+func RemovePIDFileIfOwned(pidFile string, expectedPID int) (bool, error) {
+	pidInfo, err := ReadEnhancedPIDFile(pidFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File already removed (e.g., by stop command) — not an error
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to read PID file %s: %w", pidFile, err)
+	}
+
+	if pidInfo.PID != expectedPID {
+		logger.Infof("PID file %s belongs to PID %d, not %d — skipping removal (restart in progress)",
+			pidFile, pidInfo.PID, expectedPID)
+		return false, nil
+	}
+
+	if err := os.Remove(pidFile); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to remove PID file %s: %w", pidFile, err)
+	}
+	return true, nil
+}
+
 // IsProcessRunning checks if a process with given PID is running
 func IsProcessRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
@@ -180,15 +209,15 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 		return RemovePIDFile(pidFilePath)
 	}
 
-	// Send SIGTERM to the process
-	process, err := os.FindProcess(daemon.PID)
+	// Send SIGTERM to the process (or its entire process group if it's a leader)
+	err := signalProcessGroup(daemon.PID, syscall.SIGTERM)
 	if err != nil {
-		return fmt.Errorf("failed to find process %d: %w", daemon.PID, err)
-	}
-
-	err = process.Signal(syscall.SIGTERM)
-	if err != nil {
-		return fmt.Errorf("failed to send SIGTERM to process %d: %w", daemon.PID, err)
+		// Process may have exited between the IsRunning check and the signal
+		if !IsProcessRunning(daemon.PID) {
+			logger.Infof("Daemon %s (PID %d) exited before SIGTERM could be sent", daemon.CommandName, daemon.PID)
+		} else {
+			return fmt.Errorf("failed to send SIGTERM to process %d: %w", daemon.PID, err)
+		}
 	}
 
 	// Wait for process to terminate (with timeout)
@@ -203,9 +232,15 @@ func StopDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	// Force kill if still running
 	if IsProcessRunning(daemon.PID) {
 		logger.Infof("Daemon %s (PID %d) did not stop gracefully, force killing", daemon.CommandName, daemon.PID)
-		err = process.Signal(syscall.SIGKILL)
+		err = signalProcessGroup(daemon.PID, syscall.SIGKILL)
 		if err != nil {
-			return fmt.Errorf("failed to send SIGKILL to process %d: %w", daemon.PID, err)
+			// Process may have exited between the IsProcessRunning check and
+			// the signal — treat as successful stop
+			if !IsProcessRunning(daemon.PID) {
+				logger.Infof("Daemon %s (PID %d) exited before SIGKILL could be sent", daemon.CommandName, daemon.PID)
+			} else {
+				return fmt.Errorf("failed to send SIGKILL to process %d: %w", daemon.PID, err)
+			}
 		}
 		// Wait a bit more for SIGKILL to take effect
 		time.Sleep(DaemonForceKillWaitTime)

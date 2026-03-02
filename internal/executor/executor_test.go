@@ -1368,7 +1368,7 @@ func TestStartDockerService_ComplexConfiguration(t *testing.T) {
 			name: "service with all configuration options",
 			service: config.ContainerReference{
 				Complex: &config.ContainerConfig{
-					Name: "complex-service",
+					Name:  "complex-service",
 					Image: "alpine:latest",
 					Environment: map[string]string{
 						"VAR1": "value1",
@@ -1845,6 +1845,60 @@ func TestPIDFileOperations_ErrorHandling(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no such file or directory")
+	})
+}
+
+func TestRemovePIDFileIfOwned(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("removes file when PID matches", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, ".match.pid")
+		err := CreateEnhancedPIDFile(pidFile, 12345, "test-cmd", "sleep 60")
+		require.NoError(t, err)
+
+		removed, err := RemovePIDFileIfOwned(pidFile, 12345)
+		assert.NoError(t, err)
+		assert.True(t, removed, "file should be removed when PID matches")
+
+		_, statErr := os.Stat(pidFile)
+		assert.True(t, os.IsNotExist(statErr), "PID file should no longer exist")
+	})
+
+	t.Run("preserves file when PID differs", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, ".differ.pid")
+		err := CreateEnhancedPIDFile(pidFile, 99999, "test-cmd", "sleep 60")
+		require.NoError(t, err)
+
+		removed, err := RemovePIDFileIfOwned(pidFile, 12345)
+		assert.NoError(t, err)
+		assert.False(t, removed, "file should be preserved when PID differs")
+
+		_, statErr := os.Stat(pidFile)
+		assert.False(t, os.IsNotExist(statErr), "PID file should still exist")
+
+		// Cleanup
+		_ = os.Remove(pidFile)
+	})
+
+	t.Run("no error when file missing", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, ".gone.pid")
+
+		removed, err := RemovePIDFileIfOwned(pidFile, 12345)
+		assert.NoError(t, err)
+		assert.False(t, removed, "should return false for missing file")
+	})
+
+	t.Run("works with legacy PID format", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, ".legacy.pid")
+		err := CreatePIDFile(pidFile, 12345)
+		require.NoError(t, err)
+
+		removed, err := RemovePIDFileIfOwned(pidFile, 12345)
+		assert.NoError(t, err)
+		assert.True(t, removed, "should work with legacy PID format")
+
+		_, statErr := os.Stat(pidFile)
+		assert.True(t, os.IsNotExist(statErr), "PID file should no longer exist")
 	})
 }
 
