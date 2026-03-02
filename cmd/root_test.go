@@ -23,7 +23,7 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "1.1.1", cmd.Version)
+		assert.Equal(t, "1.2.0", cmd.Version)
 		assert.True(t, cmd.SilenceUsage, "SilenceUsage should be true to prevent printing usage on command execution errors")
 		assert.True(t, cmd.SilenceErrors, "SilenceErrors should be true so we handle error display ourselves")
 		assert.True(t, cmd.DisableFlagParsing, "DisableFlagParsing should be true for manual flag handling")
@@ -151,6 +151,108 @@ func TestRunCommand_WithMocks(t *testing.T) {
 	mockExecutor.AssertExpectations(t)
 }
 
+func TestRunCommand_UserDefinedOverridesBuiltIn(t *testing.T) {
+	t.Run("user-defined logs command overrides built-in", func(t *testing.T) {
+		mockLoader := new(mocks.ConfigLoader)
+		mockExecutor := new(mocks.Executor)
+
+		SetConfigLoader(mockLoader)
+		SetExecutor(mockExecutor)
+		defer func() {
+			SetConfigLoader(nil)
+			SetExecutor(nil)
+		}()
+
+		// Config defines a "logs" command, which is also a built-in
+		expectedConfig := &config.Config{
+			Commands: map[string][]config.CommandStep{
+				"logs": {
+					{Run: config.RunCommand{"tail -f /var/log/myapp.log"}},
+				},
+			},
+		}
+		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
+		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
+
+		// The executor should be called — meaning the user's command runs, not the built-in
+		mockExecutor.On("ExecuteCommandWithOptions", mock.MatchedBy(func(opts executor.CommandExecutionOptions) bool {
+			return opts.CommandName == "logs"
+		})).Return(executor.ExecutionResult{Success: true})
+
+		rootCmd := NewRootCommand()
+		var buf bytes.Buffer
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"logs"})
+
+		err := rootCmd.Execute()
+		assert.NoError(t, err)
+
+		// Verify the executor was called (user command ran, not built-in)
+		mockExecutor.AssertCalled(t, "ExecuteCommandWithOptions", mock.Anything)
+		mockLoader.AssertExpectations(t)
+		mockExecutor.AssertExpectations(t)
+	})
+
+	t.Run("built-in logs runs when no user override", func(t *testing.T) {
+		mockLoader := new(mocks.ConfigLoader)
+		mockExecutor := new(mocks.Executor)
+
+		SetConfigLoader(mockLoader)
+		SetExecutor(mockExecutor)
+		defer func() {
+			SetConfigLoader(nil)
+			SetExecutor(nil)
+		}()
+
+		// Config has commands but NOT "logs"
+		expectedConfig := &config.Config{
+			Commands: map[string][]config.CommandStep{
+				"test": {
+					{Run: config.RunCommand{"go test ./..."}},
+				},
+			},
+		}
+		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
+
+		rootCmd := NewRootCommand()
+		var buf bytes.Buffer
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"logs"})
+
+		// Should run the built-in logs (which will fail in test env, but NOT call executor)
+		_ = rootCmd.Execute()
+
+		// Executor should NOT have been called — built-in handled it
+		mockExecutor.AssertNotCalled(t, "ExecuteCommandWithOptions", mock.Anything)
+	})
+
+	t.Run("built-in command works when config loading fails", func(t *testing.T) {
+		mockLoader := new(mocks.ConfigLoader)
+		mockExecutor := new(mocks.Executor)
+
+		SetConfigLoader(mockLoader)
+		SetExecutor(mockExecutor)
+		defer func() {
+			SetConfigLoader(nil)
+			SetExecutor(nil)
+		}()
+
+		// Config loading fails (no .dev-config.yaml)
+		mockLoader.On("LoadConfig", ".").Return((*config.Config)(nil), errors.New("no config found"))
+
+		rootCmd := NewRootCommand()
+		var buf bytes.Buffer
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"status"})
+
+		err := rootCmd.Execute()
+		// Built-in "status" should still work even without config
+		assert.NoError(t, err)
+
+		mockLoader.AssertExpectations(t)
+	})
+}
+
 func TestRunCommand_ErrorCases(t *testing.T) {
 	t.Run("environment loading error with mock executor", func(t *testing.T) {
 		mockLoader := new(mocks.ConfigLoader)
@@ -163,7 +265,13 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 			SetExecutor(nil)
 		}()
 
-		// Only set up mock for environment loading - config loading won't be called due to early failure
+		// Config loads first, must return a config with the command so env loading is attempted
+		expectedConfig := &config.Config{
+			Commands: map[string][]config.CommandStep{
+				"custom-test": {{Run: config.RunCommand{"echo test"}}},
+			},
+		}
+		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
 		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(errors.New("env load failed"))
 
 		rootCmd := NewRootCommand()
@@ -175,9 +283,8 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to load environment variables")
 
-		// Only the executor should have been called - config loading never happens due to early failure
+		mockLoader.AssertExpectations(t)
 		mockExecutor.AssertExpectations(t)
-		// Note: mockLoader.AssertExpectations(t) not called because LoadConfig should not be reached
 	})
 
 	t.Run("environment loading error without mock executor", func(t *testing.T) {
@@ -244,7 +351,6 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 			},
 		}
 		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
-		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
 
 		rootCmd := NewRootCommand()
 		var buf bytes.Buffer
@@ -257,7 +363,6 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "Available commands:")
 
 		mockLoader.AssertExpectations(t)
-		mockExecutor.AssertExpectations(t)
 	})
 
 	t.Run("command execution failure returns ExitError with FailedCommand", func(t *testing.T) {

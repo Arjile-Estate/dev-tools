@@ -29,7 +29,7 @@ type CommandConfig struct {
 }
 
 // version is the application version, injected at build time via ldflags
-var version = "1.1.1"
+var version = "1.2.0"
 
 var (
 	// Dependency injection variables (used for testing)
@@ -324,38 +324,49 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	logger.Infof("Starting dev-tools with command: %s, passthrough args: %v", commandName, parsedArgs.PassthroughArgs)
 
-	// Handle special built-in commands
-	builtInCommands := getBuiltInCommands(cmdCfg.ProjectDir, cmd.Version)
-	if commandFunc, exists := builtInCommands[commandName]; exists {
-		return commandFunc(cmd, filteredArgs)
-	}
-
-	// Load environment variables
-	envFile := filepath.Join(cmdCfg.ProjectDir, ".env")
-	if exec != nil {
-		if err := exec.LoadEnvironmentVariables(envFile); err != nil {
-			return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
-		}
-	} else {
-		if err := executor.LoadEnvironmentVariables(envFile); err != nil {
-			return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
-		}
-	}
-
-	// Load configuration
+	// Load configuration early so user-defined commands can override built-in commands
 	var cfg *config.Config
+	var configErr error
 	if configLoader != nil {
-		cfg, err = configLoader.LoadConfig(cmdCfg.ProjectDir)
+		cfg, configErr = configLoader.LoadConfig(cmdCfg.ProjectDir)
 	} else {
-		cfg, err = config.LoadConfigurationForProject(cmdCfg.ProjectDir)
-	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", colors.Error("failed to load configuration"), err)
+		cfg, configErr = config.LoadConfigurationForProject(cmdCfg.ProjectDir)
 	}
 
-	// Check if command exists
-	steps, exists := cfg.Commands[commandName]
-	if !exists {
+	// User-defined commands take precedence over built-in commands
+	var steps []config.CommandStep
+	userDefined := false
+	if configErr == nil {
+		if s, exists := cfg.Commands[commandName]; exists {
+			steps = s
+			userDefined = true
+		}
+	}
+
+	if userDefined {
+		// Load environment variables for user-defined commands
+		envFile := filepath.Join(cmdCfg.ProjectDir, ".env")
+		if exec != nil {
+			if err := exec.LoadEnvironmentVariables(envFile); err != nil {
+				return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
+			}
+		} else {
+			if err := executor.LoadEnvironmentVariables(envFile); err != nil {
+				return fmt.Errorf("%s: %w", colors.Error("failed to load environment variables"), err)
+			}
+		}
+	} else {
+		// Fall back to built-in commands
+		builtInCommands := getBuiltInCommands(cmdCfg.ProjectDir, cmd.Version)
+		if commandFunc, exists := builtInCommands[commandName]; exists {
+			return commandFunc(cmd, filteredArgs)
+		}
+
+		// No built-in match either — report the appropriate error
+		if configErr != nil {
+			return fmt.Errorf("%s: %w", colors.Error("failed to load configuration"), configErr)
+		}
+
 		var availableCommands []string
 		for cmd := range cfg.Commands {
 			availableCommands = append(availableCommands, cmd)
