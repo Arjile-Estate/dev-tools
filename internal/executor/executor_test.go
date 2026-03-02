@@ -436,14 +436,7 @@ func TestExecuteDaemonCommand(t *testing.T) {
 	}
 }
 
-func TestDaemonCommand_SuppressesOutput(t *testing.T) {
-	tmpDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	require.NoError(t, os.Chdir(tmpDir))
-	defer func() {
-		require.NoError(t, os.Chdir(oldDir))
-	}()
-
+func TestBackgroundDaemon_SuppressesOutput(t *testing.T) {
 	// Capture stdout/stderr by redirecting os.Stdout/os.Stderr to pipes
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr
@@ -459,46 +452,30 @@ func TestDaemonCommand_SuppressesOutput(t *testing.T) {
 	}()
 
 	result := ExecuteShellCommand(context.Background(), ExecuteOptions{
-		Command:     "echo daemon-stdout-leak && echo daemon-stderr-leak >&2",
-		Background:  false,
-		Daemon:      true,
-		CommandName: "test-daemon-output",
+		Command:    "echo bg-stdout-leak && echo bg-stderr-leak >&2 && sleep 0.2",
+		Background: true,
 	})
 
+	// Give the background process a moment to write its output
+	time.Sleep(100 * time.Millisecond)
+
 	// Close write ends so reads don't block
-	wOut.Close()
-	wErr.Close()
+	_ = wOut.Close()
+	_ = wErr.Close()
 
 	stdoutBytes, _ := io.ReadAll(rOut)
 	stderrBytes, _ := io.ReadAll(rErr)
-	rOut.Close()
-	rErr.Close()
+	_ = rOut.Close()
+	_ = rErr.Close()
 
-	assert.True(t, result.Success, "Daemon command should succeed")
+	assert.True(t, result.Success, "Background command should succeed")
+	assert.NotZero(t, result.PID, "Background command should return a PID")
 
-	// Daemon stderr should be completely empty (daemon's stderr goes to /dev/null,
-	// and dev-tools status messages go to stdout not stderr)
-	assert.Empty(t, string(stderrBytes),
-		"Daemon stderr should not leak to terminal")
-
-	// Stdout may contain dev-tools status messages (e.g. "Running job..."),
-	// but should NOT contain direct daemon output lines.
-	// Filter out status message lines and verify no daemon output remains.
-	var daemonLines []string
-	for _, line := range strings.Split(string(stdoutBytes), "\n") {
-		if line == "" || strings.Contains(line, "Running job") {
-			continue
-		}
-		daemonLines = append(daemonLines, line)
-	}
-	assert.Empty(t, daemonLines,
-		"Daemon stdout should not leak to terminal, but found: %v", daemonLines)
-
-	// Clean up PID file
-	expectedPIDFile := GeneratePIDFilename("test-daemon-output", "echo daemon-stdout-leak && echo daemon-stderr-leak >&2")
-	t.Cleanup(func() {
-		_ = RemovePIDFile(expectedPIDFile)
-	})
+	// Background daemon stdout/stderr should be completely suppressed
+	assert.NotContains(t, string(stdoutBytes), "bg-stdout-leak",
+		"Background daemon stdout should not leak to terminal")
+	assert.NotContains(t, string(stderrBytes), "bg-stderr-leak",
+		"Background daemon stderr should not leak to terminal")
 }
 
 func TestExecuteCommandStep(t *testing.T) {

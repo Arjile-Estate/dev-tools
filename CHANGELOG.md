@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.1] - 2026-03-02
 
 ### Fixed
-- Daemon processes no longer leak stdout/stderr to the terminal; output is now redirected to /dev/null
+- Background daemon processes no longer leak stdout/stderr to the terminal; output is explicitly redirected to /dev/null
 
 ## [1.1.0] - 2026-03-02
 

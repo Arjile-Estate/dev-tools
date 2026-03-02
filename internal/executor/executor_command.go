@@ -152,7 +152,21 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 	if opts.Background {
 		setProcessGroupAttr(cmd)
 
-		err := cmd.Start()
+		// Suppress stdout/stderr so background daemons don't produce terminal output
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			logger.Warnf("Failed to open /dev/null: %v", err)
+			return ExecutionResult{
+				Success:    false,
+				Stderr:     err.Error(),
+				ReturnCode: -1,
+			}
+		}
+		defer func() { _ = devNull.Close() }()
+		cmd.Stdout = devNull
+		cmd.Stderr = devNull
+
+		err = cmd.Start()
 		if err != nil {
 			logger.Warnf("Failed to start background command: %v", err)
 			return ExecutionResult{
@@ -213,8 +227,9 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		// stop/restart from another terminal can kill the entire tree
 		setProcessGroupAttr(cmd)
 
-		// Daemon processes should not produce terminal output.
-		// Leaving cmd.Stdout and cmd.Stderr nil connects them to /dev/null.
+		// Stream output directly to stdout/stderr for foreground daemon
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
 
 		err := cmd.Start()
 		if err != nil {
