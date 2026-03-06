@@ -411,6 +411,49 @@ func TestRunCommand_ErrorCases(t *testing.T) {
 		mockExecutor.AssertExpectations(t)
 	})
 
+	t.Run("command failure with ReturnCode 0 gets corrected to 1", func(t *testing.T) {
+		mockLoader := new(mocks.ConfigLoader)
+		mockExecutor := new(mocks.Executor)
+
+		SetConfigLoader(mockLoader)
+		SetExecutor(mockExecutor)
+		defer func() {
+			SetConfigLoader(nil)
+			SetExecutor(nil)
+		}()
+
+		expectedConfig := &config.Config{
+			Commands: map[string][]config.CommandStep{
+				"test": {{Run: config.RunCommand{"go test ./..."}}},
+			},
+		}
+		mockLoader.On("LoadConfig", ".").Return(expectedConfig, nil)
+		mockExecutor.On("LoadEnvironmentVariables", mock.Anything).Return(nil)
+		// Simulate a bug: Success=false but ReturnCode=0 (Go default)
+		mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(
+			executor.ExecutionResult{
+				Success:     false,
+				ReturnCode:  0,
+				CommandName: "test",
+			})
+
+		rootCmd := NewRootCommand()
+		var buf bytes.Buffer
+		rootCmd.SetOut(&buf)
+		rootCmd.SetArgs([]string{"test"})
+
+		err := rootCmd.Execute()
+		require.Error(t, err)
+
+		var exitErr *ExitError
+		require.True(t, errors.As(err, &exitErr))
+		assert.Equal(t, 1, exitErr.Code, "ExitError.Code should be corrected to 1 when ReturnCode is 0 on failure")
+		assert.Contains(t, exitErr.Message, "error code: 1")
+
+		mockLoader.AssertExpectations(t)
+		mockExecutor.AssertExpectations(t)
+	})
+
 	t.Run("command execution failure falls back to CommandName when FailedCommand is empty", func(t *testing.T) {
 		mockLoader := new(mocks.ConfigLoader)
 		mockExecutor := new(mocks.Executor)

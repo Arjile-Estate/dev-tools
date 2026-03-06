@@ -146,8 +146,9 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 		// Complex service configuration
 		if err := ref.Complex.Validate(); err != nil {
 			return ExecutionResult{
-				Success: false,
-				Stderr:  err.Error(),
+				Success:    false,
+				Stderr:     err.Error(),
+				ReturnCode: 1,
 			}
 		}
 
@@ -155,8 +156,9 @@ func StartDockerServiceTyped(ref config.ContainerReference) ExecutionResult {
 		dockerCmd, dockerArgs = buildDockerRunCommand(ref.Complex)
 	} else {
 		return ExecutionResult{
-			Success: false,
-			Stderr:  "Invalid container reference: neither simple nor complex",
+			Success:    false,
+			Stderr:     "Invalid container reference: neither simple nor complex",
+			ReturnCode: 1,
 		}
 	}
 
@@ -218,8 +220,9 @@ func WaitForServiceHealth(service interface{}, timeout int) ExecutionResult {
 	containerName, err := getContainerName(service)
 	if err != nil {
 		return ExecutionResult{
-			Success: false,
-			Stderr:  err.Error(),
+			Success:    false,
+			Stderr:     err.Error(),
+			ReturnCode: 1,
 		}
 	}
 

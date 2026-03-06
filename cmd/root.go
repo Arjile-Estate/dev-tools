@@ -438,11 +438,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if result.Stdout != "" || result.Stderr != "" {
 			logger.Warnf("Command '%s' failed output - stdout: %s, stderr: %s", failedLabel, result.Stdout, result.Stderr)
 		}
-		logger.Warnf("Command '%s' failed with exit code %d", failedLabel, result.ReturnCode)
+
+		// Safety net: ensure non-zero exit code on failure. ReturnCode defaults to 0 in Go,
+		// so if an error path forgot to set it, we correct it here to avoid exiting with 0.
+		returnCode := result.ReturnCode
+		if returnCode == 0 {
+			returnCode = 1
+		}
+		logger.Warnf("Command '%s' failed with exit code %d", failedLabel, returnCode)
 
 		return &ExitError{
-			Code:    result.ReturnCode,
-			Message: fmt.Sprintf("Command '%s' failed with error code: %d", failedLabel, result.ReturnCode),
+			Code:    returnCode,
+			Message: fmt.Sprintf("Command '%s' failed with error code: %d", failedLabel, returnCode),
 		}
 	}
 

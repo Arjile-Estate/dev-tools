@@ -82,7 +82,7 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
 		logger.Warn(errorMsg)
-		return ExecutionResult{Success: false, Stderr: errorMsg}
+		return ExecutionResult{Success: false, Stderr: errorMsg, ReturnCode: 1}
 	}
 
 	composeCmd := DockerComposeCmd
@@ -164,7 +164,7 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	if _, err := os.Stat(compose.File); os.IsNotExist(err) {
 		errorMsg := fmt.Sprintf("Docker Compose file '%s' does not exist", compose.File)
 		logger.Warn(errorMsg)
-		return ExecutionResult{Success: false, Stderr: errorMsg}
+		return ExecutionResult{Success: false, Stderr: errorMsg, ReturnCode: 1}
 	}
 
 	composeCmd := DockerComposeCmd

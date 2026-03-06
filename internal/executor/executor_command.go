@@ -410,19 +410,14 @@ func shellEscape(arg string) string {
 	return fmt.Sprintf("'%s'", escaped)
 }
 
-// handleServicesStartup starts configured services and returns their names
-func handleServicesStartup(services config.ServicesConfig) ([]string, error) {
+// handleServicesStartup starts configured services and returns the result directly,
+// preserving all fields including ReturnCode from the underlying command execution.
+func handleServicesStartup(services config.ServicesConfig) ExecutionResult {
 	if services.Compose == nil && len(services.Containers) == 0 {
-		return nil, nil
+		return ExecutionResult{Success: true}
 	}
 
-	result := HandleServicesConfiguration(services)
-	if !result.Success {
-		// Wrap in ServiceError for better error categorization
-		return nil, NewServiceError("multiple", "start", fmt.Errorf("%s", result.Stderr))
-	}
-
-	return result.ServicesStarted, nil
+	return HandleServicesConfiguration(services)
 }
 
 // checkDaemonAlreadyRunning checks if a daemon is already running and cleans up stale PID files
@@ -448,15 +443,15 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 	executionDir, err := validateAndResolveDirectory(step.Directory, workingDir)
 	if err != nil {
 		// Don't double-log: caller will log if needed
-		return ExecutionResult{Success: false, Stderr: err.Error()}
+		return ExecutionResult{Success: false, Stderr: err.Error(), ReturnCode: 1}
 	}
 
 	// Start services if configured
-	servicesStarted, err := handleServicesStartup(step.Services)
-	if err != nil {
-		// Don't double-log: caller will log if needed
-		return ExecutionResult{Success: false, Stderr: err.Error()}
+	serviceResult := handleServicesStartup(step.Services)
+	if !serviceResult.Success {
+		return serviceResult
 	}
+	servicesStarted := serviceResult.ServicesStarted
 
 	// Defer cleanup if services were started and cleanup is enabled
 	if len(servicesStarted) > 0 && step.Services.Cleanup {
@@ -486,7 +481,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		if step.Daemon {
 			if err := checkDaemonAlreadyRunning(commandName, command); err != nil {
 				// Don't double-log: caller will log if needed
-				return ExecutionResult{Success: false, Stderr: err.Error()}
+				return ExecutionResult{Success: false, Stderr: err.Error(), ReturnCode: 1}
 			}
 		}
 

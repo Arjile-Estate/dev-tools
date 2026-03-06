@@ -353,3 +353,103 @@ services:
 		t.Logf("Service configuration result: success=%v, stderr=%s", result.Success, result.Stderr)
 	})
 }
+
+// TestReturnCode_InternalErrors verifies that internal errors (no command ran) have ReturnCode=1
+func TestReturnCode_InternalErrors(t *testing.T) {
+	t.Run("directory validation error has ReturnCode 1", func(t *testing.T) {
+		step := config.CommandStep{
+			Directory: "/nonexistent/directory/path",
+			Run:       config.RunCommand{"echo test"},
+		}
+
+		result := ExecuteCommandStep(step, "test", t.TempDir(), nil)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "directory validation error should have ReturnCode 1, not 0")
+	})
+
+	t.Run("compose file not found has ReturnCode 1", func(t *testing.T) {
+		compose := config.ComposeConfig{
+			File: "/nonexistent/docker-compose.yml",
+		}
+
+		result := StartDockerCompose(compose)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "compose file not found should have ReturnCode 1, not 0")
+	})
+
+	t.Run("compose stop file not found has ReturnCode 1", func(t *testing.T) {
+		compose := config.ComposeConfig{
+			File: "/nonexistent/docker-compose.yml",
+		}
+
+		result := StopDockerCompose(compose)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "compose stop file not found should have ReturnCode 1, not 0")
+	})
+
+	t.Run("invalid container reference has ReturnCode 1", func(t *testing.T) {
+		ref := config.ContainerReference{} // Neither simple nor complex
+
+		result := StartDockerServiceTyped(ref)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "invalid container reference should have ReturnCode 1, not 0")
+	})
+
+	t.Run("container validation error has ReturnCode 1", func(t *testing.T) {
+		ref := config.ContainerReference{
+			Complex: &config.ContainerConfig{
+				// Missing required fields (Name, Image)
+			},
+		}
+
+		result := StartDockerServiceTyped(ref)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "container validation error should have ReturnCode 1, not 0")
+	})
+}
+
+// TestHandleServicesStartup_PreservesReturnCode verifies handleServicesStartup
+// preserves the ReturnCode from the underlying service startup failure.
+func TestHandleServicesStartup_PreservesReturnCode(t *testing.T) {
+	t.Run("empty services returns success", func(t *testing.T) {
+		services := config.ServicesConfig{}
+
+		result := handleServicesStartup(services)
+
+		assert.True(t, result.Success)
+	})
+
+	t.Run("compose file not found propagates ReturnCode", func(t *testing.T) {
+		services := config.ServicesConfig{
+			Compose: &config.ComposeConfig{
+				File: "/nonexistent/docker-compose.yml",
+			},
+		}
+
+		result := handleServicesStartup(services)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "ReturnCode should be preserved from StartDockerCompose, not lost as 0")
+	})
+
+	t.Run("service failure through ExecuteCommandStep preserves ReturnCode", func(t *testing.T) {
+		step := config.CommandStep{
+			Run: config.RunCommand{"echo test"},
+			Services: config.ServicesConfig{
+				Compose: &config.ComposeConfig{
+					File: "/nonexistent/docker-compose.yml",
+				},
+			},
+		}
+
+		result := ExecuteCommandStep(step, "test", t.TempDir(), nil)
+
+		assert.False(t, result.Success)
+		assert.NotEqual(t, 0, result.ReturnCode, "service startup failure through ExecuteCommandStep should not have ReturnCode 0")
+	})
+}
