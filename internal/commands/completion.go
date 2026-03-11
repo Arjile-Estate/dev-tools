@@ -323,8 +323,8 @@ func parseCompletionContext(commandLine string, projectDir string) *CompletionCo
 		return nil
 	}
 
-	// Skip "dev-tools" if present
-	if len(words) > 0 && words[0] == "dev-tools" {
+	// Skip the program name/alias (first word is always the binary or alias name)
+	if len(words) > 0 {
 		words = words[1:]
 	}
 
