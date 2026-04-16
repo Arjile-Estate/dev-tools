@@ -101,6 +101,27 @@ func TestValidateConfig(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "valid config with compose project_name",
+			config: &Config{
+				Commands: map[string][]CommandStep{
+					"test": {
+						{
+							Services: ServicesConfig{
+								Compose: &ComposeConfig{
+									File:        "docker-compose.yml",
+									ProjectName: "my-project",
+								},
+								WaitForHealth: true,
+								Timeout:       30,
+							},
+							Run: []string{"go test ./..."},
+						},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
 			name:        "nil config",
 			config:      nil,
 			expectError: true,

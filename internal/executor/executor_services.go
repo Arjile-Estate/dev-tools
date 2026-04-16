@@ -90,6 +90,11 @@ func StartDockerCompose(compose config.ComposeConfig) ExecutionResult {
 	// Build command arguments (no shell, direct execution for security)
 	args := []string{"compose", "-f", compose.File}
 
+	// Add project name if specified (enables sharing containers across worktrees)
+	if compose.ProjectName != "" {
+		args = append(args, "--project-name", compose.ProjectName)
+	}
+
 	// Add profiles if specified
 	for _, profile := range compose.Profiles {
 		args = append(args, "--profile", profile)
@@ -171,6 +176,11 @@ func StopDockerCompose(compose config.ComposeConfig) ExecutionResult {
 
 	// Build command arguments (no shell, direct execution for security)
 	args := []string{"compose", "-f", compose.File}
+
+	// Add project name if specified (must match the name used during startup)
+	if compose.ProjectName != "" {
+		args = append(args, "--project-name", compose.ProjectName)
+	}
 
 	// Add profiles if specified
 	for _, profile := range compose.Profiles {

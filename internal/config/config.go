@@ -59,9 +59,10 @@ func (r *RunCommand) UnmarshalYAML(value *yaml.Node) error {
 
 // ComposeConfig represents Docker Compose configuration
 type ComposeConfig struct {
-	File     string   `yaml:"file"`
-	Services []string `yaml:"services,omitempty"`
-	Profiles []string `yaml:"profiles,omitempty"`
+	File        string   `yaml:"file"`
+	ProjectName string   `yaml:"project_name,omitempty"`
+	Services    []string `yaml:"services,omitempty"`
+	Profiles    []string `yaml:"profiles,omitempty"`
 }
 
 // ServicesConfig represents the new services configuration

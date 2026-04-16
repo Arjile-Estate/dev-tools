@@ -379,6 +379,30 @@ func TestReturnCode_InternalErrors(t *testing.T) {
 		assert.Equal(t, 1, result.ReturnCode, "compose file not found should have ReturnCode 1, not 0")
 	})
 
+	t.Run("compose with project_name file not found has ReturnCode 1", func(t *testing.T) {
+		compose := config.ComposeConfig{
+			File:        "/nonexistent/docker-compose.yml",
+			ProjectName: "test-project",
+		}
+
+		result := StartDockerCompose(compose)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "compose with project_name file not found should have ReturnCode 1")
+	})
+
+	t.Run("compose stop with project_name file not found has ReturnCode 1", func(t *testing.T) {
+		compose := config.ComposeConfig{
+			File:        "/nonexistent/docker-compose.yml",
+			ProjectName: "test-project",
+		}
+
+		result := StopDockerCompose(compose)
+
+		assert.False(t, result.Success)
+		assert.Equal(t, 1, result.ReturnCode, "compose stop with project_name file not found should have ReturnCode 1")
+	})
+
 	t.Run("compose stop file not found has ReturnCode 1", func(t *testing.T) {
 		compose := config.ComposeConfig{
 			File: "/nonexistent/docker-compose.yml",

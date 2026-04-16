@@ -356,6 +356,27 @@ func TestServicesConfig_UnmarshalYAML(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "compose with project_name configuration",
+			yamlContent: `services:
+  compose:
+    file: "docker-compose.yml"
+    project_name: "shared-project"
+    services: ["postgres"]
+  wait_for_health: true
+  timeout: 60`,
+			want: ServicesConfig{
+				Compose: &ComposeConfig{
+					File:        "docker-compose.yml",
+					ProjectName: "shared-project",
+					Services:    []string{"postgres"},
+				},
+				Cleanup:       false,
+				WaitForHealth: true,
+				Timeout:       60,
+			},
+			wantErr: false,
+		},
+		{
 			name: "full configuration with custom defaults",
 			yamlContent: `services:
   compose:
@@ -460,6 +481,18 @@ services: []`,
 			},
 			wantErr: false,
 		},
+		{
+			name: "compose with project_name",
+			yamlContent: `file: "docker-compose.yml"
+project_name: "my-project"
+services: ["redis"]`,
+			want: ComposeConfig{
+				File:        "docker-compose.yml",
+				ProjectName: "my-project",
+				Services:    []string{"redis"},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -539,7 +572,7 @@ func compareComposeConfig(a, b ComposeConfig) bool {
 		}
 	}
 
-	return true
+	return a.ProjectName == b.ProjectName
 }
 
 func compareContainerInterface(a, b ContainerReference) bool {

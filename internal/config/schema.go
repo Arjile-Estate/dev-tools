@@ -60,6 +60,7 @@ const ConfigSchema = `{
               "type": "object",
               "properties": {
                 "file": {"type": "string"},
+                "project_name": {"type": "string"},
                 "services": {"type": "array", "items": {"type": "string"}},
                 "profiles": {"type": "array", "items": {"type": "string"}}
               },
