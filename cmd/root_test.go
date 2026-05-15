@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "1.4.0", cmd.Version)
+		assert.Equal(t, "1.5.0", cmd.Version)
 		assert.True(t, cmd.SilenceUsage, "SilenceUsage should be true to prevent printing usage on command execution errors")
 		assert.True(t, cmd.SilenceErrors, "SilenceErrors should be true so we handle error display ourselves")
 		assert.True(t, cmd.DisableFlagParsing, "DisableFlagParsing should be true for manual flag handling")
@@ -583,10 +584,81 @@ func TestConfigFromFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Explicitly ensure CLAUDE_CODE is unset so default stays "text"
+			t.Setenv("CLAUDE_CODE", "")
 			result := configFromFlags(tt.flags)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestDefaultOutputFormat(t *testing.T) {
+	t.Run("returns text when CLAUDE_CODE is unset", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "")
+		assert.Equal(t, "text", defaultOutputFormat())
+	})
+
+	t.Run("returns json when CLAUDE_CODE=1", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "1")
+		assert.Equal(t, "json", defaultOutputFormat())
+	})
+
+	t.Run("returns text when CLAUDE_CODE has any other value", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "0")
+		assert.Equal(t, "text", defaultOutputFormat())
+
+		t.Setenv("CLAUDE_CODE", "true")
+		assert.Equal(t, "text", defaultOutputFormat())
+	})
+}
+
+func TestPrintVersion(t *testing.T) {
+	t.Run("text format prints human-readable line", func(t *testing.T) {
+		cmd := NewRootCommand()
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		require.NoError(t, printVersion(cmd, "9.9.9", "text"))
+		assert.Equal(t, "dev-tools version 9.9.9\n", buf.String())
+	})
+
+	t.Run("json format emits {version: X}", func(t *testing.T) {
+		cmd := NewRootCommand()
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		require.NoError(t, printVersion(cmd, "9.9.9", "json"))
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		assert.Equal(t, "9.9.9", payload["version"])
+	})
+}
+
+func TestConfigFromFlags_ClaudeCodeAutoJSON(t *testing.T) {
+	t.Run("CLAUDE_CODE=1 with no explicit format → format is json", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "1")
+		cfg := configFromFlags(map[string]string{})
+		assert.Equal(t, "json", cfg.Format)
+	})
+
+	t.Run("CLAUDE_CODE=1 with explicit --format text → text wins", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "1")
+		cfg := configFromFlags(map[string]string{"format": "text"})
+		assert.Equal(t, "text", cfg.Format)
+	})
+
+	t.Run("CLAUDE_CODE=1 with explicit --format json → still json", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "1")
+		cfg := configFromFlags(map[string]string{"format": "json"})
+		assert.Equal(t, "json", cfg.Format)
+	})
+
+	t.Run("CLAUDE_CODE unset with explicit --format json → json", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE", "")
+		cfg := configFromFlags(map[string]string{"format": "json"})
+		assert.Equal(t, "json", cfg.Format)
+	})
 }
 
 func TestSetConfigLoader(t *testing.T) {

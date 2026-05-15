@@ -172,7 +172,7 @@ func TestCleanupStalePIDFilesWithTermination_MixedStates(t *testing.T) {
 		require.NoError(t, err)
 
 		// Cleanup with termination enabled (should clean up stale PIDs)
-		result := CleanupStalePIDFilesWithTermination(tmpDir, true)
+		result, _ := CleanupStalePIDFilesWithTermination(tmpDir, true)
 
 		assert.True(t, result.Success)
 		// Should mention stale processes in output
@@ -195,7 +195,7 @@ func TestCleanupStalePIDFilesWithTermination_MixedStates(t *testing.T) {
 			require.NoError(t, os.Chdir(oldDir))
 		}()
 
-		result := CleanupStalePIDFilesWithTermination(emptyDir, false)
+		result, _ := CleanupStalePIDFilesWithTermination(emptyDir, false)
 
 		assert.True(t, result.Success)
 		assert.Contains(t, result.Stdout, "No PID files")
@@ -207,7 +207,7 @@ func TestCleanupStalePIDFilesWithTermination_MixedStates(t *testing.T) {
 		err := CreateEnhancedPIDFile(stalePidFile, 999999, "error-daemon", "cmd")
 		require.NoError(t, err)
 
-		result := CleanupStalePIDFilesWithTermination(tmpDir, false)
+		result, _ := CleanupStalePIDFilesWithTermination(tmpDir, false)
 
 		// Should still succeed even if some operations had issues
 		assert.True(t, result.Success)

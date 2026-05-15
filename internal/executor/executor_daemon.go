@@ -307,8 +307,21 @@ func RestartDaemonProcess(projectDir string, daemon *DaemonInfo) error {
 	return nil
 }
 
-// CleanupStalePIDFilesWithTermination cleans up PID files and optionally terminates running processes
-func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning bool) ExecutionResult {
+// CleanupSummary is the structured breakdown of a cleanup run, suitable for
+// JSON output. The string fields are formatted "name (PID N)" so consumers
+// have a stable, parseable shape.
+type CleanupSummary struct {
+	CleanedFiles        []string `json:"cleaned_files"`
+	TerminatedProcesses []string `json:"terminated_processes"`
+	ActiveProcesses     []string `json:"active_processes"`
+	Errors              []string `json:"errors"`
+}
+
+// CleanupStalePIDFilesWithTermination cleans up PID files and optionally
+// terminates running processes. The returned ExecutionResult carries the
+// human-formatted summary in Stdout; the second return value is the same
+// information in structured form for JSON output.
+func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning bool) (ExecutionResult, CleanupSummary) {
 	logger.Info("Starting PID file cleanup")
 
 	pidFiles, err := filepath.Glob(filepath.Join(projectDir, "*.pid"))
@@ -316,7 +329,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 		return ExecutionResult{
 			Success: false,
 			Stderr:  fmt.Sprintf("Failed to find PID files: %v", err),
-		}
+		}, CleanupSummary{}
 	}
 
 	if len(pidFiles) == 0 {
@@ -325,7 +338,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 		return ExecutionResult{
 			Success: true,
 			Stdout:  message,
-		}
+		}, CleanupSummary{}
 	}
 
 	daemons, err := ListDaemonProcesses(projectDir)
@@ -333,7 +346,7 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 		return ExecutionResult{
 			Success: false,
 			Stderr:  fmt.Sprintf("Failed to list daemon processes: %v", err),
-		}
+		}, CleanupSummary{}
 	}
 
 	var cleanedFiles []string
@@ -420,13 +433,19 @@ func CleanupStalePIDFilesWithTermination(projectDir string, terminateRunning boo
 	success := len(errors) == 0 || len(cleanedFiles) > 0 || len(terminatedProcesses) > 0 || len(activeProcesses) > 0
 
 	return ExecutionResult{
-		Success: success,
-		Stdout:  summary.String(),
-		Stderr:  strings.Join(errors, "\n"),
-	}
+			Success: success,
+			Stdout:  summary.String(),
+			Stderr:  strings.Join(errors, "\n"),
+		}, CleanupSummary{
+			CleanedFiles:        cleanedFiles,
+			TerminatedProcesses: terminatedProcesses,
+			ActiveProcesses:     activeProcesses,
+			Errors:              errors,
+		}
 }
 
-// CleanupStalePIDFiles cleans up stale PID files for processes that are no longer running
-func CleanupStalePIDFiles(projectDir string) ExecutionResult {
+// CleanupStalePIDFiles cleans up stale PID files for processes that are no longer running.
+// Returns both the human-formatted ExecutionResult and the structured CleanupSummary.
+func CleanupStalePIDFiles(projectDir string) (ExecutionResult, CleanupSummary) {
 	return CleanupStalePIDFilesWithTermination(projectDir, false)
 }

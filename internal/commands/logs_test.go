@@ -2,6 +2,8 @@ package commands
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -172,5 +174,86 @@ func TestHandleLogsCommandUsesConfiguredSize(t *testing.T) {
 		assert.NotContains(t, output, "line10\n")
 		assert.Contains(t, output, "line11")
 		assert.Contains(t, output, "line30")
+	})
+}
+
+func TestHandleLogsCommand_JSONOutput(t *testing.T) {
+	t.Run("emits parsed entries as JSON when format is json", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		logContent := `{"level":"info","time":"2025-06-15T10:30:00+02:00","exec_dir":"/home/user/project","command":"test","message":"all tests passed"}
+{"level":"warn","time":"2025-06-15T10:31:00+02:00","exec_dir":"/home/user/project","command":"build","message":"deprecated API"}
+`
+		logFile := filepath.Join(tempDir, "custom.log")
+		require.NoError(t, os.WriteFile(logFile, []byte(logContent), 0644))
+
+		configContent := "logs:\n  file: " + logFile + "\ncommands:\n  test:\n    - run: echo hi\n"
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644))
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		require.NoError(t, HandleLogsCommand(cmd, tempDir))
+
+		var payload struct {
+			Logs []map[string]any `json:"logs"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		require.Len(t, payload.Logs, 2)
+		assert.Equal(t, "info", payload.Logs[0]["level"])
+		assert.Equal(t, "all tests passed", payload.Logs[0]["message"])
+		assert.Equal(t, "warn", payload.Logs[1]["level"])
+	})
+
+	t.Run("malformed lines surface as raw entries", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		logContent := `{"level":"info","time":"2025-06-15T10:30:00+02:00","message":"ok"}
+this is not json
+`
+		logFile := filepath.Join(tempDir, "custom.log")
+		require.NoError(t, os.WriteFile(logFile, []byte(logContent), 0644))
+
+		configContent := "logs:\n  file: " + logFile + "\ncommands:\n  test:\n    - run: echo hi\n"
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644))
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		require.NoError(t, HandleLogsCommand(cmd, tempDir))
+
+		var payload struct {
+			Logs []map[string]any `json:"logs"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		require.Len(t, payload.Logs, 2)
+		assert.Equal(t, "ok", payload.Logs[0]["message"])
+		assert.Equal(t, "this is not json", payload.Logs[1]["raw"])
+	})
+
+	t.Run("empty log file produces empty array", func(t *testing.T) {
+		tempDir := t.TempDir()
+		logFile := filepath.Join(tempDir, "custom.log")
+		require.NoError(t, os.WriteFile(logFile, []byte(""), 0644))
+
+		configContent := "logs:\n  file: " + logFile + "\ncommands:\n  test:\n    - run: echo hi\n"
+		require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".dev-config.yaml"), []byte(configContent), 0644))
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		require.NoError(t, HandleLogsCommand(cmd, tempDir))
+
+		var payload struct {
+			Logs []map[string]any `json:"logs"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		assert.Empty(t, payload.Logs)
 	})
 }

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -148,6 +149,59 @@ func TestHandleCleanupPidsCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleCleanupPidsCommand_JSONOutput(t *testing.T) {
+	t.Run("empty project emits success JSON with zero cleaned files", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		require.NoError(t, HandleCleanupPidsCommand(cmd, tempDir))
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		assert.Equal(t, "cleanup-pids", payload["action"])
+		assert.Equal(t, true, payload["success"])
+		assert.Equal(t, float64(0), payload["cleaned"])
+		assert.Equal(t, []any{}, payload["cleaned_files"])
+		assert.Equal(t, []any{}, payload["errors"])
+	})
+
+	t.Run("removes stale PID files and reports them in JSON", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create a stale PID file pointing to a non-existent process.
+		pidFile := filepath.Join(tempDir, ".stale-daemon.pid")
+		pidInfo := executor.PIDFileInfo{
+			PID:         999999,
+			CommandName: "stale-daemon",
+			Command:     "sleep 0",
+			StartTime:   time.Now(),
+		}
+		data, err := json.Marshal(pidInfo)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(pidFile, data, 0644))
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		require.NoError(t, HandleCleanupPidsCommand(cmd, tempDir))
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		assert.Equal(t, "cleanup-pids", payload["action"])
+		assert.Equal(t, true, payload["success"])
+		assert.Equal(t, float64(1), payload["cleaned"])
+		cleanedFiles, _ := payload["cleaned_files"].([]any)
+		require.Len(t, cleanedFiles, 1)
+		assert.Contains(t, cleanedFiles[0].(string), "stale-daemon")
+	})
 }
 
 func TestHandleCleanupAllCommand(t *testing.T) {
@@ -444,6 +498,25 @@ func TestHandleRestartCommand(t *testing.T) {
 			assert.NotContains(t, err.Error(), "daemon 'test-daemon' not found")
 		}
 	})
+
+	t.Run("emits JSON on daemon-not-found when format is json", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		err := HandleRestartCommand(cmd, []string{"restart", "nonexistent"}, tempDir)
+		require.Error(t, err)
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		assert.Equal(t, "restart", payload["action"])
+		assert.Equal(t, "nonexistent", payload["daemon"])
+		assert.Equal(t, false, payload["success"])
+		assert.Contains(t, payload["error"], "not found")
+	})
 }
 
 func TestHandleStopCommand(t *testing.T) {
@@ -515,6 +588,25 @@ func TestHandleStopCommand(t *testing.T) {
 			assert.NotContains(t, err.Error(), "daemon 'test-daemon' not found")
 		}
 	})
+
+	t.Run("emits JSON on daemon-not-found when format is json", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		cmd := &cobra.Command{}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
+
+		err := HandleStopCommand(cmd, []string{"stop", "nonexistent"}, tempDir)
+		require.Error(t, err)
+
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &payload))
+		assert.Equal(t, "stop", payload["action"])
+		assert.Equal(t, "nonexistent", payload["daemon"])
+		assert.Equal(t, false, payload["success"])
+		assert.Contains(t, payload["error"], "not found")
+	})
 }
 
 func TestOutputStatusJSON(t *testing.T) {
@@ -538,8 +630,9 @@ func TestOutputStatusJSON(t *testing.T) {
 		cmd := &cobra.Command{}
 		var buf bytes.Buffer
 		cmd.SetOut(&buf)
+		cmd.SetContext(context.WithValue(context.Background(), FormatCtxKey, "json"))
 
-		err = HandleStatusCommand(cmd, []string{"--format=json"}, tempDir)
+		err = HandleStatusCommand(cmd, []string{}, tempDir)
 
 		require.NoError(t, err)
 		output := buf.String()

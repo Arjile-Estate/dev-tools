@@ -393,8 +393,9 @@ func TestCleanupStalePIDFiles(t *testing.T) {
 	err = os.WriteFile(nonPIDFile, []byte("test"), 0644)
 	require.NoError(t, err)
 
-	result := CleanupStalePIDFiles(tmpDir)
+	result, summary := CleanupStalePIDFiles(tmpDir)
 	assert.True(t, result.Success, "CleanupStalePIDFiles should succeed")
+	assert.NotNil(t, summary.CleanedFiles, "CleanupStalePIDFiles should return a summary")
 
 	_, err = os.Stat(stalePIDFile)
 	assert.True(t, os.IsNotExist(err), "Stale PID file should be removed")
@@ -1198,10 +1199,12 @@ func TestCleanupStalePIDFilesWithTermination(t *testing.T) {
 		err = CreateEnhancedPIDFile(runningPIDFile, os.Getpid(), "running-daemon", "current command")
 		require.NoError(t, err)
 
-		result := CleanupStalePIDFilesWithTermination(tmpDir, false)
+		result, summary := CleanupStalePIDFilesWithTermination(tmpDir, false)
 
 		assert.True(t, result.Success)
 		assert.Contains(t, result.Stdout, "Cleaned up 1 stale PID file")
+		assert.Len(t, summary.CleanedFiles, 1)
+		assert.Len(t, summary.ActiveProcesses, 1)
 
 		// Stale file should be removed
 		_, err = os.Stat(stalePIDFile)
@@ -1221,10 +1224,11 @@ func TestCleanupStalePIDFilesWithTermination(t *testing.T) {
 		err := CreateEnhancedPIDFile(stalePIDFile, 999999, "stale-daemon2", "old command")
 		require.NoError(t, err)
 
-		result := CleanupStalePIDFilesWithTermination(tmpDir, true)
+		result, summary := CleanupStalePIDFilesWithTermination(tmpDir, true)
 
 		assert.True(t, result.Success)
 		assert.Contains(t, result.Stdout, "Cleaned up 1 stale PID file")
+		assert.Len(t, summary.CleanedFiles, 1)
 
 		// Stale file should be removed
 		_, err = os.Stat(stalePIDFile)
@@ -1232,10 +1236,11 @@ func TestCleanupStalePIDFilesWithTermination(t *testing.T) {
 	})
 
 	t.Run("no PID files to cleanup", func(t *testing.T) {
-		result := CleanupStalePIDFilesWithTermination(tmpDir, false)
+		result, summary := CleanupStalePIDFilesWithTermination(tmpDir, false)
 
 		assert.True(t, result.Success)
 		assert.Contains(t, result.Stdout, "No PID files found to clean up")
+		assert.Empty(t, summary.CleanedFiles)
 	})
 }
 

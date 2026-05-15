@@ -227,8 +227,13 @@ func main() {
 
 - **`status.go`**: Shows running daemons (text/JSON output)
   ```go
-  func HandleStatusCommand(cmd *cobra.Command, args []string, format string)
+  func HandleStatusCommand(cmd *cobra.Command, args []string, projectDir string)
   ```
+  The output format ("text" or "json") is propagated via the cobra command
+  context using `FormatCtxKey`; handlers read it via
+  `commands.FormatFromContext(cmd)`. When the `CLAUDE_CODE=1` environment
+  variable is set, the default is `json` so Claude Code sessions always get
+  structured output.
 
 - **`onboard.go`**: Generates CLAUDE.md for AI assistants
   ```go

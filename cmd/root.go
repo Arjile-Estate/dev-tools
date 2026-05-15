@@ -29,7 +29,23 @@ type CommandConfig struct {
 }
 
 // version is the application version, injected at build time via ldflags
-var version = "1.4.0"
+var version = "1.5.0"
+
+// claudeCodeEnvVar is the environment variable Claude Code sets in
+// subprocesses spawned by its Bash tool. See
+// https://code.claude.com/docs/en/env-vars.md
+const claudeCodeEnvVar = "CLAUDE_CODE"
+
+// defaultOutputFormat returns the format to use when --format is not
+// explicitly passed. When running inside a Claude Code session
+// (CLAUDE_CODE=1), default to "json" so an LLM gets structured output;
+// otherwise default to "text".
+func defaultOutputFormat() string {
+	if os.Getenv(claudeCodeEnvVar) == "1" {
+		return "json"
+	}
+	return "text"
+}
 
 var (
 	// Dependency injection variables (used for testing)
@@ -96,11 +112,14 @@ Flags:
 	return rootCmd
 }
 
-// configFromFlags creates a CommandConfig from parsed flag values
+// configFromFlags creates a CommandConfig from parsed flag values.
+// When --format is not explicitly present in flags, the default is
+// determined by defaultOutputFormat (CLAUDE_CODE=1 → "json", else "text").
+// An explicit --format value always wins.
 func configFromFlags(flags map[string]string) CommandConfig {
 	cfg := CommandConfig{
-		ProjectDir: ".",    // default
-		Format:     "text", // default
+		ProjectDir: ".", // default
+		Format:     defaultOutputFormat(),
 	}
 
 	if v, ok := flags["verbose"]; ok && v == "true" {
@@ -235,8 +254,7 @@ func getBuiltInCommands(projectDir string, cmdVersion string) map[string]Command
 		// Special handling for version command which needs access to cmd.Version
 		if name == "version" {
 			builtInMap[name] = func(cmd *cobra.Command, args []string) error {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmdVersion)
-				return nil
+				return printVersion(cmd, cmdVersion, commands.FormatFromContext(cmd))
 			}
 		} else {
 			// Capture handler and projectDir in closure
@@ -249,6 +267,17 @@ func getBuiltInCommands(projectDir string, cmdVersion string) map[string]Command
 	}
 
 	return builtInMap
+}
+
+// printVersion writes the version string in the requested format. JSON mode
+// emits {"version":"X.Y.Z"} so an LLM can parse it programmatically; the
+// text path preserves the existing human-readable line.
+func printVersion(cmd *cobra.Command, v, format string) error {
+	if format == "json" {
+		return commands.EmitJSON(cmd, map[string]any{"version": v})
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", v)
+	return nil
 }
 
 // formatResultAsJSON converts an ExecutionResult to JSON output
@@ -294,10 +323,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Dev-tools flags must come BEFORE the command name
 	filteredArgs, devToolsFlags := extractDevToolsFlags(args)
 
+	// Resolve configuration first so --version and --help can honor --format.
+	cmdCfg := configFromFlags(devToolsFlags)
+
 	// Handle --version flag
 	if v, ok := devToolsFlags["version"]; ok && v == "true" {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "dev-tools version", cmd.Version)
-		return nil
+		return printVersion(cmd, cmd.Version, cmdCfg.Format)
 	}
 
 	// Handle --help flag
@@ -305,8 +336,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	// Create configuration from parsed flags
-	cmdCfg := configFromFlags(devToolsFlags)
+	// Propagate the resolved output format to built-in command handlers via
+	// the cobra command context. They read it back with
+	// commands.FormatFromContext(cmd) to decide between text and JSON output.
+	parentCtx := cmd.Context()
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	cmd.SetContext(context.WithValue(parentCtx, commands.FormatCtxKey, cmdCfg.Format))
 
 	// Initialize colors and logging with the parsed flags
 	colors.InitializeColorSupport(cmdCfg.NoColor)

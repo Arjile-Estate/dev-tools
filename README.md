@@ -1007,7 +1007,10 @@ cat activity.log | jq -r 'select(.message=="Executing command") | .command'
 
 ## Machine-Readable Output
 
-The `status` command supports JSON output for integration with automation tools:
+All commands accept `--format json` for machine-readable output. This works
+for user-defined commands (`test`, `build`, `dev`, …) as well as built-in
+commands (`status`, `logs`, `restart`, `stop`, `cleanup-pids`,
+`cleanup-all`, `validate`, `version`):
 
 ```bash
 # Get status in JSON format
@@ -1034,11 +1037,27 @@ dev-tools status --format json
 }
 ```
 
+### Automatic JSON in Claude Code sessions
+
+When `dev-tools` detects it is running inside a Claude Code session — i.e.
+the `CLAUDE_CODE=1` environment variable set by Claude Code's Bash tool — it
+automatically defaults `--format` to `json` so the assistant always reads
+structured output. To get human-readable output inside a Claude Code session,
+pass `--format text` explicitly; an explicit flag always wins over the
+auto-detection.
+
+### Recognized environment variables
+
+- `CLAUDE_CODE=1` — auto-default `--format` to `json` (described above).
+- `NO_COLOR` — disable ANSI colors (https://no-color.org/).
+- `TERM` — when empty or `dumb`, colors are disabled.
+
 **Use cases:**
 - **Monitoring**: Integrate with monitoring tools (Prometheus, Datadog)
 - **CI/CD**: Validate service health in pipelines
 - **Automation**: Script daemon management and health checks
 - **Dashboards**: Build custom development environment dashboards
+- **AI assistants**: Claude Code automatically receives structured JSON
 
 ## Development
 

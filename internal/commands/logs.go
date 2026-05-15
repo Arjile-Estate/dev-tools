@@ -13,7 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// HandleLogsCommand displays recent activity logs in human-readable format
+// HandleLogsCommand displays recent activity logs. In "text" format
+// (default) each entry is rendered as a single human-readable line; in
+// "json" format the entries are emitted as a JSON object with a "logs"
+// array, preserving every field of the original log records.
 func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 	logger.Info("Displaying recent activity logs")
 
@@ -28,6 +31,14 @@ func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 		return fmt.Errorf("failed to read logs: %w", err)
 	}
 
+	if FormatFromContext(cmd) == "json" {
+		entries := make([]map[string]any, 0, len(lines))
+		for _, line := range lines {
+			entries = append(entries, parseLogLineForJSON(line))
+		}
+		return EmitJSON(cmd, map[string]any{"logs": entries})
+	}
+
 	out := cmd.OutOrStdout()
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(out, formatLogLine(line)); err != nil {
@@ -36,6 +47,18 @@ func HandleLogsCommand(cmd *cobra.Command, projectDir string) error {
 	}
 
 	return nil
+}
+
+// parseLogLineForJSON decodes a single log line as a generic JSON object so
+// every field (including unexpected ones) survives a round-trip through the
+// JSON output. Lines that aren't valid JSON are wrapped as {"raw": <line>}
+// so consumers can still recover their content.
+func parseLogLineForJSON(rawLine string) map[string]any {
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(rawLine), &entry); err != nil || entry == nil {
+		return map[string]any{"raw": rawLine}
+	}
+	return entry
 }
 
 // readLastNLines reads a file and returns the last n non-empty lines.

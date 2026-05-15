@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-15
+
+### Added
+- Automatic JSON output when running inside a Claude Code session (detected via `CLAUDE_CODE=1` env var). Pass `--format text` to override.
+- `--format json` support extended to all built-in commands that previously only emitted text: `logs`, `restart`, `stop`, `cleanup-pids`, `cleanup-all`, `validate`, and `version`.
+- New `internal/commands/format.go` helper exposing `FormatCtxKey`, `FormatFromContext(cmd)`, and `EmitJSON(cmd, payload)` for consistent JSON output across handlers.
+- `executor.CleanupSummary` struct returned alongside `ExecutionResult` from `CleanupStalePIDFiles` / `CleanupStalePIDFilesWithTermination`, providing structured cleaned-files/active-processes/errors arrays for JSON output.
+
+### Changed
+- `status` command no longer sniffs `--format=json` from `args`; the output format is now propagated through the cobra command context.
+- `CleanupStalePIDFiles` and `CleanupStalePIDFilesWithTermination` now return `(ExecutionResult, CleanupSummary)` instead of just `ExecutionResult`.
+
 ## [1.2.0] - 2026-03-02
 
 ### Added

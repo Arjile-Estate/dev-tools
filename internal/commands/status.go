@@ -27,14 +27,9 @@ type DockerService struct {
 func HandleStatusCommand(cmd *cobra.Command, args []string, projectDir string) error {
 	logger.Info("Displaying comprehensive system status")
 
-	// Check for --format flag
-	useJSONFormat := false
-	for _, arg := range args {
-		if arg == "--format=json" || (len(args) > 1 && arg == "--format" && args[len(args)-1] == "json") {
-			useJSONFormat = true
-			break
-		}
-	}
+	// Output format is propagated via the cobra context by cmd/root.go.
+	// Fallback to "text" keeps this safe for direct invocation in tests.
+	useJSONFormat := FormatFromContext(cmd) == "json"
 
 	// Gather status information
 	daemons, err := executor.ListDaemonProcesses(projectDir)
