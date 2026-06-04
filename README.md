@@ -32,25 +32,25 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/slaanesh/dev-tools/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Arjile-Estate/dev-tools/main/install.sh | bash
 ```
 
 This downloads the latest release binary to `~/.local/bin`. Set a custom install directory with `INSTALL_DIR`:
 
 ```bash
-INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/slaanesh/dev-tools/main/install.sh | bash
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/Arjile-Estate/dev-tools/main/install.sh | bash
 ```
 
 ### Download from Releases
 
-Pre-built binaries for Linux and macOS (amd64/arm64) are available on the [Releases page](https://github.com/slaanesh/dev-tools/releases).
+Pre-built binaries for Linux and macOS (amd64/arm64) are available on the [Releases page](https://github.com/Arjile-Estate/dev-tools/releases).
 
 ### Build from Source
 
 Requires Go 1.22 or higher.
 
 ```bash
-git clone git@github.com:slaanesh/dev-tools.git
+git clone git@github.com:Arjile-Estate/dev-tools.git
 cd dev-tools
 go build -o dev-tools .
 cp dev-tools ~/.local/bin/

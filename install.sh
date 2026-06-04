@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # dev-tools installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/slaanesh/dev-tools/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Arjile-Estate/dev-tools/main/install.sh | bash
 
-REPO="slaanesh/dev-tools"
+REPO="Arjile-Estate/dev-tools"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 log() { echo "==> $*"; }

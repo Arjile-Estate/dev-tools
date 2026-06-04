@@ -386,7 +386,7 @@ type ExecutionResult struct {
 
 ```bash
 # Clone repository
-git clone git@github.com:slaanesh/dev-tools.git
+git clone git@github.com:Arjile-Estate/dev-tools.git
 cd dev-tools
 
 # Install dependencies

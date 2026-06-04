@@ -2,8 +2,6 @@ module dev-tools
 
 go 1.22
 
-toolchain go1.24.5
-
 require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/rs/zerolog v1.34.0
