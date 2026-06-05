@@ -30,10 +30,21 @@ detect_arch() {
 }
 
 get_latest_version() {
-    local version
-    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
-    if [ -z "$version" ]; then
-        error "Failed to fetch latest version from GitHub"
+    local effective_url version token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    # Resolve via the github.com /releases/latest redirect (web endpoint, not the
+    # rate-limited API) so anonymous `curl | bash` installs aren't throttled.
+    if [ -n "$token" ]; then
+        effective_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            -H "Authorization: Bearer ${token}" \
+            "https://github.com/${REPO}/releases/latest")
+    else
+        effective_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+            "https://github.com/${REPO}/releases/latest")
+    fi
+    version=${effective_url##*/tag/}
+    version=${version#v}
+    if [ -z "$version" ] || [ "$version" = "$effective_url" ]; then
+        error "Failed to resolve latest version from GitHub (redirect: ${effective_url:-empty})"
     fi
     echo "$version"
 }
