@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Installer no longer reports a spurious failure on a successful install: the `EXIT` cleanup trap referenced a `main()`-local `tmp_dir` that was out of scope when the trap fired, tripping `set -u` (`tmp_dir: unbound variable`). `tmp_dir` is now a script global so cleanup runs cleanly.
+- Installer resolves the latest release via the github.com `/releases/latest` redirect instead of the unauthenticated GitHub API, which is rate-limited to 60 req/hr per IP and returned 403 on token-less `curl | bash` installs. `GITHUB_TOKEN`/`GH_TOKEN` is now honoured when present.
 
 ## [1.5.0] - 2026-05-15
 
