@@ -7,6 +7,9 @@ set -euo pipefail
 REPO="Arjile-Estate/dev-tools"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
+# Global so the EXIT trap can clean it up after main() returns.
+tmp_dir=""
+
 log() { echo "==> $*"; }
 error() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -36,7 +39,7 @@ get_latest_version() {
 }
 
 main() {
-    local os arch version archive_name url tmp_dir
+    local os arch version archive_name url
 
     os=$(detect_os)
     arch=$(detect_arch)
