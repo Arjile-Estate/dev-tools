@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-06-05
+
+### Fixed
+- Installer no longer reports a spurious failure on a successful install: the `EXIT` cleanup trap referenced a `main()`-local `tmp_dir` that was out of scope when the trap fired, tripping `set -u` (`tmp_dir: unbound variable`). `tmp_dir` is now a script global so cleanup runs cleanly.
+
 ## [1.5.0] - 2026-05-15
 
 ### Added
