@@ -122,6 +122,28 @@ func TestValidateConfig(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "valid config with non_blocking services",
+			config: &Config{
+				Commands: map[string][]CommandStep{
+					"test": {
+						{
+							Services: ServicesConfig{
+								Compose: &ComposeConfig{
+									File:     "docker-compose.yml",
+									Services: []string{"postgres"},
+								},
+								WaitForHealth: true,
+								Timeout:       60,
+								NonBlocking:   true,
+							},
+							Run: []string{"pnpm -w turbo test"},
+						},
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
 			name:        "nil config",
 			config:      nil,
 			expectError: true,

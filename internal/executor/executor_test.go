@@ -961,6 +961,39 @@ func TestServicesConfiguration(t *testing.T) {
 	}
 }
 
+func TestHandleServicesConfiguration_NonBlocking(t *testing.T) {
+	original := IsDockerRunning
+	t.Cleanup(func() { IsDockerRunning = original })
+
+	// A compose file that does not exist: if the dependency is NOT skipped,
+	// StartDockerCompose fails, so any Success==true proves the skip happened.
+	missingCompose := config.ServicesConfig{
+		NonBlocking: true,
+		Compose: &config.ComposeConfig{
+			File: filepath.Join(t.TempDir(), "does-not-exist-compose.yml"),
+		},
+		WaitForHealth: false,
+	}
+
+	t.Run("skips when daemon is down", func(t *testing.T) {
+		IsDockerRunning = func() bool { return false }
+
+		result := HandleServicesConfiguration(missingCompose)
+
+		require.True(t, result.Success, "non-blocking dependency should be skipped when daemon is down")
+		require.Empty(t, result.ServicesStarted, "no services should be started when skipped")
+		require.NotEmpty(t, result.Warnings, "a warning should be recorded when skipping")
+	})
+
+	t.Run("does not skip when daemon is up", func(t *testing.T) {
+		IsDockerRunning = func() bool { return true }
+
+		result := HandleServicesConfiguration(missingCompose)
+
+		require.False(t, result.Success, "with daemon up, a genuine compose failure must still block")
+	})
+}
+
 func TestFindDaemonByCommandName(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldDir, _ := os.Getwd()

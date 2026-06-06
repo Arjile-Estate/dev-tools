@@ -18,6 +18,14 @@ func HandleServicesConfiguration(services config.ServicesConfig) ExecutionResult
 	logger.Infof("Handling services configuration (compose: %v, containers: %d)",
 		services.Compose != nil, len(services.Containers))
 
+	// Non-blocking dependencies are skipped (not failed) when the Docker daemon
+	// is not running, so the command can still proceed to its run step.
+	if services.NonBlocking && !IsDockerRunning() {
+		msg := "Docker daemon is not running; skipping non-blocking services dependency"
+		logger.Warn(msg)
+		return ExecutionResult{Success: true, Warnings: []string{msg}}
+	}
+
 	var servicesStarted []string
 
 	// Handle Docker Compose services

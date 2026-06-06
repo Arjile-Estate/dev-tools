@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// IsDockerRunning reports whether the Docker daemon is reachable. It runs
+// `docker info`, which (unlike `docker --version`) returns non-zero when the
+// daemon is not running. It is a package-level var so tests can stub it.
+var IsDockerRunning = func() bool {
+	result := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
+		Command:       "docker",
+		Args:          []string{"info", "--format", "{{.ServerVersion}}"},
+		CaptureOutput: true,
+	})
+	return result.Success && strings.TrimSpace(result.Stdout) != ""
+}
+
 // buildDockerPsArgs builds docker ps arguments with the given format and filters
 func buildDockerPsArgs(containerName string, allContainers bool) []string {
 	args := []string{"ps", "--format", "{{.Names}}", "--filter", fmt.Sprintf("name=^%s$", containerName)}

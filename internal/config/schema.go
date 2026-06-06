@@ -77,7 +77,8 @@ const ConfigSchema = `{
             },
             "cleanup": {"type": "boolean"},
             "wait_for_health": {"type": "boolean"},
-            "timeout": {"type": "integer", "minimum": 1}
+            "timeout": {"type": "integer", "minimum": 1},
+            "non_blocking": {"type": "boolean"}
           }
         },
         "background": {
