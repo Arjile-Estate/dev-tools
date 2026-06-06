@@ -29,7 +29,7 @@ type CommandConfig struct {
 }
 
 // version is the application version, injected at build time via ldflags
-var version = "1.5.0"
+var version = "1.6.0"
 
 // claudeCodeEnvVar is the environment variable Claude Code sets in
 // subprocesses spawned by its Bash tool. See

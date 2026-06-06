@@ -402,6 +402,25 @@ func TestServicesConfig_UnmarshalYAML(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "non_blocking compose configuration",
+			yamlContent: `services:
+  non_blocking: true
+  compose:
+    file: "docker-compose.yml"
+    services: ["postgres"]`,
+			want: ServicesConfig{
+				Compose: &ComposeConfig{
+					File:     "docker-compose.yml",
+					Services: []string{"postgres"},
+				},
+				Cleanup:       false,
+				WaitForHealth: true,
+				Timeout:       30,
+				NonBlocking:   true,
+			},
+			wantErr: false,
+		},
+		{
 			name:        "empty services configuration",
 			yamlContent: `services: {}`,
 			want: ServicesConfig{
@@ -534,7 +553,8 @@ func compareServicesConfig(a, b ServicesConfig) bool {
 
 	return a.Cleanup == b.Cleanup &&
 		a.WaitForHealth == b.WaitForHealth &&
-		a.Timeout == b.Timeout
+		a.Timeout == b.Timeout &&
+		a.NonBlocking == b.NonBlocking
 }
 
 func compareComposeConfigPointers(a, b *ComposeConfig) bool {

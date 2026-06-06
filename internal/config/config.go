@@ -72,6 +72,7 @@ type ServicesConfig struct {
 	Cleanup       bool                 `yaml:"cleanup,omitempty"`
 	WaitForHealth bool                 `yaml:"wait_for_health,omitempty"`
 	Timeout       int                  `yaml:"timeout,omitempty"`
+	NonBlocking   bool                 `yaml:"non_blocking,omitempty"`
 }
 
 // UnmarshalYAML implements custom unmarshaling for ServicesConfig with defaults

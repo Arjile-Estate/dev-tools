@@ -471,6 +471,28 @@ services:
   cleanup: false                        # Default: false - keep services running
   wait_for_health: true                 # Default: true - wait for health checks
   timeout: 30                          # Default: 30 seconds startup timeout
+  non_blocking: false                   # Default: false - skip (with warning) if Docker daemon is down
+```
+
+**Non-blocking dependencies (`non_blocking`):**
+When `non_blocking: true`, dev-tools checks whether the Docker daemon is running before
+starting the dependency. If the daemon is **not** running, it logs a warning, skips the entire
+services dependency, and continues to the `run` step instead of failing. If the daemon **is**
+running, behaviour is unchanged — a genuine compose/container startup failure still aborts the
+command. Use this for steps that can run without their Docker services (e.g. a test suite that
+only needs Postgres when present):
+
+```yaml
+test:
+  - services:
+      non_blocking: true
+      compose:
+        file: "docker-compose.yml"
+        project_name: "arjile-app"
+        services: ["postgres"]
+      wait_for_health: true
+      timeout: 60
+  - run: "pnpm -w turbo test"
 ```
 
 **Docker Compose Examples:**
