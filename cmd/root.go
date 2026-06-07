@@ -29,7 +29,7 @@ type CommandConfig struct {
 }
 
 // version is the application version, injected at build time via ldflags
-var version = "1.6.0"
+var version = "1.6.1"
 
 // claudeCodeEnvVar is the environment variable Claude Code sets in
 // subprocesses spawned by its Bash tool. See
@@ -96,9 +96,9 @@ sensible defaults, while allowing customization through configuration files.`,
 		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), `
 Usage:
-  %s [flags] [command]
+  %s [global flags] <command> [args...]
 
-Flags:
+Global flags (must be placed BEFORE the command name):
       --format string        Output format: text or json (default "text")
   -h, --help                 help for dev-tools
       --no-color             Disable colored output
@@ -106,6 +106,10 @@ Flags:
   -v, --verbose              Enable verbose logging to stdout
   -w, --watch                Watch mode: re-run command on file changes
       --version              version for dev-tools
+
+Any arguments after the command name are passed through to the command, not
+interpreted by dev-tools. For example, use 'dev-tools -p ./svc validate',
+not 'dev-tools validate -p ./svc'.
 `, cmd.CommandPath())
 	})
 
