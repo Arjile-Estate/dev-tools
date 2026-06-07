@@ -24,7 +24,7 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Equal(t, "dev-tools [command]", cmd.Use)
 		assert.Equal(t, "Dev Tools - A command runner for development workflows", cmd.Short)
 		assert.Contains(t, cmd.Long, "dev-tools is a command runner")
-		assert.Equal(t, "1.6.0", cmd.Version)
+		assert.Equal(t, "1.6.1", cmd.Version)
 		assert.True(t, cmd.SilenceUsage, "SilenceUsage should be true to prevent printing usage on command execution errors")
 		assert.True(t, cmd.SilenceErrors, "SilenceErrors should be true so we handle error display ourselves")
 		assert.True(t, cmd.DisableFlagParsing, "DisableFlagParsing should be true for manual flag handling")
@@ -55,7 +55,8 @@ func TestNewRootCommand(t *testing.T) {
 		assert.Contains(t, output, "Available commands:")
 		assert.Contains(t, output, "test")
 		assert.Contains(t, output, "Usage:")
-		assert.Contains(t, output, "Flags:")
+		assert.Contains(t, output, "Global flags")
+		assert.Contains(t, output, "must be placed BEFORE the command name")
 	})
 }
 

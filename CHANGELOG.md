@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-06-07
+
+### Changed
+- `--help` now states explicitly that global flags (`--format`, `--no-color`, `-p/--project-dir`, `-v/--verbose`, `-w/--watch`, `--version`) must be placed **before** the command name. Arguments after the command name are passed through to the command and are not interpreted by dev-tools, so e.g. `dev-tools validate -p ./svc` silently ignored `-p`; the correct form is `dev-tools -p ./svc validate`. No parsing behaviour changed — this is a documentation clarification.
+
 ## [1.6.0] - 2026-06-06
 
 ### Added
