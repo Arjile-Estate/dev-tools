@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-07-10
+
+### Fixed
+- Re-running a daemon command whose daemon is already running (e.g. `dev-tools dev`) no longer fails with a cryptic `Command '<name>' failed with error code: 1`. The reason ("process already running") was previously written only to the log file, so the terminal gave no clue why. Starting a second copy of an already-running daemon is now an idempotent no-op that succeeds (exit 0) and prints a clear, actionable message — `✓ Daemon '<name>' is already running (PID N)` plus hints to `dev-tools restart <name>` / `dev-tools stop <name>`. The existing PID file is left untouched; genuinely stale PID files are still cleaned up and the daemon started as before.
+
 ## [1.6.1] - 2026-06-07
 
 ### Changed

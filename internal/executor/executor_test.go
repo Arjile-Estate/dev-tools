@@ -437,6 +437,62 @@ func TestExecuteDaemonCommand(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandStep_DaemonAlreadyRunning_IsIdempotentNoOp(t *testing.T) {
+	// Regression: re-running a daemon command (e.g. `dev-tools dev`) while its
+	// daemon is already running must be an idempotent no-op that SUCCEEDS with a
+	// clear message — not a hard failure that surfaces only a cryptic
+	// "Command 'dev' failed with error code: 1". The PID file is created and
+	// checked relative to the process CWD, so run from tmpDir.
+	tmpDir := t.TempDir()
+	oldDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() {
+		require.NoError(t, os.Chdir(oldDir))
+	}()
+
+	const commandName = "dev"
+	const command = "sleep 300"
+
+	// Simulate an already-running daemon: a PID file pointing at a live process
+	// (this test process, which is guaranteed to be running).
+	pidFile := GeneratePIDFilename(commandName, command)
+	require.NoError(t, CreateEnhancedPIDFile(pidFile, os.Getpid(), commandName, command))
+	t.Cleanup(func() { _ = RemovePIDFile(pidFile) })
+
+	// Capture stdout to assert the user-facing message.
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+
+	step := config.CommandStep{
+		Run:        config.RunCommand{command},
+		Background: true,
+		Daemon:     true,
+	}
+	result := ExecuteCommandStep(step, commandName, tmpDir, nil)
+
+	require.NoError(t, w.Close())
+	os.Stdout = oldStdout
+	out, _ := io.ReadAll(r)
+	_ = r.Close()
+	output := string(out)
+
+	// Idempotent no-op: succeed, don't launch a second process, exit 0.
+	assert.True(t, result.Success, "already-running daemon should be a success no-op, got stderr: %s", result.Stderr)
+	assert.Zero(t, result.ReturnCode, "already-running daemon must not set a non-zero return code")
+	assert.Zero(t, result.PID, "already-running daemon must not launch a new process")
+
+	// The pre-existing PID file must be preserved (not treated as stale).
+	_, statErr := os.Stat(pidFile)
+	assert.NoError(t, statErr, "existing daemon PID file should be preserved")
+
+	// The user must be told what happened, for which PID, and how to act.
+	assert.Contains(t, output, "already running", "should report the daemon is already running")
+	assert.Contains(t, output, fmt.Sprintf("%d", os.Getpid()), "should report the running daemon PID")
+	assert.Contains(t, output, "dev-tools restart dev", "should hint how to restart")
+}
+
 func TestBackgroundDaemon_SuppressesOutput(t *testing.T) {
 	// Capture stdout/stderr by redirecting os.Stdout/os.Stderr to pipes
 	oldStdout := os.Stdout

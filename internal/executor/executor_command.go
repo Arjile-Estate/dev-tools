@@ -420,18 +420,20 @@ func handleServicesStartup(services config.ServicesConfig) ExecutionResult {
 	return HandleServicesConfiguration(services)
 }
 
-// checkDaemonAlreadyRunning checks if a daemon is already running and cleans up stale PID files
-func checkDaemonAlreadyRunning(commandName, command string) error {
+// checkDaemonAlreadyRunning reports the PID of an already-running daemon for
+// this command, or 0 if none is running. A PID file whose process is no longer
+// alive is treated as stale and removed so a fresh daemon can start.
+func checkDaemonAlreadyRunning(commandName, command string) int {
 	pidFile := GeneratePIDFilename(commandName, command)
 	if _, err := os.Stat(pidFile); err == nil {
 		if existingPID, err := ReadPIDFile(pidFile); err == nil && IsProcessRunning(existingPID) {
-			return NewDaemonError(existingPID, pidFile, fmt.Errorf("process already running"))
+			return existingPID
 		}
 		// Clean up stale PID file
 		logger.Infof("Removing stale PID file %s", pidFile)
 		_ = RemovePIDFile(pidFile)
 	}
-	return nil
+	return 0
 }
 
 // executeWithRetry executes a command with retry logic based on step configuration
@@ -477,11 +479,17 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		command := appendPassthroughArgs(baseCommand, passthroughArgs)
 		logger.Infof("Executing command: %s", command)
 
-		// Check if daemon already running
+		// If the daemon is already running, starting a second copy is neither
+		// wanted nor possible — treat it as an idempotent no-op that succeeds
+		// (exit 0) with a clear, actionable message rather than failing with a
+		// cryptic "error code: 1". The existing PID file is left untouched.
 		if step.Daemon {
-			if err := checkDaemonAlreadyRunning(commandName, command); err != nil {
-				// Don't double-log: caller will log if needed
-				return ExecutionResult{Success: false, Stderr: err.Error(), ReturnCode: 1}
+			if existingPID := checkDaemonAlreadyRunning(commandName, command); existingPID != 0 {
+				logger.Infof("Daemon '%s' already running with PID %d; skipping start", commandName, existingPID)
+				fmt.Printf("%s\n", colors.Success("✓ Daemon '%s' is already running (PID %d).", commandName, existingPID))
+				fmt.Printf("  Use 'dev-tools restart %s' to restart it, or\n", commandName)
+				fmt.Printf("  'dev-tools stop %s' to stop it.\n", commandName)
+				return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
 			}
 		}
 
