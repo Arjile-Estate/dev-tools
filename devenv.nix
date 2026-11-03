@@ -4,6 +4,7 @@
   languages.go.enable = true;
 
   packages = with pkgs; [
+    claude-code
     codex
     docker-client
     golangci-lint
