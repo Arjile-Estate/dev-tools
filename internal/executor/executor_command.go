@@ -34,6 +34,7 @@ type DirectExecuteOptions struct {
 
 // CommandExecutionOptions contains options for command execution with steps
 type CommandExecutionOptions struct {
+	Context         context.Context      // Cancellation context; defaults to context.Background
 	CommandName     string               // Name of the command being executed
 	Steps           []config.CommandStep // Steps to execute
 	WorkingDir      string               // Working directory
@@ -55,13 +56,17 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		err := cmd.Run()
+		err := cmd.Start()
+		cancelledBySignal := false
+		if err == nil {
+			err, cancelledBySignal = waitForProcessWithSignalHandlingStatus(cmd)
+		}
 		success := err == nil
 		returnCode := 0
 
 		if err != nil {
 			// Check if context was cancelled
-			if ctx.Err() == context.Canceled {
+			if ctx.Err() == context.Canceled || cancelledBySignal {
 				return ExecutionResult{
 					Success:    false,
 					Stdout:     stdout.String(),
@@ -196,13 +201,17 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		err := cmd.Run()
+		err := cmd.Start()
+		cancelledBySignal := false
+		if err == nil {
+			err, cancelledBySignal = waitForProcessWithSignalHandlingStatus(cmd)
+		}
 		success := err == nil
 		returnCode := 0
 
 		if err != nil {
 			// Check if context was cancelled
-			if ctx.Err() == context.Canceled {
+			if ctx.Err() == context.Canceled || cancelledBySignal {
 				return ExecutionResult{
 					Success:    false,
 					Stdout:     stdout.String(),
@@ -457,10 +466,10 @@ func checkDaemonAlreadyRunning(commandName, command string) int {
 // executeWithRetry executes a command with retry logic based on step configuration
 // ExecuteCommandStep executes a single command step with all its components
 func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
-	return executeCommandStep(step, commandName, workingDir, passthroughArgs, false)
+	return executeCommandStep(context.Background(), step, commandName, workingDir, passthroughArgs, false)
 }
 
-func executeCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string, captureOutput bool) (result ExecutionResult) {
+func executeCommandStep(ctx context.Context, step config.CommandStep, commandName, workingDir string, passthroughArgs []string, captureOutput bool) (result ExecutionResult) {
 	logger.Infof("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Validate and resolve execution directory
@@ -520,7 +529,7 @@ func executeCommandStep(step config.CommandStep, commandName, workingDir string,
 		}
 
 		// Execute with retry logic
-		result = executeWithRetry(context.Background(), step, command, executionDir, commandName, captureOutput)
+		result = executeWithRetry(ctx, step, command, executionDir, commandName, captureOutput)
 		if captureOutput {
 			stdout.WriteString(result.Stdout)
 			stderr.WriteString(result.Stderr)
@@ -549,7 +558,7 @@ func executeCommandStep(step config.CommandStep, commandName, workingDir string,
 			if err := CreateEnhancedPIDFile(pidFile, result.PID, commandName, command); err != nil {
 				warning := fmt.Sprintf("Failed to create PID file: %v", NewDaemonError(result.PID, pidFile, err))
 				logger.Warnf("%s", warning)
-				result.Warnings = append(result.Warnings, warning)
+				warnings = append(warnings, warning)
 			} else {
 				logger.Infof("Created enhanced PID file %s for background daemon process", pidFile)
 				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
@@ -597,10 +606,14 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 	var warnings []string
 	var attemptedCommands []string
 	attempts := 0
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	for i, step := range opts.Steps {
 		logger.Infof("Executing step %d/%d", i+1, len(opts.Steps))
-		result := executeCommandStep(step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs, opts.CaptureOutput)
+		result := executeCommandStep(ctx, step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs, opts.CaptureOutput)
 		if opts.CaptureOutput {
 			stdout.WriteString(result.Stdout)
 			stderr.WriteString(result.Stderr)

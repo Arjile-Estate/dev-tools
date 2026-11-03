@@ -442,6 +442,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Execute command (non-watch mode)
 	execOpts := executor.CommandExecutionOptions{
+		Context:         cmd.Context(),
 		CommandName:     commandName,
 		Steps:           steps,
 		WorkingDir:      cmdCfg.ProjectDir,
@@ -472,17 +473,29 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			TimedOut:          result.TimedOut,
 			Cancelled:         result.Cancelled,
 		}, budgets, os.Environ())
+		compactMetadata := devresult.Compact(model, budgets)
+		model.Truncation = compactMetadata.Truncation
 		written, writeErr := devresult.WriteArtifacts(cmdCfg.ProjectDir, model, retained)
 		if writeErr != nil {
-			return fmt.Errorf("failed to persist DEV-RESULT: %w", writeErr)
+			if result.Success {
+				return fmt.Errorf("failed to persist DEV-RESULT: %w", writeErr)
+			}
+			logger.Warnf("DEV-RESULT artifacts unavailable: %v", writeErr)
+			model.Artifacts = devresult.Artifacts{Log: "unavailable", Result: "unavailable"}
+			model.DrillDown = devresult.DrillDown{Full: "unavailable"}
+			model.Warnings = append(model.Warnings, devresult.Evidence{Message: "DEV-RESULT artifacts unavailable: " + writeErr.Error(), Source: "dev-tools"})
+			model.Summary = fmt.Sprintf("Validation failed with %d distinct failure(s) and %d warning(s).", len(model.Failures), len(model.Warnings))
+			written = model
 		}
 		if cmdCfg.Format == "json" {
-			compact := devresult.Compact(written, budgets)
-			jsonBytes, marshalErr := json.MarshalIndent(compact, "", "  ")
+			jsonBytes, marshalErr := devresult.MarshalCompactJSON(written, budgets)
 			if marshalErr != nil {
-				return fmt.Errorf("failed to format DEV-RESULT JSON: %w", marshalErr)
+				if result.Success {
+					return fmt.Errorf("failed to format DEV-RESULT JSON: %w", marshalErr)
+				}
+				jsonBytes = []byte(fmt.Sprintf("{\"schema\":%q,\"outcome\":%q,\"exit_code\":%d,\"error\":%q}\n", devresult.SchemaV1, "fail", result.ReturnCode, marshalErr.Error()))
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(jsonBytes))
+			_, _ = fmt.Fprint(cmd.OutOrStdout(), string(jsonBytes))
 		} else {
 			_, _ = fmt.Fprint(cmd.OutOrStdout(), devresult.RenderText(written, budgets))
 		}

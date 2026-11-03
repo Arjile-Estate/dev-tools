@@ -1,6 +1,7 @@
 package devresult
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -314,6 +315,8 @@ func Compact(result Result, budgets Budgets) Result {
 	result.Truncation.Budget = budgetFor(result.Outcome, budgets)
 	result.Truncation.Total.Failures = len(result.Failures)
 	result.Truncation.Total.Warnings = len(result.Warnings)
+	result.Command.Normalized = truncateText(result.Command.Normalized, 256)
+	result.Summary = truncateText(result.Summary, 160)
 	failureCount := len(result.Failures)
 	warningCount := len(result.Warnings)
 
@@ -324,21 +327,103 @@ func Compact(result Result, budgets Budgets) Result {
 		candidate.Truncation.Shown.Failures = failureCount
 		candidate.Truncation.Shown.Warnings = warningCount
 		candidate.Truncation.Truncated = failureCount < len(result.Failures) || warningCount < len(result.Warnings)
-		text := render(candidate)
-		lineCount := len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
-		byteCount := len([]byte(text))
-		if (lineCount <= candidate.Truncation.Budget.Lines && byteCount <= candidate.Truncation.Budget.Bytes) || (failureCount == 0 && warningCount == 0) {
-			candidate.Truncation.Shown.Lines = lineCount
-			candidate.Truncation.Shown.Bytes = byteCount
-			candidate.Truncation.Truncated = candidate.Truncation.Truncated || lineCount > candidate.Truncation.Budget.Lines || byteCount > candidate.Truncation.Budget.Bytes
+		measureText(&candidate)
+		if candidate.Truncation.Shown.Lines <= candidate.Truncation.Budget.Lines && candidate.Truncation.Shown.Bytes <= candidate.Truncation.Budget.Bytes {
 			return candidate
 		}
 		if warningCount > 0 {
 			warningCount--
 		} else if failureCount > 0 {
 			failureCount--
+		} else {
+			shrinkMetadata(&candidate)
+			measureText(&candidate)
+			return candidate
 		}
 	}
+}
+
+func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
+	compact := Compact(result, budgets)
+	for {
+		data, err := json.MarshalIndent(compact, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, '\n')
+		if len(data) <= compact.Truncation.Budget.Bytes {
+			return data, nil
+		}
+		compact.Truncation.Truncated = true
+		switch {
+		case len(compact.Warnings) > 0:
+			compact.Warnings = compact.Warnings[:len(compact.Warnings)-1]
+			compact.Truncation.Shown.Warnings = len(compact.Warnings)
+		case len(compact.Failures) > 0:
+			compact.Failures = compact.Failures[:len(compact.Failures)-1]
+			compact.Truncation.Shown.Failures = len(compact.Failures)
+		case len(compact.Command.Normalized) > 32:
+			compact.Command.Normalized = truncateText(compact.Command.Normalized, len(compact.Command.Normalized)-16)
+		case len(compact.Summary) > 32:
+			compact.Summary = truncateText(compact.Summary, len(compact.Summary)-16)
+		default:
+			return nil, fmt.Errorf("DEV-RESULT JSON metadata exceeds %d-byte budget", compact.Truncation.Budget.Bytes)
+		}
+		measureText(&compact)
+	}
+}
+
+func measureText(result *Result) {
+	for iteration := 0; iteration < 4; iteration++ {
+		text := render(*result)
+		lines := len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
+		bytes := len([]byte(text))
+		if result.Truncation.Shown.Lines == lines && result.Truncation.Shown.Bytes == bytes {
+			return
+		}
+		result.Truncation.Shown.Lines = lines
+		result.Truncation.Shown.Bytes = bytes
+	}
+}
+
+func shrinkMetadata(result *Result) {
+	for {
+		measureText(result)
+		if result.Truncation.Shown.Lines <= result.Truncation.Budget.Lines && result.Truncation.Shown.Bytes <= result.Truncation.Budget.Bytes {
+			return
+		}
+		switch {
+		case len(result.Command.Normalized) > 32:
+			result.Command.Normalized = truncateText(result.Command.Normalized, len(result.Command.Normalized)-16)
+		case len(result.Summary) > 32:
+			result.Summary = truncateText(result.Summary, len(result.Summary)-16)
+		default:
+			return
+		}
+		result.Truncation.Truncated = true
+	}
+}
+
+func truncateText(value string, maximumBytes int) string {
+	if maximumBytes < 1 {
+		return ""
+	}
+	if len([]byte(value)) <= maximumBytes {
+		return value
+	}
+	const suffix = "…"
+	limit := maximumBytes - len([]byte(suffix))
+	if limit < 1 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, character := range value {
+		if builder.Len()+len(string(character)) > limit {
+			break
+		}
+		builder.WriteRune(character)
+	}
+	return builder.String() + suffix
 }
 
 func render(result Result) string {
