@@ -496,6 +496,10 @@ func executeCommandStep(step config.CommandStep, commandName, workingDir string,
 	if len(step.Run) == 0 {
 		return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
 	}
+	var stdout, stderr strings.Builder
+	var warnings []string
+	var attemptedCommands []string
+	attempts := 0
 
 	for _, baseCommand := range []string(step.Run) {
 		command := appendPassthroughArgs(baseCommand, passthroughArgs)
@@ -516,11 +520,25 @@ func executeCommandStep(step config.CommandStep, commandName, workingDir string,
 		}
 
 		// Execute with retry logic
-		result := executeWithRetry(context.Background(), step, command, executionDir, commandName, captureOutput)
+		result = executeWithRetry(context.Background(), step, command, executionDir, commandName, captureOutput)
+		if captureOutput {
+			stdout.WriteString(result.Stdout)
+			stderr.WriteString(result.Stderr)
+		}
+		warnings = append(warnings, result.Warnings...)
+		attemptedCommands = append(attemptedCommands, result.AttemptedCommands...)
+		attempts += result.Attempts
 
 		if !result.Success && !step.Background && !step.ContinueOnError {
 			result.FailedCommand = command
 			result.ServicesStarted = servicesStarted
+			if captureOutput {
+				result.Stdout = stdout.String()
+				result.Stderr = stderr.String()
+			}
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			return result
 		}
 
@@ -538,6 +556,9 @@ func executeCommandStep(step config.CommandStep, commandName, workingDir string,
 					command, result.PID, pidFile))
 			}
 			result.ServicesStarted = servicesStarted
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			return result
 		}
 
@@ -546,11 +567,23 @@ func executeCommandStep(step config.CommandStep, commandName, workingDir string,
 			logger.Infof("Command started with PID %d", result.PID)
 			fmt.Printf("%s\n", colors.Success("Running job '%s' in the background", command))
 			result.ServicesStarted = servicesStarted
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			return result
 		}
 	}
 
-	return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
+	result.Success = true
+	result.ServicesStarted = servicesStarted
+	if captureOutput {
+		result.Stdout = stdout.String()
+		result.Stderr = stderr.String()
+	}
+	result.Warnings = warnings
+	result.AttemptedCommands = attemptedCommands
+	result.Attempts = attempts
+	return result
 }
 
 // ExecuteCommandWithOptions executes a command using the options struct pattern

@@ -8,7 +8,7 @@ import (
 	"regexp"
 )
 
-var safeJobPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
+var safeJobPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]*$`)
 
 func WriteArtifacts(root string, result Result, retainedLog string) (Result, error) {
 	if !safeJobPattern.MatchString(result.Job) {
