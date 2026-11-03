@@ -62,6 +62,11 @@ dist/
 .gocache/
 .beads/daemon.lock
 
+# devenv and direnv local state
+.devenv*
+.direnv/
+devenv.local.nix
+
 # Dolt database files (added by bd init)
 .dolt/
 *.db
