@@ -6,17 +6,32 @@ import (
 )
 
 var (
-	secretNamePattern    = regexp.MustCompile(`(?i)(token|secret|password|passwd|credential|private[_-]?key|api[_-]?key)`)
-	authorizationPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)([^\s]+)`)
-	assignmentPattern    = regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|passwd|credential|private[_-]?key)\s*[:=]\s*)([^\s]+)`)
-	privateKeyPattern    = regexp.MustCompile(`(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----`)
+	secretNamePattern     = regexp.MustCompile(`(?i)(token|secret|password|passwd|credential|private[_-]?key|api[_-]?key)`)
+	authorizationPattern  = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)([^\s]+)`)
+	assignmentPattern     = regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|passwd|credential|private[_-]?key)\s*[:=]\s*)([^\s]+)`)
+	credentialFlagPattern = regexp.MustCompile(`(?i)(--(?:api[_-]?key|token|secret|password|passwd|credential|private[_-]?key)(?:\s+|=))([^\s]+)`)
+	privateKeyPattern     = regexp.MustCompile(`(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----`)
 )
 
 func Redact(input string, environment []string) (string, int) {
 	redacted := input
 	matches := 0
+	redacted = credentialFlagPattern.ReplaceAllStringFunc(redacted, func(match string) string {
+		if strings.Contains(match, RedactionMarker) {
+			return match
+		}
+		matches++
+		location := strings.IndexAny(match, "= \t")
+		if location < 0 {
+			return match
+		}
+		return match[:location+1] + RedactionMarker
+	})
 	for _, pattern := range []*regexp.Regexp{authorizationPattern, assignmentPattern} {
 		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
+			if strings.Contains(match, RedactionMarker) {
+				return match
+			}
 			matches++
 			parts := regexp.MustCompile(`[:=]`).Split(match, 2)
 			separator := ": "

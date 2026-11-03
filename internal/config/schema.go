@@ -60,8 +60,8 @@ const ConfigSchema = `{
     "resultBudget": {
       "type": "object",
       "properties": {
-        "lines": {"type": "integer", "minimum": 1},
-        "bytes": {"type": "integer", "minimum": 1}
+        "lines": {"type": "integer", "minimum": 7},
+        "bytes": {"type": "integer", "minimum": 1024}
       },
       "additionalProperties": false
     },

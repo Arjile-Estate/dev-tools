@@ -17,6 +17,11 @@ type ResultBudgetConfig struct {
 	Bytes int `yaml:"bytes,omitempty" json:"bytes,omitempty"`
 }
 
+const (
+	MinDevResultLines = 7
+	MinDevResultBytes = 1024
+)
+
 func (b *ResultBudgetConfig) UnmarshalYAML(value *yaml.Node) error {
 	type rawBudget ResultBudgetConfig
 	var decoded rawBudget
@@ -27,12 +32,12 @@ func (b *ResultBudgetConfig) UnmarshalYAML(value *yaml.Node) error {
 		name := value.Content[index].Value
 		switch name {
 		case "lines":
-			if decoded.Lines < 1 {
-				return fmt.Errorf("lines must be greater than or equal to 1")
+			if decoded.Lines < MinDevResultLines {
+				return fmt.Errorf("DEV-RESULT lines must be greater than or equal to %d", MinDevResultLines)
 			}
 		case "bytes":
-			if decoded.Bytes < 1 {
-				return fmt.Errorf("bytes must be greater than or equal to 1")
+			if decoded.Bytes < MinDevResultBytes {
+				return fmt.Errorf("DEV-RESULT bytes must be greater than or equal to %d", MinDevResultBytes)
 			}
 		}
 	}

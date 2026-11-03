@@ -53,6 +53,9 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 		if result.Success {
 			break
 		}
+		if result.Cancelled || result.TimedOut {
+			break
+		}
 
 		// Check if we should retry based on exit code
 		shouldRetry := len(step.RetryOnExitCodes) == 0

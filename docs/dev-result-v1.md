@@ -83,7 +83,7 @@ Logs and sidecars are written atomically with mode `0600` below `.build/agent/lo
 | Timeout or cancellation | 30 | 4,096 |
 | Background start (model only; integration is deferred) | 3 | 1,024 |
 
-Each enabled command may override any outcome budget with positive `lines` and/or `bytes` values. Selection is deterministic: required metadata comes first, followed by the first distinct actionable failures, then warnings. Counts always state how much evidence is shown versus retained.
+Each enabled command may override any outcome budget with `lines` of at least 7 and `bytes` of at least 1,024. Those minima keep the mandatory envelope metadata representable. Selection is deterministic: required metadata comes first, followed by the first distinct actionable failures, then warnings. Counts always state how much evidence is shown versus retained.
 
 ## Redaction
 

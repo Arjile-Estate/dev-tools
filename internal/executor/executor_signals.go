@@ -11,8 +11,14 @@ import (
 // waitForProcessWithSignalHandling waits for a process to complete while handling signals
 // It forwards SIGINT and SIGTERM to the child process for graceful shutdown
 func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
+	err, _ := waitForProcessWithSignalHandlingStatus(cmd)
+	return err
+}
+
+func waitForProcessWithSignalHandlingStatus(cmd *exec.Cmd) (error, bool) {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signalChan)
 
 	done := make(chan error, 1)
 	go func() {
@@ -21,7 +27,7 @@ func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
 
 	select {
 	case err := <-done:
-		return err
+		return err, false
 	case sig := <-signalChan:
 		logger.Infof("Received signal %v, terminating process", sig)
 		if cmd.Process != nil {
@@ -36,6 +42,6 @@ func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
 				}
 			}
 		}
-		return <-done
+		return <-done, true
 	}
 }

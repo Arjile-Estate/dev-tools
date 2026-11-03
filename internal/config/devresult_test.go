@@ -54,7 +54,7 @@ dev_result:
 
 	_, err := LoadConfigFromFile(configPath)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "greater than or equal to 1")
+	assert.Contains(t, err.Error(), "DEV-RESULT lines")
 }
 
 func TestDevResultConfigurationRejectsBudgetsTooSmallForContract(t *testing.T) {
