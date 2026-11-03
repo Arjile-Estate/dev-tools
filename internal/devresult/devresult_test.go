@@ -47,6 +47,15 @@ func TestRedactRemovesSpaceSeparatedCredentialFlags(t *testing.T) {
 	assert.Equal(t, 2, matches)
 }
 
+func TestRedactRemovesQuotedJSONAndMultiwordCredentialValues(t *testing.T) {
+	redacted, matches := Redact(`{"token":"json-secret","password":"two words"} dev-tools test --token 'alpha beta' --api-key="gamma delta"`, nil)
+
+	for _, secret := range []string{"json-secret", "two words", "alpha beta", "gamma delta"} {
+		assert.NotContains(t, redacted, secret)
+	}
+	assert.Equal(t, 4, matches)
+}
+
 func TestBuildAndRenderSelectsDistinctActionableEvidenceDeterministically(t *testing.T) {
 	input := Input{
 		Job:               "build-fixed-001",
@@ -169,6 +178,23 @@ func TestCompactTextAndJSONRespectHardBudgets(t *testing.T) {
 	jsonData, err := MarshalCompactJSON(result, budgets)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(jsonData), budgets.Failure.Bytes)
+	assert.LessOrEqual(t, len(strings.Split(strings.TrimSuffix(string(jsonData), "\n"), "\n")), budgets.Failure.Lines)
+	var decoded Result
+	require.NoError(t, json.Unmarshal(jsonData, &decoded))
+	assert.Equal(t, 1, decoded.Truncation.Shown.Lines)
+	assert.Equal(t, len(jsonData), decoded.Truncation.Shown.Bytes)
+}
+
+func TestCompactReportsMetadataTruncation(t *testing.T) {
+	budgets := DefaultBudgets()
+	result, _ := Build(Input{
+		Job: "test-metadata", CommandName: "test", ExitCode: 0,
+		NormalizedCommand: "dev-tools test -- " + strings.Repeat("very-long-argument-", 100),
+	}, budgets, nil)
+
+	compact := Compact(result, budgets)
+	assert.True(t, compact.Truncation.Truncated)
+	assert.Contains(t, compact.Command.Normalized, "…")
 }
 
 func TestWriteArtifactsUsesNewIdentifierWhenJobAlreadyExists(t *testing.T) {
@@ -180,6 +206,11 @@ func TestWriteArtifactsUsesNewIdentifierWhenJobAlreadyExists(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test-fixed", first.Job)
 	assert.Equal(t, "test-fixed-2", second.Job)
+	loaded, _, err := LoadArtifacts(root, second.Job)
+	require.NoError(t, err)
+	expected := Compact(loaded, DefaultBudgets())
+	assert.Equal(t, expected.Truncation.Shown, loaded.Truncation.Shown)
+	assert.Equal(t, expected.Truncation.Truncated, loaded.Truncation.Truncated)
 }
 
 func TestWriteArtifactsReservesCollisionSafeIdentifiersConcurrently(t *testing.T) {

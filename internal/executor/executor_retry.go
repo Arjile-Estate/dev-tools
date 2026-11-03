@@ -33,7 +33,20 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
 			logger.Infof("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
-			time.Sleep(retryDelay)
+			if delayErr := waitForRetryDelay(ctx, retryDelay); delayErr != nil {
+				result = ExecutionResult{Success: false, ReturnCode: -1}
+				if delayErr == context.DeadlineExceeded {
+					result.TimedOut = true
+					result.Stderr = "command timeout exceeded during retry delay"
+				} else {
+					result.Cancelled = true
+					result.Stderr = "command cancelled during retry delay"
+				}
+				if captureOutput {
+					stderr += result.Stderr
+				}
+				break
+			}
 		}
 
 		result = ExecuteShellCommand(ctx, ExecuteOptions{

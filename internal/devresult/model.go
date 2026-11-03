@@ -213,6 +213,14 @@ func summary(result Result) string {
 	}
 }
 
+func WithArtifactWarning(result Result, err error) Result {
+	result.Artifacts = Artifacts{Log: "unavailable", Result: "unavailable"}
+	result.DrillDown = DrillDown{Full: "unavailable"}
+	result.Warnings = append(result.Warnings, Evidence{Message: "DEV-RESULT artifacts unavailable: " + err.Error(), Source: "dev-tools"})
+	result.Summary = summary(result)
+	return result
+}
+
 func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome Outcome) ([]Evidence, []Evidence) {
 	type sourcedText struct{ text, source string }
 	var lines []sourcedText
@@ -312,11 +320,15 @@ func RenderStoredText(result Result) string {
 }
 
 func Compact(result Result, budgets Budgets) Result {
+	originalCommand := result.Command.Normalized
+	originalSummary := result.Summary
+	previouslyTruncated := result.Truncation.Truncated
 	result.Truncation.Budget = budgetFor(result.Outcome, budgets)
 	result.Truncation.Total.Failures = len(result.Failures)
 	result.Truncation.Total.Warnings = len(result.Warnings)
 	result.Command.Normalized = truncateText(result.Command.Normalized, 256)
 	result.Summary = truncateText(result.Summary, 160)
+	metadataTruncated := previouslyTruncated || result.Command.Normalized != originalCommand || result.Summary != originalSummary
 	failureCount := len(result.Failures)
 	warningCount := len(result.Warnings)
 
@@ -326,7 +338,7 @@ func Compact(result Result, budgets Budgets) Result {
 		candidate.Warnings = append([]Evidence(nil), result.Warnings[:warningCount]...)
 		candidate.Truncation.Shown.Failures = failureCount
 		candidate.Truncation.Shown.Warnings = warningCount
-		candidate.Truncation.Truncated = failureCount < len(result.Failures) || warningCount < len(result.Warnings)
+		candidate.Truncation.Truncated = metadataTruncated || failureCount < len(result.Failures) || warningCount < len(result.Warnings)
 		measureText(&candidate)
 		if candidate.Truncation.Shown.Lines <= candidate.Truncation.Budget.Lines && candidate.Truncation.Shown.Bytes <= candidate.Truncation.Budget.Bytes {
 			return candidate
@@ -346,12 +358,11 @@ func Compact(result Result, budgets Budgets) Result {
 func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 	compact := Compact(result, budgets)
 	for {
-		data, err := json.MarshalIndent(compact, "", "  ")
+		data, err := marshalMeasuredJSON(&compact)
 		if err != nil {
 			return nil, err
 		}
-		data = append(data, '\n')
-		if len(data) <= compact.Truncation.Budget.Bytes {
+		if compact.Truncation.Shown.Lines <= compact.Truncation.Budget.Lines && len(data) <= compact.Truncation.Budget.Bytes {
 			return data, nil
 		}
 		compact.Truncation.Truncated = true
@@ -369,8 +380,29 @@ func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 		default:
 			return nil, fmt.Errorf("DEV-RESULT JSON metadata exceeds %d-byte budget", compact.Truncation.Budget.Bytes)
 		}
-		measureText(&compact)
 	}
+}
+
+func marshalMeasuredJSON(result *Result) ([]byte, error) {
+	for iteration := 0; iteration < 8; iteration++ {
+		data, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, '\n')
+		lines := len(strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"))
+		bytes := len(data)
+		if result.Truncation.Shown.Lines == lines && result.Truncation.Shown.Bytes == bytes {
+			return data, nil
+		}
+		result.Truncation.Shown.Lines = lines
+		result.Truncation.Shown.Bytes = bytes
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 func measureText(result *Result) {
