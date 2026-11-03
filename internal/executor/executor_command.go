@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"dev-tools/internal/logger"
 	"fmt"
@@ -37,6 +38,7 @@ type CommandExecutionOptions struct {
 	Steps           []config.CommandStep // Steps to execute
 	WorkingDir      string               // Working directory
 	PassthroughArgs []string             // Arguments to pass through to commands
+	CaptureOutput   bool                 // Capture distinct stdout/stderr for DEV-RESULT
 }
 
 // ExecuteCommandDirect executes a command directly without shell interpretation
@@ -50,25 +52,31 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 	}
 
 	if opts.CaptureOutput {
-		output, err := cmd.CombinedOutput()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
 		success := err == nil
 		returnCode := 0
-		stderr := ""
 
 		if err != nil {
 			// Check if context was cancelled
 			if ctx.Err() == context.Canceled {
 				return ExecutionResult{
 					Success:    false,
-					Stderr:     "command cancelled",
+					Stdout:     stdout.String(),
+					Stderr:     stderr.String() + "command cancelled",
 					ReturnCode: -1,
+					Cancelled:  true,
 				}
 			}
 			if ctx.Err() == context.DeadlineExceeded {
 				return ExecutionResult{
 					Success:    false,
-					Stderr:     "command timeout exceeded",
+					Stdout:     stdout.String(),
+					Stderr:     stderr.String() + "command timeout exceeded",
 					ReturnCode: -1,
+					TimedOut:   true,
 				}
 			}
 
@@ -77,13 +85,15 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 			} else {
 				returnCode = -1
 			}
-			stderr = err.Error()
+			if stderr.Len() == 0 {
+				_, _ = stderr.WriteString(err.Error())
+			}
 		}
 
 		return ExecutionResult{
 			Success:    success,
-			Stdout:     string(output),
-			Stderr:     stderr,
+			Stdout:     stdout.String(),
+			Stderr:     stderr.String(),
 			ReturnCode: returnCode,
 		}
 	}
@@ -183,25 +193,31 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 	}
 
 	if opts.CaptureOutput {
-		output, err := cmd.CombinedOutput()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
 		success := err == nil
 		returnCode := 0
-		stderr := ""
 
 		if err != nil {
 			// Check if context was cancelled
 			if ctx.Err() == context.Canceled {
 				return ExecutionResult{
 					Success:    false,
-					Stderr:     "command cancelled",
+					Stdout:     stdout.String(),
+					Stderr:     stderr.String() + "command cancelled",
 					ReturnCode: -1,
+					Cancelled:  true,
 				}
 			}
 			if ctx.Err() == context.DeadlineExceeded {
 				return ExecutionResult{
 					Success:    false,
-					Stderr:     "command timeout exceeded",
+					Stdout:     stdout.String(),
+					Stderr:     stderr.String() + "command timeout exceeded",
 					ReturnCode: -1,
+					TimedOut:   true,
 				}
 			}
 
@@ -210,13 +226,15 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 			} else {
 				returnCode = -1
 			}
-			stderr = err.Error()
+			if stderr.Len() == 0 {
+				_, _ = stderr.WriteString(err.Error())
+			}
 		}
 
 		return ExecutionResult{
 			Success:    success,
-			Stdout:     string(output),
-			Stderr:     stderr,
+			Stdout:     stdout.String(),
+			Stderr:     stderr.String(),
 			ReturnCode: returnCode,
 		}
 	}
@@ -438,7 +456,11 @@ func checkDaemonAlreadyRunning(commandName, command string) int {
 
 // executeWithRetry executes a command with retry logic based on step configuration
 // ExecuteCommandStep executes a single command step with all its components
-func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) (result ExecutionResult) {
+func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
+	return executeCommandStep(step, commandName, workingDir, passthroughArgs, false)
+}
+
+func executeCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string, captureOutput bool) (result ExecutionResult) {
 	logger.Infof("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Validate and resolve execution directory
@@ -494,7 +516,7 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		}
 
 		// Execute with retry logic
-		result := executeWithRetry(context.Background(), step, command, executionDir, commandName)
+		result := executeWithRetry(context.Background(), step, command, executionDir, commandName, captureOutput)
 
 		if !result.Success && !step.Background && !step.ContinueOnError {
 			result.FailedCommand = command
@@ -538,10 +560,21 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 
 	var servicesStarted []string
 	var finalResult ExecutionResult
+	var stdout, stderr strings.Builder
+	var warnings []string
+	var attemptedCommands []string
+	attempts := 0
 
 	for i, step := range opts.Steps {
 		logger.Infof("Executing step %d/%d", i+1, len(opts.Steps))
-		result := ExecuteCommandStep(step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs)
+		result := executeCommandStep(step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs, opts.CaptureOutput)
+		if opts.CaptureOutput {
+			stdout.WriteString(result.Stdout)
+			stderr.WriteString(result.Stderr)
+		}
+		warnings = append(warnings, result.Warnings...)
+		attemptedCommands = append(attemptedCommands, result.AttemptedCommands...)
+		attempts += result.Attempts
 
 		// Track services started in this step
 		if len(result.ServicesStarted) > 0 {
@@ -553,6 +586,13 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 			result.CommandName = opts.CommandName
 			result.DurationMs = time.Since(startTime).Milliseconds()
 			result.ServicesStarted = servicesStarted
+			if opts.CaptureOutput {
+				result.Stdout = stdout.String()
+				result.Stderr = stderr.String()
+			}
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			result.StartTime = startTime
 			return result
 		}
@@ -564,16 +604,24 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 	duration := time.Since(startTime).Milliseconds()
 	logger.Infof("Command '%s' completed successfully in %dms", opts.CommandName, duration)
 
-	return ExecutionResult{
-		Success:         true,
-		CommandName:     opts.CommandName,
-		DurationMs:      duration,
-		ServicesStarted: servicesStarted,
-		StartTime:       startTime,
-		Stdout:          finalResult.Stdout,
-		Stderr:          finalResult.Stderr,
-		PID:             finalResult.PID,
+	result := ExecutionResult{
+		Success:           true,
+		CommandName:       opts.CommandName,
+		DurationMs:        duration,
+		ServicesStarted:   servicesStarted,
+		StartTime:         startTime,
+		Stdout:            finalResult.Stdout,
+		Stderr:            finalResult.Stderr,
+		PID:               finalResult.PID,
+		Warnings:          warnings,
+		AttemptedCommands: attemptedCommands,
+		Attempts:          attempts,
 	}
+	if opts.CaptureOutput {
+		result.Stdout = stdout.String()
+		result.Stderr = stderr.String()
+	}
+	return result
 }
 
 // getContainerName extracts container name from service definition

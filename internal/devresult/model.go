@@ -1,0 +1,424 @@
+package devresult
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+const (
+	SchemaV1        = "dev-result/v1"
+	RedactionMarker = "[REDACTED]"
+)
+
+type Outcome string
+
+const (
+	OutcomePass      Outcome = "pass"
+	OutcomeFail      Outcome = "fail"
+	OutcomeTimeout   Outcome = "timeout"
+	OutcomeCancelled Outcome = "cancelled"
+)
+
+type Budget struct {
+	Lines int `json:"lines"`
+	Bytes int `json:"bytes"`
+}
+
+type Budgets struct {
+	Success    Budget `json:"success"`
+	Failure    Budget `json:"failure"`
+	Timeout    Budget `json:"timeout"`
+	Background Budget `json:"background"`
+}
+
+func DefaultBudgets() Budgets {
+	return Budgets{
+		Success:    Budget{Lines: 10, Bytes: 1024},
+		Failure:    Budget{Lines: 80, Bytes: 12 * 1024},
+		Timeout:    Budget{Lines: 30, Bytes: 4 * 1024},
+		Background: Budget{Lines: 3, Bytes: 1024},
+	}
+}
+
+var supportedCommands = map[string]struct{}{
+	"test": {}, "test:focused": {}, "build": {}, "lint": {}, "lint:dead-code": {}, "typecheck": {},
+}
+
+func SupportedCommand(name string) bool {
+	_, ok := supportedCommands[name]
+	return ok
+}
+
+type Command struct {
+	Name       string `json:"name"`
+	Normalized string `json:"normalized"`
+}
+
+type AttemptSummary struct {
+	Shown int `json:"shown"`
+	Total int `json:"total"`
+}
+
+type Evidence struct {
+	Message string `json:"message"`
+	Source  string `json:"source"`
+}
+
+type Artifacts struct {
+	Log    string `json:"log"`
+	Result string `json:"result"`
+}
+
+type DrillDown struct {
+	Full     string `json:"full"`
+	Failures string `json:"failures,omitempty"`
+	Warnings string `json:"warnings,omitempty"`
+}
+
+type Counts struct {
+	Lines    int `json:"lines,omitempty"`
+	Bytes    int `json:"bytes,omitempty"`
+	Failures int `json:"failures,omitempty"`
+	Warnings int `json:"warnings,omitempty"`
+}
+
+type Truncation struct {
+	Truncated bool   `json:"truncated"`
+	Budget    Budget `json:"budget"`
+	Shown     Counts `json:"shown"`
+	Total     Counts `json:"total"`
+}
+
+type Redaction struct {
+	Applied bool `json:"applied"`
+	Matches int  `json:"matches"`
+}
+
+type Result struct {
+	Schema       string         `json:"schema"`
+	Job          string         `json:"job"`
+	Outcome      Outcome        `json:"outcome"`
+	Command      Command        `json:"command"`
+	ExitCode     *int           `json:"exit_code"`
+	DurationMS   int64          `json:"duration_ms"`
+	Attempts     AttemptSummary `json:"attempts"`
+	Summary      string         `json:"summary"`
+	Failures     []Evidence     `json:"failures,omitempty"`
+	Warnings     []Evidence     `json:"warnings,omitempty"`
+	Artifacts    Artifacts      `json:"artifacts"`
+	DrillDown    DrillDown      `json:"drill_down"`
+	Truncation   Truncation     `json:"truncation"`
+	Redaction    Redaction      `json:"redaction"`
+	RawLineCount int            `json:"-"`
+}
+
+type Input struct {
+	Job               string
+	CommandName       string
+	NormalizedCommand string
+	ExitCode          int
+	Duration          time.Duration
+	Attempts          int
+	Stdout            string
+	Stderr            string
+	Warnings          []string
+	TimedOut          bool
+	Cancelled         bool
+}
+
+var (
+	ansiPattern     = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	failurePattern  = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
+	warningPattern  = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
+	progressPattern = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)
+)
+
+func Build(input Input, budgets Budgets, environment []string) (Result, string) {
+	stdout, stdoutMatches := Redact(input.Stdout, environment)
+	stderr, stderrMatches := Redact(input.Stderr, environment)
+	normalizedCommand, commandMatches := Redact(input.NormalizedCommand, environment)
+	redactedWarnings := make([]string, 0, len(input.Warnings))
+	warningMatches := 0
+	for _, warning := range input.Warnings {
+		redacted, count := Redact(warning, environment)
+		redactedWarnings = append(redactedWarnings, redacted)
+		warningMatches += count
+	}
+
+	outcome := OutcomePass
+	switch {
+	case input.Cancelled:
+		outcome = OutcomeCancelled
+	case input.TimedOut:
+		outcome = OutcomeTimeout
+	case input.ExitCode != 0:
+		outcome = OutcomeFail
+	}
+
+	if input.Job == "" {
+		input.Job = NewJobID(input.CommandName, time.Now().UTC())
+	}
+	if input.NormalizedCommand == "" {
+		normalizedCommand = "dev-tools " + input.CommandName
+	}
+	if input.Attempts < 1 {
+		input.Attempts = 1
+	}
+
+	failures, warnings := collectEvidence(stdout, stderr, redactedWarnings, outcome)
+	exitCode := input.ExitCode
+	result := Result{
+		Schema:     SchemaV1,
+		Job:        input.Job,
+		Outcome:    outcome,
+		Command:    Command{Name: input.CommandName, Normalized: normalizedCommand},
+		ExitCode:   &exitCode,
+		DurationMS: input.Duration.Milliseconds(),
+		Attempts:   AttemptSummary{Shown: input.Attempts, Total: input.Attempts},
+		Failures:   failures,
+		Warnings:   warnings,
+		Redaction: Redaction{
+			Applied: stdoutMatches+stderrMatches+commandMatches+warningMatches > 0,
+			Matches: stdoutMatches + stderrMatches + commandMatches + warningMatches,
+		},
+	}
+	result.Summary = summary(result)
+	result.Artifacts = artifactPaths(result.Job)
+	result.DrillDown = drillDown(result)
+	result.Truncation = Truncation{
+		Budget: budgetFor(outcome, budgets),
+		Shown:  Counts{Failures: len(failures), Warnings: len(warnings)},
+		Total:  Counts{Failures: len(failures), Warnings: len(warnings)},
+	}
+
+	retained := fmt.Sprintf("DEV-RESULT-LOG v1\njob: %s\ncommand: %s\n\n--- stdout ---\n%s\n--- stderr ---\n%s", result.Job, result.Command.Normalized, stdout, stderr)
+	result.RawLineCount = strings.Count(retained, "\n") + 1
+	return result, retained
+}
+
+func summary(result Result) string {
+	switch result.Outcome {
+	case OutcomePass:
+		return fmt.Sprintf("Validation passed with %d warning(s).", len(result.Warnings))
+	case OutcomeTimeout:
+		return fmt.Sprintf("Validation timed out with %d distinct failure(s) and %d warning(s).", len(result.Failures), len(result.Warnings))
+	case OutcomeCancelled:
+		return fmt.Sprintf("Validation was cancelled with %d distinct failure(s) and %d warning(s).", len(result.Failures), len(result.Warnings))
+	default:
+		return fmt.Sprintf("Validation failed with %d distinct failure(s) and %d warning(s).", len(result.Failures), len(result.Warnings))
+	}
+}
+
+func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome Outcome) ([]Evidence, []Evidence) {
+	type sourcedText struct{ text, source string }
+	var lines []sourcedText
+	for _, stream := range []sourcedText{{stdout, "stdout"}, {stderr, "stderr"}} {
+		normalized := strings.ReplaceAll(stream.text, "\r", "\n")
+		for _, line := range strings.Split(normalized, "\n") {
+			line = strings.TrimSpace(ansiPattern.ReplaceAllString(line, ""))
+			if line == "" || noiseLine(line) {
+				continue
+			}
+			lines = append(lines, sourcedText{line, stream.source})
+		}
+	}
+	for _, warning := range configuredWarnings {
+		lines = append(lines, sourcedText{strings.TrimSpace(ansiPattern.ReplaceAllString(warning, "")), "dev-tools"})
+	}
+
+	var failures, warnings []Evidence
+	seenFailures := map[string]struct{}{}
+	seenWarnings := map[string]struct{}{}
+	var fallback []Evidence
+	for _, line := range lines {
+		key := strings.ToLower(line.text)
+		if warningPattern.MatchString(line.text) {
+			if _, exists := seenWarnings[key]; !exists {
+				seenWarnings[key] = struct{}{}
+				warnings = append(warnings, Evidence{Message: line.text, Source: line.source})
+			}
+			continue
+		}
+		evidence := Evidence{Message: line.text, Source: line.source}
+		fallback = append(fallback, evidence)
+		if failurePattern.MatchString(line.text) {
+			if _, exists := seenFailures[key]; !exists {
+				seenFailures[key] = struct{}{}
+				failures = append(failures, evidence)
+			}
+		}
+	}
+	if outcome != OutcomePass && len(failures) == 0 && len(fallback) > 0 {
+		failures = append(failures, fallback[0])
+	}
+	return failures, warnings
+}
+
+func noiseLine(line string) bool {
+	if progressPattern.MatchString(line) {
+		return true
+	}
+	lower := strings.ToLower(line)
+	return strings.HasPrefix(lower, "progress ") && strings.HasSuffix(lower, "%")
+}
+
+func budgetFor(outcome Outcome, budgets Budgets) Budget {
+	switch outcome {
+	case OutcomePass:
+		return budgets.Success
+	case OutcomeTimeout, OutcomeCancelled:
+		return budgets.Timeout
+	default:
+		return budgets.Failure
+	}
+}
+
+func artifactPaths(job string) Artifacts {
+	return Artifacts{
+		Log:    ".build/agent/logs/" + job + ".log",
+		Result: ".build/agent/results/" + job + ".json",
+	}
+}
+
+func drillDown(result Result) DrillDown {
+	base := "dev-tools result " + result.Job
+	return DrillDown{
+		Full:     base + " --full",
+		Failures: base + " --failures",
+		Warnings: base + " --warnings",
+	}
+}
+
+func RenderText(result Result, budgets Budgets) string {
+	compact := Compact(result, budgets)
+	return render(compact)
+}
+
+func RenderStoredText(result Result) string {
+	budgets := DefaultBudgets()
+	switch result.Outcome {
+	case OutcomePass:
+		budgets.Success = result.Truncation.Budget
+	case OutcomeTimeout, OutcomeCancelled:
+		budgets.Timeout = result.Truncation.Budget
+	default:
+		budgets.Failure = result.Truncation.Budget
+	}
+	return RenderText(result, budgets)
+}
+
+func Compact(result Result, budgets Budgets) Result {
+	result.Truncation.Budget = budgetFor(result.Outcome, budgets)
+	result.Truncation.Total.Failures = len(result.Failures)
+	result.Truncation.Total.Warnings = len(result.Warnings)
+	failureCount := len(result.Failures)
+	warningCount := len(result.Warnings)
+
+	for {
+		candidate := result
+		candidate.Failures = append([]Evidence(nil), result.Failures[:failureCount]...)
+		candidate.Warnings = append([]Evidence(nil), result.Warnings[:warningCount]...)
+		candidate.Truncation.Shown.Failures = failureCount
+		candidate.Truncation.Shown.Warnings = warningCount
+		candidate.Truncation.Truncated = failureCount < len(result.Failures) || warningCount < len(result.Warnings)
+		text := render(candidate)
+		lineCount := len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
+		byteCount := len([]byte(text))
+		if (lineCount <= candidate.Truncation.Budget.Lines && byteCount <= candidate.Truncation.Budget.Bytes) || (failureCount == 0 && warningCount == 0) {
+			candidate.Truncation.Shown.Lines = lineCount
+			candidate.Truncation.Shown.Bytes = byteCount
+			candidate.Truncation.Truncated = candidate.Truncation.Truncated || lineCount > candidate.Truncation.Budget.Lines || byteCount > candidate.Truncation.Budget.Bytes
+			return candidate
+		}
+		if warningCount > 0 {
+			warningCount--
+		} else if failureCount > 0 {
+			failureCount--
+		}
+	}
+}
+
+func render(result Result) string {
+	exit := "null"
+	if result.ExitCode != nil {
+		exit = fmt.Sprintf("%d", *result.ExitCode)
+	}
+	lines := []string{
+		"DEV-RESULT v1 " + strings.ToUpper(string(result.Outcome)),
+		"command: " + result.Command.Normalized,
+		fmt.Sprintf("exit: %s | duration: %s | attempts: %d/%d", exit, formatDuration(result.DurationMS), result.Attempts.Shown, result.Attempts.Total),
+		"summary: " + result.Summary,
+	}
+	if len(result.Failures) > 0 {
+		lines = append(lines, fmt.Sprintf("failures: shown %d/%d", len(result.Failures), result.Truncation.Total.Failures))
+		for _, item := range result.Failures {
+			lines = append(lines, "- "+item.Message)
+		}
+	}
+	if len(result.Warnings) > 0 {
+		lines = append(lines, fmt.Sprintf("warnings: shown %d/%d", len(result.Warnings), result.Truncation.Total.Warnings))
+		for _, item := range result.Warnings {
+			lines = append(lines, "- "+item.Message)
+		}
+	}
+	lines = append(lines,
+		fmt.Sprintf("artifacts: log=%s | result=%s", result.Artifacts.Log, result.Artifacts.Result),
+		formatDrillDown(result),
+		fmt.Sprintf("truncation: %t | lines=%d/%d | bytes=%d/%d | failures=%d/%d | warnings=%d/%d",
+			result.Truncation.Truncated,
+			result.Truncation.Shown.Lines, result.Truncation.Budget.Lines,
+			result.Truncation.Shown.Bytes, result.Truncation.Budget.Bytes,
+			result.Truncation.Shown.Failures, result.Truncation.Total.Failures,
+			result.Truncation.Shown.Warnings, result.Truncation.Total.Warnings),
+	)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func formatDrillDown(result Result) string {
+	items := []string{"full=" + result.DrillDown.Full}
+	if result.Truncation.Total.Failures > 0 {
+		items = append(items, "failures="+result.DrillDown.Failures)
+	}
+	if result.Truncation.Total.Warnings > 0 {
+		items = append(items, "warnings="+result.DrillDown.Warnings)
+	}
+	return "drill-down: " + strings.Join(items, " | ")
+}
+
+func formatDuration(milliseconds int64) string {
+	return (time.Duration(milliseconds) * time.Millisecond).String()
+}
+
+func NewJobID(command string, now time.Time) string {
+	command = strings.ToLower(command)
+	command = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(command, "-")
+	command = strings.Trim(command, "-")
+	if command == "" {
+		command = "job"
+	}
+	return command + "-" + now.UTC().Format("20060102T150405.000000000Z")
+}
+
+func NormalizeCommand(command string, args []string) string {
+	parts := []string{"dev-tools", command}
+	for _, arg := range args {
+		if regexp.MustCompile(`^[A-Za-z0-9_./:=+-]+$`).MatchString(arg) {
+			parts = append(parts, arg)
+		} else {
+			parts = append(parts, "'"+strings.ReplaceAll(arg, "'", "'\\''")+"'")
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func SortedSupportedCommands() []string {
+	commands := make([]string, 0, len(supportedCommands))
+	for command := range supportedCommands {
+		commands = append(commands, command)
+	}
+	sort.Strings(commands)
+	return commands
+}

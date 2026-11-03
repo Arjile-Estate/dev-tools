@@ -745,6 +745,29 @@ func TestExecuteCommandWithOptions(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandWithOptionsCapturesAllForegroundStepEvidence(t *testing.T) {
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:   "test",
+		WorkingDir:    t.TempDir(),
+		CaptureOutput: true,
+		Steps: []config.CommandStep{
+			{Run: config.RunCommand{"printf 'step-one'; printf 'error-one' >&2"}},
+			{Run: config.RunCommand{"printf 'step-two'; printf 'warning: cache' >&2"}},
+		},
+	})
+
+	require.True(t, result.Success)
+	assert.Contains(t, result.Stdout, "step-one")
+	assert.Contains(t, result.Stdout, "step-two")
+	assert.Contains(t, result.Stderr, "error-one")
+	assert.Contains(t, result.Stderr, "warning: cache")
+	assert.Equal(t, []string{
+		"printf 'step-one'; printf 'error-one' >&2",
+		"printf 'step-two'; printf 'warning: cache' >&2",
+	}, result.AttemptedCommands)
+	assert.Equal(t, 2, result.Attempts)
+}
+
 func TestLoadEnvironmentVariables(t *testing.T) {
 	tests := []struct {
 		name        string
