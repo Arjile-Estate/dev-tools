@@ -113,3 +113,45 @@ func TestNewJobIDIsNormalizedAndCollisionSafe(t *testing.T) {
 	now := time.Date(2026, 11, 3, 14, 25, 1, 123456789, time.UTC)
 	assert.Equal(t, "test-focused-20261103T142501.123456789Z", NewJobID("test:focused", now))
 }
+
+func TestTimeoutAndCancellationUseBoundedOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		input   Input
+		outcome Outcome
+		header  string
+	}{
+		{name: "timeout", input: Input{Job: "typecheck-timeout", CommandName: "typecheck", TimedOut: true, ExitCode: -1}, outcome: OutcomeTimeout, header: "DEV-RESULT v1 TIMEOUT"},
+		{name: "cancelled", input: Input{Job: "lint-cancelled", CommandName: "lint", Cancelled: true, ExitCode: -1}, outcome: OutcomeCancelled, header: "DEV-RESULT v1 CANCELLED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, _ := Build(tc.input, DefaultBudgets(), nil)
+			assert.Equal(t, tc.outcome, result.Outcome)
+			assert.Equal(t, DefaultBudgets().Timeout, result.Truncation.Budget)
+			assert.Contains(t, RenderText(result, DefaultBudgets()), tc.header)
+		})
+	}
+}
+
+func TestCompactJSONNeverContainsRawStreams(t *testing.T) {
+	result, _ := Build(Input{
+		Job: "build-json", CommandName: "build", ExitCode: 42,
+		Stdout: "raw stdout payload", Stderr: "error: raw stderr payload",
+	}, DefaultBudgets(), nil)
+	data, err := json.Marshal(Compact(result, DefaultBudgets()))
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "raw stdout payload")
+	assert.NotContains(t, string(data), `"stdout"`)
+	assert.NotContains(t, string(data), `"stderr"`)
+}
+
+func TestWriteArtifactsUsesNewIdentifierWhenJobAlreadyExists(t *testing.T) {
+	root := t.TempDir()
+	result, retained := Build(Input{Job: "test-fixed", CommandName: "test"}, DefaultBudgets(), nil)
+	first, err := WriteArtifacts(root, result, retained)
+	require.NoError(t, err)
+	second, err := WriteArtifacts(root, result, retained)
+	require.NoError(t, err)
+	assert.Equal(t, "test-fixed", first.Job)
+	assert.Equal(t, "test-fixed-2", second.Job)
+}
