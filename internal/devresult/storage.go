@@ -24,6 +24,16 @@ func WriteArtifacts(root string, result Result, retainedLog string) (Result, err
 	result.Job = reservedJob
 	result.Artifacts = artifactPaths(result.Job)
 	result.DrillDown = drillDown(result)
+	budgets := DefaultBudgets()
+	switch result.Outcome {
+	case OutcomePass:
+		budgets.Success = result.Truncation.Budget
+	case OutcomeTimeout, OutcomeCancelled:
+		budgets.Timeout = result.Truncation.Budget
+	default:
+		budgets.Failure = result.Truncation.Budget
+	}
+	result.Truncation = Compact(result, budgets).Truncation
 	if originalJob != result.Job {
 		retainedLog = strings.Replace(retainedLog, "job: "+originalJob+"\n", "job: "+result.Job+"\n", 1)
 	}

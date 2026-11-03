@@ -787,6 +787,50 @@ func TestExecuteCommandWithOptionsCapturesCancellation(t *testing.T) {
 	assert.Contains(t, result.Stdout, "started")
 }
 
+func TestContinueOnErrorDoesNotSwallowCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		cancel()
+	}()
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		Context:       ctx,
+		CommandName:   "lint",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{{
+			Run:             config.RunCommand{"printf 'started'; sleep 5", "printf 'must-not-run'"},
+			ContinueOnError: true,
+		}},
+	})
+
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+	assert.NotContains(t, result.Stdout, "must-not-run")
+}
+
+func TestRetryDelayStopsWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		Context:       ctx,
+		CommandName:   "test",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{{
+			Run:        config.RunCommand{"printf 'first'; exit 1"},
+			Retry:      1,
+			RetryDelay: "5s",
+		}},
+	})
+
+	assert.Less(t, time.Since(started), time.Second)
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+}
+
 func TestLoadEnvironmentVariables(t *testing.T) {
 	tests := []struct {
 		name        string

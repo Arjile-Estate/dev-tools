@@ -537,6 +537,18 @@ func executeCommandStep(ctx context.Context, step config.CommandStep, commandNam
 		warnings = append(warnings, result.Warnings...)
 		attemptedCommands = append(attemptedCommands, result.AttemptedCommands...)
 		attempts += result.Attempts
+		if result.Cancelled || result.TimedOut {
+			result.FailedCommand = command
+			result.ServicesStarted = servicesStarted
+			if captureOutput {
+				result.Stdout = stdout.String()
+				result.Stderr = stderr.String()
+			}
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
+			return result
+		}
 
 		if !result.Success && !step.Background && !step.ContinueOnError {
 			result.FailedCommand = command

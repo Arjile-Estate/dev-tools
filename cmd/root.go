@@ -477,23 +477,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		model.Truncation = compactMetadata.Truncation
 		written, writeErr := devresult.WriteArtifacts(cmdCfg.ProjectDir, model, retained)
 		if writeErr != nil {
-			if result.Success {
-				return fmt.Errorf("failed to persist DEV-RESULT: %w", writeErr)
-			}
 			logger.Warnf("DEV-RESULT artifacts unavailable: %v", writeErr)
-			model.Artifacts = devresult.Artifacts{Log: "unavailable", Result: "unavailable"}
-			model.DrillDown = devresult.DrillDown{Full: "unavailable"}
-			model.Warnings = append(model.Warnings, devresult.Evidence{Message: "DEV-RESULT artifacts unavailable: " + writeErr.Error(), Source: "dev-tools"})
-			model.Summary = fmt.Sprintf("Validation failed with %d distinct failure(s) and %d warning(s).", len(model.Failures), len(model.Warnings))
-			written = model
+			written = devresult.WithArtifactWarning(model, writeErr)
 		}
 		if cmdCfg.Format == "json" {
 			jsonBytes, marshalErr := devresult.MarshalCompactJSON(written, budgets)
 			if marshalErr != nil {
-				if result.Success {
-					return fmt.Errorf("failed to format DEV-RESULT JSON: %w", marshalErr)
-				}
-				jsonBytes = []byte(fmt.Sprintf("{\"schema\":%q,\"outcome\":%q,\"exit_code\":%d,\"error\":%q}\n", devresult.SchemaV1, "fail", result.ReturnCode, marshalErr.Error()))
+				jsonBytes = []byte(fmt.Sprintf("{\"schema\":%q,\"outcome\":%q,\"exit_code\":%d,\"error\":%q}\n", devresult.SchemaV1, written.Outcome, result.ReturnCode, marshalErr.Error()))
 			}
 			_, _ = fmt.Fprint(cmd.OutOrStdout(), string(jsonBytes))
 		} else {
