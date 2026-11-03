@@ -39,9 +39,43 @@ const ConfigSchema = `{
           "$ref": "#/definitions/commandStep"
         }
       }
+    },
+    "dev_result": {
+      "type": "object",
+      "description": "Per-command DEV-RESULT v1 opt-in and budgets",
+      "properties": {
+        "commands": {
+          "type": "object",
+          "propertyNames": {
+            "enum": ["test", "test:focused", "build", "lint", "lint:dead-code", "typecheck"]
+          },
+          "additionalProperties": {"$ref": "#/definitions/devResultCommand"}
+        }
+      },
+      "required": ["commands"],
+      "additionalProperties": false
     }
   },
   "definitions": {
+    "resultBudget": {
+      "type": "object",
+      "properties": {
+        "lines": {"type": "integer", "minimum": 1},
+        "bytes": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "devResultCommand": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "success": {"$ref": "#/definitions/resultBudget"},
+        "failure": {"$ref": "#/definitions/resultBudget"},
+        "timeout": {"$ref": "#/definitions/resultBudget"},
+        "background": {"$ref": "#/definitions/resultBudget"}
+      },
+      "additionalProperties": false
+    },
     "commandStep": {
       "type": "object",
       "properties": {

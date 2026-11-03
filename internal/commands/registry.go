@@ -23,6 +23,13 @@ func initBuiltInCommandRegistry() {
 	builtInCommandRegistryOnce.Do(func() {
 		builtInCommandRegistry = []BuiltInCommand{
 			{
+				Name:        "result",
+				Description: "Read a retained DEV-RESULT artifact",
+				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
+					return HandleResultCommand(cmd, args[1:], projectDir)
+				},
+			},
+			{
 				Name:        "logs",
 				Description: "Show recent activity logs",
 				Handler: func(cmd *cobra.Command, args []string, projectDir string) error {
