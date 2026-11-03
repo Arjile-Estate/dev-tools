@@ -31,6 +31,27 @@ Dev-Tools is a unified command runner for development workflows written in Go. I
 **Logging**: zerolog
 **Testing**: Standard Go testing + testify/assert
 
+## Development Environment
+
+The repository includes a [devenv](https://devenv.sh/) environment with Go,
+`golangci-lint`, and the Docker CLI. Start it with:
+
+```bash
+devenv shell
+```
+
+Inside the environment, `dev-tools` runs the CLI from the current checkout, so
+the standard project commands exercise local code:
+
+```bash
+dev-tools test
+dev-tools lint
+dev-tools build
+```
+
+Run the environment's verification hook with `devenv test`. If direnv is
+installed, use `direnv allow` once to activate the environment automatically.
+
 ## Architecture
 
 ### High-Level Design
