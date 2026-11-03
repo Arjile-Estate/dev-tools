@@ -18,6 +18,7 @@ Dev Tools automatically detects your project type (Go, Python, Node.js, Rust, et
 - **Advanced Daemon Support**: SHA1-based PID tracking prevents duplicate daemon instances
 - **Structured Logging**: High-performance JSON logging with zerolog for easy parsing
 - **JSON Output**: Machine-readable output (`--format json`) for automation and monitoring
+- **Opt-in DEV-RESULT v1**: Per-command bounded validation summaries with complete redacted artifacts
 - **Security Hardening**: Shell injection prevention, POSIX escaping, thread-safe operations
 - **Dynamic Help System**: Context-aware help showing available commands from configuration
 - **Shell Completion**: Bash, Zsh, and Fish completion with dynamic command discovery
@@ -294,6 +295,41 @@ Detected by presence of `Gemfile`:
 ## Configuration
 
 Create a `.dev-config.yaml` file in your project root to customize commands with powerful service and execution management.
+
+### DEV-RESULT v1 (opt-in per command)
+
+DEV-RESULT is disabled by default. Enable it only for the foreground validation commands whose output you want captured and summarized:
+
+```yaml
+commands:
+  test:
+    - run: "go test ./..."
+  lint:
+    - run: "golangci-lint run"
+
+dev_result:
+  commands:
+    test:
+      enabled: true
+    lint:
+      enabled: true
+      failure:
+        lines: 120
+        bytes: 16384
+```
+
+Supported command names are `test`, `test:focused`, `build`, `lint`, `lint:dead-code`, and `typecheck`. An absent, unlisted, or disabled entry preserves the command's existing streaming, text/JSON output, artifact behavior, and exit code.
+
+Enabled commands emit a bounded `DEV-RESULT v1` envelope and retain complete redacted streams under `.build/agent/`. Inspect an existing result without rerunning validation:
+
+```bash
+dev-tools result <job>
+dev-tools result <job> --full
+dev-tools result <job> --failures
+dev-tools result <job> --warnings
+```
+
+`dev-tools result` is retrieval-only; it is not a pipe processor or alternate command runner. See [DEV-RESULT v1](docs/dev-result-v1.md) for the schema, budgets, redaction rules, and artifact contract.
 
 ### Configuration Validation
 
