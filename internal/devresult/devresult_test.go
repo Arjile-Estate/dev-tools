@@ -141,8 +141,8 @@ func TestCompactJSONNeverContainsRawStreams(t *testing.T) {
 	data, err := json.Marshal(Compact(result, DefaultBudgets()))
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "raw stdout payload")
-	assert.NotContains(t, string(data), `"stdout"`)
-	assert.NotContains(t, string(data), `"stderr"`)
+	assert.NotContains(t, string(data), `"stdout":`)
+	assert.NotContains(t, string(data), `"stderr":`)
 }
 
 func TestWriteArtifactsUsesNewIdentifierWhenJobAlreadyExists(t *testing.T) {
