@@ -768,6 +768,25 @@ func TestExecuteCommandWithOptionsCapturesAllForegroundStepEvidence(t *testing.T
 	assert.Equal(t, 2, result.Attempts)
 }
 
+func TestExecuteCommandWithOptionsCapturesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		cancel()
+	}()
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		Context:       ctx,
+		CommandName:   "lint",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{
+			{Run: config.RunCommand{"printf 'started'; sleep 5"}},
+		},
+	})
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+	assert.Contains(t, result.Stdout, "started")
+}
+
 func TestLoadEnvironmentVariables(t *testing.T) {
 	tests := []struct {
 		name        string

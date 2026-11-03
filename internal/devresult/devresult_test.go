@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,13 @@ func TestRedactRemovesCommonAndEnvironmentSecrets(t *testing.T) {
 	assert.NotContains(t, redacted, "environment-secret")
 	assert.Contains(t, redacted, RedactionMarker)
 	assert.GreaterOrEqual(t, matches, 3)
+}
+
+func TestRedactRemovesSpaceSeparatedCredentialFlags(t *testing.T) {
+	redacted, matches := Redact("dev-tools test --token secret-value --password=other-secret", nil)
+	assert.NotContains(t, redacted, "secret-value")
+	assert.NotContains(t, redacted, "other-secret")
+	assert.Equal(t, 2, matches)
 }
 
 func TestBuildAndRenderSelectsDistinctActionableEvidenceDeterministically(t *testing.T) {
@@ -145,6 +153,24 @@ func TestCompactJSONNeverContainsRawStreams(t *testing.T) {
 	assert.NotContains(t, string(data), `"stderr":`)
 }
 
+func TestCompactTextAndJSONRespectHardBudgets(t *testing.T) {
+	budgets := DefaultBudgets()
+	budgets.Failure = Budget{Lines: 7, Bytes: 1024}
+	result, _ := Build(Input{
+		Job: "build-budget", CommandName: "build", ExitCode: 42,
+		NormalizedCommand: "dev-tools build -- " + strings.Repeat("long-argument-", 300),
+		Stderr:            strings.Repeat("error: distinct failure payload\n", 100),
+	}, budgets, nil)
+
+	text := RenderText(result, budgets)
+	assert.LessOrEqual(t, len(strings.Split(strings.TrimSuffix(text, "\n"), "\n")), budgets.Failure.Lines)
+	assert.LessOrEqual(t, len([]byte(text)), budgets.Failure.Bytes)
+
+	jsonData, err := MarshalCompactJSON(result, budgets)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(jsonData), budgets.Failure.Bytes)
+}
+
 func TestWriteArtifactsUsesNewIdentifierWhenJobAlreadyExists(t *testing.T) {
 	root := t.TempDir()
 	result, retained := Build(Input{Job: "test-fixed", CommandName: "test"}, DefaultBudgets(), nil)
@@ -154,4 +180,40 @@ func TestWriteArtifactsUsesNewIdentifierWhenJobAlreadyExists(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test-fixed", first.Job)
 	assert.Equal(t, "test-fixed-2", second.Job)
+}
+
+func TestWriteArtifactsReservesCollisionSafeIdentifiersConcurrently(t *testing.T) {
+	root := t.TempDir()
+	result, retained := Build(Input{Job: "test-concurrent", CommandName: "test"}, DefaultBudgets(), nil)
+	const writers = 8
+	jobs := make(chan string, writers)
+	errs := make(chan error, writers)
+	var wait sync.WaitGroup
+	for index := 0; index < writers; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			written, err := WriteArtifacts(root, result, retained)
+			if err != nil {
+				errs <- err
+				return
+			}
+			jobs <- written.Job
+		}()
+	}
+	wait.Wait()
+	close(jobs)
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	seen := map[string]struct{}{}
+	for job := range jobs {
+		seen[job] = struct{}{}
+		loaded, logText, err := LoadArtifacts(root, job)
+		require.NoError(t, err)
+		assert.Equal(t, job, loaded.Job)
+		assert.Contains(t, logText, "job: "+job)
+	}
+	assert.Len(t, seen, writers)
 }

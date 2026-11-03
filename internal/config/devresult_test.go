@@ -57,6 +57,28 @@ dev_result:
 	assert.Contains(t, err.Error(), "greater than or equal to 1")
 }
 
+func TestDevResultConfigurationRejectsBudgetsTooSmallForContract(t *testing.T) {
+	for _, budget := range []string{
+		"lines: 6\n        bytes: 1024",
+		"lines: 7\n        bytes: 1023",
+	} {
+		configPath := filepath.Join(t.TempDir(), ".dev-config.yaml")
+		contents := `commands:
+  test:
+    - run: "go test ./..."
+dev_result:
+  commands:
+    test:
+      enabled: true
+      success:
+        ` + budget + "\n"
+		require.NoError(t, os.WriteFile(configPath, []byte(contents), 0o600))
+		_, err := LoadConfigFromFile(configPath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "DEV-RESULT")
+	}
+}
+
 func TestDevResultConfigurationRejectsUnsupportedCommand(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".dev-config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`commands:
