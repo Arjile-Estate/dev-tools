@@ -38,6 +38,19 @@ dev_result:
 	assert.False(t, listed)
 }
 
+func TestDevResultConfigurationSurvivesDefaultCommandMerge(t *testing.T) {
+	user := &Config{
+		Commands: map[string][]CommandStep{"test": {{Run: RunCommand{"go test ./..."}}}},
+		DevResult: &DevResultConfig{Commands: map[string]DevResultCommandConfig{
+			"test": {Enabled: true},
+		}},
+	}
+	merged := MergeConfigWithDefaults(user, GetDefaultCommandsForProjectType(ProjectTypeGo))
+
+	require.NotNil(t, merged.DevResult)
+	assert.True(t, merged.DevResult.Commands["test"].Enabled)
+}
+
 func TestDevResultConfigurationRejectsInvalidBudgets(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".dev-config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`commands:

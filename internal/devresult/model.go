@@ -141,6 +141,7 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	stdout, stdoutMatches := Redact(input.Stdout, environment)
 	stderr, stderrMatches := Redact(input.Stderr, environment)
 	normalizedCommand, commandMatches := Redact(input.NormalizedCommand, environment)
+	commandMatches += strings.Count(input.NormalizedCommand, RedactionMarker)
 	redactedWarnings := make([]string, 0, len(input.Warnings))
 	warningMatches := 0
 	for _, warning := range input.Warnings {
@@ -521,7 +522,8 @@ func NewJobID(command string, now time.Time) string {
 
 func NormalizeCommand(command string, args []string) string {
 	parts := []string{"dev-tools", command}
-	for _, arg := range args {
+	redactedArgs := redactCredentialArguments(args)
+	for _, arg := range redactedArgs {
 		if regexp.MustCompile(`^[A-Za-z0-9_./:=+-]+$`).MatchString(arg) {
 			parts = append(parts, arg)
 		} else {
@@ -529,6 +531,30 @@ func NormalizeCommand(command string, args []string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+var credentialArgumentPattern = regexp.MustCompile(`(?i)^(--(?:api[_-]?key|token|secret|password|passwd|credential|private[_-]?key))(?:=(.*))?$`)
+
+func redactCredentialArguments(args []string) []string {
+	redacted := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		parts := credentialArgumentPattern.FindStringSubmatch(arg)
+		if len(parts) != 3 {
+			redacted = append(redacted, arg)
+			continue
+		}
+		if strings.Contains(arg, "=") {
+			redacted = append(redacted, parts[1]+"="+RedactionMarker)
+			continue
+		}
+		redacted = append(redacted, parts[1])
+		if index+1 < len(args) {
+			redacted = append(redacted, RedactionMarker)
+			index++
+		}
+	}
+	return redacted
 }
 
 func SortedSupportedCommands() []string {

@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dev-tools/internal/config"
+	"dev-tools/internal/devresult"
 	"dev-tools/internal/executor"
 	"dev-tools/internal/mocks"
 
@@ -192,4 +195,45 @@ func TestRunCommandDevResultPreservesSuccessWhenArtifactsCannotBeWritten(t *test
 	require.NoError(t, rootCmd.Execute())
 	assert.Contains(t, output.String(), "DEV-RESULT v1 PASS")
 	assert.Contains(t, output.String(), "artifacts unavailable")
+}
+
+func TestRunCommandDevResultJSONSidecarMatchesEmittedTruncation(t *testing.T) {
+	t.Setenv(claudeCodeEnvVar, "")
+	projectDir := t.TempDir()
+	mockLoader := new(mocks.ConfigLoader)
+	mockExecutor := new(mocks.Executor)
+	SetConfigLoader(mockLoader)
+	SetExecutor(mockExecutor)
+	t.Cleanup(func() {
+		SetConfigLoader(nil)
+		SetExecutor(nil)
+	})
+	cfg := &config.Config{
+		Commands: map[string][]config.CommandStep{"build": {{Run: config.RunCommand{"go build ./..."}}}},
+		DevResult: &config.DevResultConfig{Commands: map[string]config.DevResultCommandConfig{
+			"build": {Enabled: true},
+		}},
+	}
+	mockLoader.On("LoadConfig", projectDir).Return(cfg, nil)
+	mockExecutor.On("LoadEnvironmentVariables", filepath.Join(projectDir, ".env")).Return(nil)
+	mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(executor.ExecutionResult{
+		Success: false, CommandName: "build", ReturnCode: 42,
+		Stderr: strings.Repeat("error: distinct failure payload\n", 100), Attempts: 1,
+	})
+
+	rootCmd := NewRootCommand()
+	var output bytes.Buffer
+	rootCmd.SetOut(&output)
+	rootCmd.SetArgs([]string{"--project-dir", projectDir, "--format", "json", "build"})
+	require.Error(t, rootCmd.Execute())
+	var emitted devresult.Result
+	require.NoError(t, json.Unmarshal(output.Bytes(), &emitted))
+	resultFiles, err := filepath.Glob(filepath.Join(projectDir, ".build", "agent", "results", "build-*.json"))
+	require.NoError(t, err)
+	require.Len(t, resultFiles, 1)
+	sidecarData, err := os.ReadFile(resultFiles[0])
+	require.NoError(t, err)
+	var sidecar devresult.Result
+	require.NoError(t, json.Unmarshal(sidecarData, &sidecar))
+	assert.Equal(t, emitted.Truncation, sidecar.Truncation)
 }
