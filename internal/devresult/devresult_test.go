@@ -56,6 +56,20 @@ func TestRedactRemovesQuotedJSONAndMultiwordCredentialValues(t *testing.T) {
 	assert.Equal(t, 4, matches)
 }
 
+func TestNormalizeCommandRedactsCredentialArgumentsBeforeShellQuoting(t *testing.T) {
+	normalized := NormalizeCommand("test", []string{
+		"--token=alpha beta",
+		"--password", "odd ' quoted secret",
+	})
+
+	assert.NotContains(t, normalized, "alpha beta")
+	assert.NotContains(t, normalized, "odd")
+	assert.NotContains(t, normalized, "quoted secret")
+	assert.Equal(t, 2, strings.Count(normalized, RedactionMarker))
+	result, _ := Build(Input{CommandName: "test", NormalizedCommand: normalized}, DefaultBudgets(), nil)
+	assert.True(t, result.Redaction.Applied)
+}
+
 func TestBuildAndRenderSelectsDistinctActionableEvidenceDeterministically(t *testing.T) {
 	input := Input{
 		Job:               "build-fixed-001",

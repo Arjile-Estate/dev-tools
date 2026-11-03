@@ -808,6 +808,30 @@ func TestContinueOnErrorDoesNotSwallowCancellation(t *testing.T) {
 	assert.NotContains(t, result.Stdout, "must-not-run")
 }
 
+func TestContinueOnErrorNormalizesToleratedFailureExitCode(t *testing.T) {
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:   "lint",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{{
+			Run:             config.RunCommand{"printf 'tolerated failure' >&2; exit 42"},
+			ContinueOnError: true,
+		}},
+	})
+
+	assert.True(t, result.Success)
+	assert.Equal(t, 0, result.ReturnCode)
+	assert.False(t, result.Cancelled)
+	assert.False(t, result.TimedOut)
+}
+
+func TestCapturedExecutionResultTreatsHandledSignalAsCancellation(t *testing.T) {
+	result := capturedExecutionResult(context.Background(), nil, true, "handled", "")
+
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+	assert.Equal(t, -1, result.ReturnCode)
+}
+
 func TestRetryDelayStopsWhenContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {

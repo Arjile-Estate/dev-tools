@@ -12,6 +12,15 @@ import (
 var safeJobPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]*$`)
 
 func WriteArtifacts(root string, result Result, retainedLog string) (Result, error) {
+	budgets := budgetsFromResult(result)
+	return writeArtifacts(root, result, retainedLog, budgets, false)
+}
+
+func WriteArtifactsForFormat(root string, result Result, retainedLog string, budgets Budgets, jsonFormat bool) (Result, error) {
+	return writeArtifacts(root, result, retainedLog, budgets, jsonFormat)
+}
+
+func writeArtifacts(root string, result Result, retainedLog string, budgets Budgets, jsonFormat bool) (Result, error) {
 	if !safeJobPattern.MatchString(result.Job) {
 		return Result{}, fmt.Errorf("invalid DEV-RESULT job identifier %q", result.Job)
 	}
@@ -24,16 +33,19 @@ func WriteArtifacts(root string, result Result, retainedLog string) (Result, err
 	result.Job = reservedJob
 	result.Artifacts = artifactPaths(result.Job)
 	result.DrillDown = drillDown(result)
-	budgets := DefaultBudgets()
-	switch result.Outcome {
-	case OutcomePass:
-		budgets.Success = result.Truncation.Budget
-	case OutcomeTimeout, OutcomeCancelled:
-		budgets.Timeout = result.Truncation.Budget
-	default:
-		budgets.Failure = result.Truncation.Budget
+	if jsonFormat {
+		compactJSON, compactErr := MarshalCompactJSON(result, budgets)
+		if compactErr != nil {
+			return Result{}, fmt.Errorf("compact DEV-RESULT JSON: %w", compactErr)
+		}
+		var compact Result
+		if unmarshalErr := json.Unmarshal(compactJSON, &compact); unmarshalErr != nil {
+			return Result{}, fmt.Errorf("decode compact DEV-RESULT JSON: %w", unmarshalErr)
+		}
+		result.Truncation = compact.Truncation
+	} else {
+		result.Truncation = Compact(result, budgets).Truncation
 	}
-	result.Truncation = Compact(result, budgets).Truncation
 	if originalJob != result.Job {
 		retainedLog = strings.Replace(retainedLog, "job: "+originalJob+"\n", "job: "+result.Job+"\n", 1)
 	}
@@ -53,6 +65,22 @@ func WriteArtifacts(root string, result Result, retainedLog string) (Result, err
 		return Result{}, fmt.Errorf("write DEV-RESULT sidecar: %w", err)
 	}
 	return result, nil
+}
+
+func budgetsFromResult(result Result) Budgets {
+	budgets := DefaultBudgets()
+	if result.Truncation.Budget.Lines < 1 || result.Truncation.Budget.Bytes < 1 {
+		return budgets
+	}
+	switch result.Outcome {
+	case OutcomePass:
+		budgets.Success = result.Truncation.Budget
+	case OutcomeTimeout, OutcomeCancelled:
+		budgets.Timeout = result.Truncation.Budget
+	default:
+		budgets.Failure = result.Truncation.Budget
+	}
+	return budgets
 }
 
 func LoadArtifacts(root, job string) (Result, string, error) {

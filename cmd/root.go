@@ -475,7 +475,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}, budgets, os.Environ())
 		compactMetadata := devresult.Compact(model, budgets)
 		model.Truncation = compactMetadata.Truncation
-		written, writeErr := devresult.WriteArtifacts(cmdCfg.ProjectDir, model, retained)
+		written, writeErr := devresult.WriteArtifactsForFormat(cmdCfg.ProjectDir, model, retained, budgets, cmdCfg.Format == "json")
 		if writeErr != nil {
 			logger.Warnf("DEV-RESULT artifacts unavailable: %v", writeErr)
 			written = devresult.WithArtifactWarning(model, writeErr)

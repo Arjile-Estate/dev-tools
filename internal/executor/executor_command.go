@@ -61,46 +61,7 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 		if err == nil {
 			err, cancelledBySignal = waitForProcessWithSignalHandlingStatus(cmd)
 		}
-		success := err == nil
-		returnCode := 0
-
-		if err != nil {
-			// Check if context was cancelled
-			if ctx.Err() == context.Canceled || cancelledBySignal {
-				return ExecutionResult{
-					Success:    false,
-					Stdout:     stdout.String(),
-					Stderr:     stderr.String() + "command cancelled",
-					ReturnCode: -1,
-					Cancelled:  true,
-				}
-			}
-			if ctx.Err() == context.DeadlineExceeded {
-				return ExecutionResult{
-					Success:    false,
-					Stdout:     stdout.String(),
-					Stderr:     stderr.String() + "command timeout exceeded",
-					ReturnCode: -1,
-					TimedOut:   true,
-				}
-			}
-
-			if exitError, ok := err.(*exec.ExitError); ok {
-				returnCode = exitError.ExitCode()
-			} else {
-				returnCode = -1
-			}
-			if stderr.Len() == 0 {
-				_, _ = stderr.WriteString(err.Error())
-			}
-		}
-
-		return ExecutionResult{
-			Success:    success,
-			Stdout:     stdout.String(),
-			Stderr:     stderr.String(),
-			ReturnCode: returnCode,
-		}
+		return capturedExecutionResult(ctx, err, cancelledBySignal, stdout.String(), stderr.String())
 	}
 
 	// Stream output directly to stdout/stderr
@@ -206,46 +167,7 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 		if err == nil {
 			err, cancelledBySignal = waitForProcessWithSignalHandlingStatus(cmd)
 		}
-		success := err == nil
-		returnCode := 0
-
-		if err != nil {
-			// Check if context was cancelled
-			if ctx.Err() == context.Canceled || cancelledBySignal {
-				return ExecutionResult{
-					Success:    false,
-					Stdout:     stdout.String(),
-					Stderr:     stderr.String() + "command cancelled",
-					ReturnCode: -1,
-					Cancelled:  true,
-				}
-			}
-			if ctx.Err() == context.DeadlineExceeded {
-				return ExecutionResult{
-					Success:    false,
-					Stdout:     stdout.String(),
-					Stderr:     stderr.String() + "command timeout exceeded",
-					ReturnCode: -1,
-					TimedOut:   true,
-				}
-			}
-
-			if exitError, ok := err.(*exec.ExitError); ok {
-				returnCode = exitError.ExitCode()
-			} else {
-				returnCode = -1
-			}
-			if stderr.Len() == 0 {
-				_, _ = stderr.WriteString(err.Error())
-			}
-		}
-
-		return ExecutionResult{
-			Success:    success,
-			Stdout:     stdout.String(),
-			Stderr:     stderr.String(),
-			ReturnCode: returnCode,
-		}
+		return capturedExecutionResult(ctx, err, cancelledBySignal, stdout.String(), stderr.String())
 	}
 
 	// For daemon processes running in foreground, track PID
@@ -596,6 +518,10 @@ func executeCommandStep(ctx context.Context, step config.CommandStep, commandNam
 	}
 
 	result.Success = true
+	result.ReturnCode = 0
+	result.Cancelled = false
+	result.TimedOut = false
+	result.FailedCommand = ""
 	result.ServicesStarted = servicesStarted
 	if captureOutput {
 		result.Stdout = stdout.String()
@@ -605,6 +531,26 @@ func executeCommandStep(ctx context.Context, step config.CommandStep, commandNam
 	result.AttemptedCommands = attemptedCommands
 	result.Attempts = attempts
 	return result
+}
+
+func capturedExecutionResult(ctx context.Context, err error, cancelledBySignal bool, stdout, stderr string) ExecutionResult {
+	if ctx.Err() == context.Canceled || cancelledBySignal {
+		return ExecutionResult{Success: false, Stdout: stdout, Stderr: stderr + "command cancelled", ReturnCode: -1, Cancelled: true}
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return ExecutionResult{Success: false, Stdout: stdout, Stderr: stderr + "command timeout exceeded", ReturnCode: -1, TimedOut: true}
+	}
+	if err == nil {
+		return ExecutionResult{Success: true, Stdout: stdout, Stderr: stderr, ReturnCode: 0}
+	}
+	returnCode := -1
+	if exitError, ok := err.(*exec.ExitError); ok {
+		returnCode = exitError.ExitCode()
+	}
+	if stderr == "" {
+		stderr = err.Error()
+	}
+	return ExecutionResult{Success: false, Stdout: stdout, Stderr: stderr, ReturnCode: returnCode}
 }
 
 // ExecuteCommandWithOptions executes a command using the options struct pattern
