@@ -125,3 +125,38 @@ func TestRunCommandDevResultPreservesFailureExitCodeAndRedactsArtifacts(t *testi
 	require.NoError(t, readErr)
 	assert.NotContains(t, string(logData), "secret-demo-12345")
 }
+
+func TestRunCommandDevResultPreservesFailureExitCodeWhenArtifactsCannotBeWritten(t *testing.T) {
+	t.Setenv(claudeCodeEnvVar, "")
+	projectFile := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(projectFile, []byte("x"), 0o600))
+	mockLoader := new(mocks.ConfigLoader)
+	mockExecutor := new(mocks.Executor)
+	SetConfigLoader(mockLoader)
+	SetExecutor(mockExecutor)
+	t.Cleanup(func() {
+		SetConfigLoader(nil)
+		SetExecutor(nil)
+	})
+	cfg := &config.Config{
+		Commands: map[string][]config.CommandStep{"build": {{Run: config.RunCommand{"go build ./..."}}}},
+		DevResult: &config.DevResultConfig{Commands: map[string]config.DevResultCommandConfig{
+			"build": {Enabled: true},
+		}},
+	}
+	mockLoader.On("LoadConfig", projectFile).Return(cfg, nil)
+	mockExecutor.On("LoadEnvironmentVariables", filepath.Join(projectFile, ".env")).Return(nil)
+	mockExecutor.On("ExecuteCommandWithOptions", mock.Anything).Return(executor.ExecutionResult{
+		Success: false, CommandName: "build", ReturnCode: 42, Stderr: "error: compilation failed", Attempts: 1,
+	})
+
+	rootCmd := NewRootCommand()
+	var output bytes.Buffer
+	rootCmd.SetOut(&output)
+	rootCmd.SetArgs([]string{"--project-dir", projectFile, "build"})
+	err := rootCmd.Execute()
+	var exitErr *ExitError
+	require.True(t, errors.As(err, &exitErr))
+	assert.Equal(t, 42, exitErr.Code)
+	assert.Contains(t, output.String(), "DEV-RESULT v1 FAIL")
+}
