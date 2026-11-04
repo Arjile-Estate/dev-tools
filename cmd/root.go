@@ -478,7 +478,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if adapterWarning != "" {
 			resultWarnings = append(resultWarnings, adapterWarning)
 		}
-		if cfg.DevResult != nil {
+		if cfg.DevResult != nil && validationRun.ID != "" {
 			retention, retentionErr := devresult.ApplyRetention(cmdCfg.ProjectDir, validationRun.ID, time.Now(), devresult.RetentionPolicy{
 				MaxAge:   cfg.DevResult.Retention.MaxAge,
 				MaxBytes: cfg.DevResult.Retention.MaxBytes,

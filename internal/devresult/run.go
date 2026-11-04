@@ -36,7 +36,7 @@ func CreateValidationRun(root, command string, now time.Time) (ValidationRun, er
 	if err := os.MkdirAll(runsDir, 0o700); err != nil {
 		return ValidationRun{}, fmt.Errorf("create validation runs directory: %w", err)
 	}
-	prefix := now.UTC().Format("20060102T150405.000000000Z") + "-" + safeRunLabel(command) + "-"
+	prefix := safeRunLabel(command) + "-" + now.UTC().Format("20060102T150405.000000000Z") + "-"
 	dir, err := os.MkdirTemp(runsDir, prefix)
 	if err != nil {
 		return ValidationRun{}, fmt.Errorf("allocate validation run: %w", err)

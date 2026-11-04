@@ -288,7 +288,7 @@ func summary(result Result) string {
 func WithArtifactWarning(result Result, err error) Result {
 	result.Artifacts = Artifacts{Log: "unavailable", Result: "unavailable"}
 	result.DrillDown = DrillDown{Full: "unavailable"}
-	result.Warnings = append(result.Warnings, Evidence{Message: "DEV-RESULT artifacts unavailable: " + err.Error(), Source: "dev-tools"})
+	result.Warnings = append([]Evidence{{Message: "DEV-RESULT artifacts unavailable: " + err.Error(), Source: "dev-tools"}}, result.Warnings...)
 	result.Summary = summary(result)
 	return result
 }
