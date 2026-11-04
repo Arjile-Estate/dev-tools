@@ -661,10 +661,16 @@ func arj3539OnlyJob(t *testing.T, projectDir string) string {
 
 func arj3539WriteRetentionJob(t *testing.T, root, job string, modified time.Time) {
 	t.Helper()
-	for _, relative := range []string{filepath.Join(".build", "agent", "results", job+".json"), filepath.Join(".build", "agent", "logs", job+".log")} {
+	resultData, err := json.Marshal(devresult.Result{Schema: devresult.SchemaV1, Job: job})
+	require.NoError(t, err)
+	artifacts := map[string][]byte{
+		filepath.Join(".build", "agent", "results", job+".json"): resultData,
+		filepath.Join(".build", "agent", "logs", job+".log"):     []byte(job),
+	}
+	for relative, data := range artifacts {
 		path := filepath.Join(root, relative)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-		require.NoError(t, os.WriteFile(path, []byte(job), 0o600))
+		require.NoError(t, os.WriteFile(path, data, 0o600))
 		require.NoError(t, os.Chtimes(path, modified, modified))
 	}
 }

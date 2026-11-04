@@ -2,6 +2,7 @@ package devresult
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 const (
 	RunIDEnvironment  = "DEV_TOOLS_RUN_ID"
 	RunDirEnvironment = "DEV_TOOLS_RUN_DIR"
+	activeRunMarker   = ".active"
 )
 
 type ValidationRun struct {
@@ -25,6 +27,7 @@ type ValidatedSource struct {
 	Path         string
 	AbsolutePath string
 	Size         int64
+	Content      []byte
 }
 
 func CreateValidationRun(root, command string, now time.Time) (ValidationRun, error) {
@@ -43,6 +46,10 @@ func CreateValidationRun(root, command string, now time.Time) (ValidationRun, er
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return ValidationRun{}, fmt.Errorf("secure validation run: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, activeRunMarker), []byte(now.UTC().Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
+		_ = os.RemoveAll(dir)
+		return ValidationRun{}, fmt.Errorf("mark validation run active: %w", err)
 	}
 	return ValidationRun{ID: filepath.Base(dir), Dir: dir}, nil
 }
@@ -179,21 +186,48 @@ func (run ValidationRun) ValidateSources(sources []DiagnosticSource, limits Limi
 		if !contained {
 			return nil, fmt.Errorf("diagnostic source %q symlink escapes run directory", source.Path)
 		}
-		info, err := os.Stat(resolved)
+		file, err := openContainedSource(resolvedRunDir, relative)
 		if err != nil {
+			return nil, fmt.Errorf("open diagnostic source %q without following links: %w", source.Path, err)
+		}
+		info, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
 			return nil, fmt.Errorf("inspect diagnostic source %q: %w", source.Path, err)
 		}
 		if !info.Mode().IsRegular() {
+			_ = file.Close()
 			return nil, fmt.Errorf("diagnostic source %q is not a regular file", source.Path)
 		}
 		if info.Size() > limits.PerSourceBytes {
+			_ = file.Close()
 			return nil, fmt.Errorf("diagnostic source %q exceeds source size limit of %d bytes", source.Path, limits.PerSourceBytes)
 		}
 		if info.Size() > limits.TotalSourceBytes-total {
+			_ = file.Close()
 			return nil, fmt.Errorf("diagnostic sources exceed total source size limit of %d bytes", limits.TotalSourceBytes)
 		}
-		total += info.Size()
-		validated = append(validated, ValidatedSource{Kind: source.Kind, Path: filepath.ToSlash(relative), AbsolutePath: resolved, Size: info.Size()})
+		remaining := limits.TotalSourceBytes - total
+		readLimit := limits.PerSourceBytes
+		if remaining < readLimit {
+			readLimit = remaining
+		}
+		content, readErr := io.ReadAll(io.LimitReader(file, readLimit+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read diagnostic source %q: %w", source.Path, readErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close diagnostic source %q: %w", source.Path, closeErr)
+		}
+		if int64(len(content)) > limits.PerSourceBytes {
+			return nil, fmt.Errorf("diagnostic source %q exceeds source size limit of %d bytes", source.Path, limits.PerSourceBytes)
+		}
+		if int64(len(content)) > remaining {
+			return nil, fmt.Errorf("diagnostic sources exceed total source size limit of %d bytes", limits.TotalSourceBytes)
+		}
+		total += int64(len(content))
+		validated = append(validated, ValidatedSource{Kind: source.Kind, Path: filepath.ToSlash(relative), AbsolutePath: resolved, Size: int64(len(content)), Content: content})
 	}
 	return validated, nil
 }

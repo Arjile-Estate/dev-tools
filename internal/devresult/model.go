@@ -64,8 +64,9 @@ type AttemptSummary struct {
 }
 
 type Evidence struct {
-	Message string `json:"message"`
-	Source  string `json:"source"`
+	Identity string `json:"identity,omitempty"`
+	Message  string `json:"message"`
+	Source   string `json:"source"`
 }
 
 type Artifacts struct {
@@ -229,12 +230,12 @@ func collectStructuredEvidence(response DiagnosticsResponse, environment []strin
 	for _, diagnostic := range response.Failures {
 		message, count := Redact(formatDiagnostic(diagnostic), environment)
 		matches += count
-		failures = append(failures, Evidence{Message: message, Source: "diagnostics-adapter"})
+		failures = append(failures, Evidence{Identity: diagnostic.Identity, Message: message, Source: "diagnostics-adapter"})
 	}
 	for _, diagnostic := range response.Warnings {
 		message, count := Redact(formatDiagnostic(diagnostic), environment)
 		matches += count
-		warnings = append(warnings, Evidence{Message: message, Source: "diagnostics-adapter"})
+		warnings = append(warnings, Evidence{Identity: diagnostic.Identity, Message: message, Source: "diagnostics-adapter"})
 	}
 	for _, problem := range response.Problems {
 		message, count := Redact(problem.Message, environment)
@@ -260,6 +261,9 @@ func deduplicateEvidence(items []Evidence) []Evidence {
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		key := strings.ToLower(strings.TrimSpace(item.Message))
+		if identity := strings.TrimSpace(item.Identity); identity != "" {
+			key = "identity:" + strings.ToLower(identity)
+		}
 		if key == "" {
 			continue
 		}
@@ -442,6 +446,12 @@ func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 		}
 		compact.Truncation.Truncated = true
 		switch {
+		case len(compact.Artifacts.Sources) > 0:
+			compact.Artifacts.Sources = nil
+		case compact.Artifacts.AdapterStderr != "":
+			compact.Artifacts.AdapterStderr = ""
+		case compact.Artifacts.AdapterResponse != "":
+			compact.Artifacts.AdapterResponse = ""
 		case len(compact.Warnings) > 0:
 			compact.Warnings = compact.Warnings[:len(compact.Warnings)-1]
 			compact.Truncation.Shown.Warnings = len(compact.Warnings)

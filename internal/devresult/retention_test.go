@@ -14,10 +14,16 @@ import (
 func createRetentionJob(t *testing.T, root, job string, age time.Duration, bytes int) {
 	t.Helper()
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
-	for _, rel := range []string{filepath.Join(".build", "agent", "results", job+".json"), filepath.Join(".build", "agent", "logs", job+".log")} {
+	resultData, err := json.Marshal(Result{Schema: SchemaV1, Job: job})
+	require.NoError(t, err)
+	artifacts := map[string][]byte{
+		filepath.Join(".build", "agent", "results", job+".json"): resultData,
+		filepath.Join(".build", "agent", "logs", job+".log"):     make([]byte, bytes/2),
+	}
+	for rel, data := range artifacts {
 		path := filepath.Join(root, rel)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-		require.NoError(t, os.WriteFile(path, make([]byte, bytes/2), 0o600))
+		require.NoError(t, os.WriteFile(path, data, 0o600))
 		require.NoError(t, os.Chtimes(path, now.Add(-age), now.Add(-age)))
 	}
 	evidencePath := filepath.Join(root, ".build", "agent", "evidence", job, "junit.xml")
@@ -25,6 +31,33 @@ func createRetentionJob(t *testing.T, root, job string, age time.Duration, bytes
 	require.NoError(t, os.WriteFile(evidencePath, []byte("evidence"), 0o600))
 	require.NoError(t, os.Chtimes(evidencePath, now.Add(-age), now.Add(-age)))
 	require.NoError(t, os.Chtimes(filepath.Dir(evidencePath), now.Add(-age), now.Add(-age)))
+}
+
+func TestApplyRetentionIgnoresUnrelatedAgentLogs(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(root, ".build", "agent", "logs", "arj-3539-implementation-test.log")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, make([]byte, 1024), 0o600))
+	require.NoError(t, os.Chtimes(path, now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour)))
+
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 7 * 24 * time.Hour, MaxBytes: 1})
+	require.NoError(t, err)
+	assert.Empty(t, report.Removed)
+	assert.FileExists(t, path)
+}
+
+func TestApplyRetentionProtectsOtherActiveValidationRuns(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	run, err := CreateValidationRun(root, "test", now)
+	require.NoError(t, err)
+	createRetentionJob(t, root, run.ID, 8*24*time.Hour, 100)
+
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 7 * 24 * time.Hour, MaxBytes: 1})
+	require.NoError(t, err)
+	assert.NotContains(t, report.Removed, run.ID)
+	assert.FileExists(t, filepath.Join(root, ".build", "agent", "results", run.ID+".json"))
 }
 
 func writeLease(t *testing.T, root, id string, lease Lease) {
@@ -60,7 +93,14 @@ func TestApplyRetentionEnforcesSizeOldestFirst(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	createRetentionJob(t, root, "oldest", 3*time.Hour, 120)
 	createRetentionJob(t, root, "newest", time.Hour, 120)
-	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 30 * 24 * time.Hour, MaxBytes: 150})
+	jobs, err := scanRetentionJobs(root)
+	require.NoError(t, err)
+	require.Len(t, jobs, 2)
+	maxSingleJob := jobs[0].size
+	if jobs[1].size > maxSingleJob {
+		maxSingleJob = jobs[1].size
+	}
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 30 * 24 * time.Hour, MaxBytes: maxSingleJob})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"oldest"}, report.Removed)
 }

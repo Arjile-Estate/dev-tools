@@ -76,6 +76,7 @@ func TestValidationRunValidatesSourceContainmentAndBounds(t *testing.T) {
 	require.Len(t, sources, 1)
 	assert.Equal(t, "junit/checkout.xml", sources[0].Path)
 	assert.EqualValues(t, 4, sources[0].Size)
+	assert.Equal(t, []byte("safe"), sources[0].Content)
 
 	_, err = run.ValidateSources([]DiagnosticSource{{Kind: "junit", Path: "../foreign.xml"}}, DefaultAdapterLimits())
 	assert.ErrorContains(t, err, "escapes run directory")

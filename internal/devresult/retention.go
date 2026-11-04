@@ -50,6 +50,13 @@ func ApplyRetention(root, currentRunID string, now time.Time, policy RetentionPo
 	if warning != "" {
 		return RetentionReport{Skipped: true, Warning: warning}, nil
 	}
+	active, err := loadActiveRuns(root, now, policy.MaxAge)
+	if err != nil {
+		return RetentionReport{}, err
+	}
+	for runID := range active {
+		protected[runID] = true
+	}
 	if currentRunID != "" {
 		protected[currentRunID] = true
 	}
@@ -186,60 +193,83 @@ type retentionJob struct {
 	modified time.Time
 }
 
-func scanRetentionJobs(root string) ([]retentionJob, error) {
-	jobs := make(map[string]*retentionJob)
-	locations := []struct {
-		directory string
-		extension string
-		dirs      bool
-	}{
-		{directory: filepath.Join(root, ".build", "agent", "results"), extension: ".json"},
-		{directory: filepath.Join(root, ".build", "agent", "logs"), extension: ".log"},
-		{directory: filepath.Join(root, ".build", "agent", "runs"), dirs: true},
-		{directory: filepath.Join(root, ".build", "agent", "evidence"), dirs: true},
+func loadActiveRuns(root string, now time.Time, maxAge time.Duration) (map[string]bool, error) {
+	active := make(map[string]bool)
+	directory := filepath.Join(root, ".build", "agent", "runs")
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return active, nil
 	}
-	for _, location := range locations {
-		entries, err := os.ReadDir(location.directory)
-		if errors.Is(err, os.ErrNotExist) {
+	if err != nil {
+		return nil, fmt.Errorf("scan active validation runs: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !safeJobPattern.MatchString(entry.Name()) {
 			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("scan retention artifacts in %q: %w", location.directory, err)
+		info, statErr := os.Stat(filepath.Join(directory, entry.Name(), activeRunMarker))
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
 		}
-		for _, entry := range entries {
-			if location.dirs != entry.IsDir() {
+		if statErr != nil {
+			return nil, fmt.Errorf("inspect active validation run %q: %w", entry.Name(), statErr)
+		}
+		if age := now.Sub(info.ModTime()); age <= maxAge {
+			active[entry.Name()] = true
+		}
+	}
+	return active, nil
+}
+
+func scanRetentionJobs(root string) ([]retentionJob, error) {
+	resultsDirectory := filepath.Join(root, ".build", "agent", "results")
+	entries, err := os.ReadDir(resultsDirectory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan DEV-RESULT sidecars: %w", err)
+	}
+	jobs := make([]retentionJob, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		id := strings.TrimSuffix(entry.Name(), ".json")
+		if !safeJobPattern.MatchString(id) {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(resultsDirectory, entry.Name()))
+		if readErr != nil {
+			return nil, fmt.Errorf("read DEV-RESULT sidecar %q: %w", id, readErr)
+		}
+		var result Result
+		if json.Unmarshal(data, &result) != nil || result.Schema != SchemaV1 || result.Job != id {
+			continue
+		}
+		job := retentionJob{id: id}
+		paths := []string{
+			filepath.Join(resultsDirectory, entry.Name()),
+			filepath.Join(root, ".build", "agent", "logs", id+".log"),
+			filepath.Join(root, ".build", "agent", "runs", id),
+			filepath.Join(root, ".build", "agent", "evidence", id),
+		}
+		for _, path := range paths {
+			size, modified, statErr := artifactStats(path)
+			if errors.Is(statErr, os.ErrNotExist) {
 				continue
 			}
-			id := entry.Name()
-			if !location.dirs {
-				if filepath.Ext(id) != location.extension {
-					continue
-				}
-				id = strings.TrimSuffix(id, location.extension)
-			}
-			if !safeJobPattern.MatchString(id) {
-				continue
-			}
-			size, modified, err := artifactStats(filepath.Join(location.directory, entry.Name()))
-			if err != nil {
-				return nil, fmt.Errorf("inspect retention artifact for %q: %w", id, err)
-			}
-			job := jobs[id]
-			if job == nil {
-				job = &retentionJob{id: id}
-				jobs[id] = job
+			if statErr != nil {
+				return nil, fmt.Errorf("inspect retention artifact for %q: %w", id, statErr)
 			}
 			job.size += size
 			if modified.After(job.modified) {
 				job.modified = modified
 			}
 		}
+		jobs = append(jobs, job)
 	}
-	result := make([]retentionJob, 0, len(jobs))
-	for _, job := range jobs {
-		result = append(result, *job)
-	}
-	return result, nil
+	return jobs, nil
 }
 
 func artifactStats(path string) (int64, time.Time, error) {

@@ -2,6 +2,7 @@ package devresult
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,21 @@ func TestBuildAndRenderSelectsDistinctActionableEvidenceDeterministically(t *tes
 	assert.LessOrEqual(t, len(strings.Split(strings.TrimSuffix(first, "\n"), "\n")), DefaultBudgets().Failure.Lines)
 }
 
+func TestBuildPreservesDistinctStructuredDiagnosticIdentities(t *testing.T) {
+	response := DiagnosticsResponse{
+		Schema:        DiagnosticsResponseSchemaV1,
+		EvidenceState: EvidenceComplete,
+		Failures: []Diagnostic{
+			{Identity: "checkout/first", Message: "same assertion failed"},
+			{Identity: "checkout/second", Message: "same assertion failed"},
+		},
+	}
+	result, _ := Build(Input{Job: "test-identities", CommandName: "test", ExitCode: 1, Diagnostics: &response}, DefaultBudgets(), nil)
+	require.Len(t, result.Failures, 2)
+	assert.Equal(t, "checkout/first", result.Failures[0].Identity)
+	assert.Equal(t, "checkout/second", result.Failures[1].Identity)
+}
+
 func TestWriteAndLoadArtifactsArePrivateAndComplete(t *testing.T) {
 	root := t.TempDir()
 	result, retained := Build(Input{
@@ -138,6 +154,24 @@ func TestWriteArtifactsRejectsUnsafeJobIdentifier(t *testing.T) {
 	result, retained := Build(Input{Job: "../escape", CommandName: "test"}, DefaultBudgets(), nil)
 	_, err := WriteArtifacts(t.TempDir(), result, retained)
 	require.Error(t, err)
+}
+
+func TestWriteJSONArtifactsCompactsLargeSourceMetadataWithoutDroppingSidecar(t *testing.T) {
+	root := t.TempDir()
+	result, retained := Build(Input{Job: "test-many-sources", CommandName: "test"}, DefaultBudgets(), nil)
+	bundle := EvidenceBundle{AdapterResponse: `{"schema":"dev-tools/diagnostics-response/v1","evidence_state":"complete"}`}
+	for index := range 200 {
+		bundle.Sources = append(bundle.Sources, RetainedSource{Kind: "junit", Path: fmt.Sprintf("junit/suite-%03d.xml", index), Content: "<testsuite/>"})
+	}
+
+	written, err := WriteArtifactsWithEvidenceForFormat(root, result, retained, bundle, DefaultBudgets(), true)
+	require.NoError(t, err)
+	require.Len(t, written.Artifacts.Sources, 200)
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(written.Artifacts.Result)))
+	require.NoError(t, err)
+	var sidecar Result
+	require.NoError(t, json.Unmarshal(data, &sidecar))
+	assert.Len(t, sidecar.Artifacts.Sources, 200)
 }
 
 func TestNewJobIDIsNormalizedAndCollisionSafe(t *testing.T) {

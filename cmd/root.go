@@ -654,14 +654,10 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		return nil, "unsafe structured evidence: " + err.Error(), evidence
 	}
 	for _, source := range validated {
-		data, readErr := os.ReadFile(source.AbsolutePath)
-		if readErr != nil {
-			return nil, "unsafe structured evidence: read source " + source.Path + ": " + readErr.Error(), evidence
-		}
 		evidence.Sources = append(evidence.Sources, devresult.RetainedSource{
 			Kind:    source.Kind,
 			Path:    source.Path,
-			Content: redactRetainedEvidence(string(data)),
+			Content: redactRetainedEvidence(string(source.Content)),
 		})
 	}
 	return adapterResult.Response, "", evidence
