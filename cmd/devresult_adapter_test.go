@@ -146,8 +146,8 @@ func TestARJ3539AdapterHelperProcess(t *testing.T) {
 		encode(value)
 	case "secret":
 		value := response(devresult.EvidenceComplete)
-		value.Failures = []devresult.Diagnostic{{Identity: "checkout/token", Message: "token secret-demo-12345 rejected"}}
-		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "checkout.xml"}}
+		value.Failures = []devresult.Diagnostic{{Identity: "checkout/secret-demo-12345", Message: "token secret-demo-12345 rejected"}}
+		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "secret-demo-12345.xml"}}
 		encode(value)
 	case "traversal":
 		value := response(devresult.EvidenceComplete)
@@ -391,7 +391,7 @@ func TestRunCommandDiagnostics(t *testing.T) {
 	t.Run("R4.E1_redacts_every_retained_artifact", func(t *testing.T) {
 		t.Setenv("ARJ3539_TOKEN", "secret-demo-12345")
 		projectDir := t.TempDir()
-		runner := arj3539EvidenceExecutor(t, "checkout.xml", "<failure token=\"secret-demo-12345\"/>", arj3539Failure("test", 10, "token secret-demo-12345 failed"))
+		runner := arj3539EvidenceExecutor(t, "secret-demo-12345.xml", "<failure token=\"secret-demo-12345\"/>", arj3539Failure("test", 10, "token secret-demo-12345 failed"))
 		arj3539Install(t, arj3539Config(arj3539Adapter("secret"), false), runner)
 		_, err := arj3539RunRoot(projectDir, "test")
 		arj3539RequireExitCode(t, err, 10)

@@ -76,7 +76,7 @@ The version 1 response is:
 
 Default adapter limits are a 2-second runtime, 1 MiB stdout, 64 KiB stderr, 1,000 diagnostic records, 10 MiB per source, and 50 MiB across sources. They may be overridden with `timeout`, `stdout_bytes`, `stderr_bytes`, `max_diagnostics`, `max_source_bytes`, and `max_total_source_bytes` under `diagnostics_adapter`.
 
-Complete evidence replaces rendered-log failures. Partial evidence keeps valid structured diagnostics and surfaces its evidence problems as warnings. Missing, incompatible, malformed, timed-out, cancelled, unsafe, or failed adapters produce a visible warning and use the bounded rendered-log fallback. A failed primary command with no actionable structured failure also falls back. In every case the primary validation outcome and exit code remain authoritative.
+Complete evidence replaces rendered-log failures. Partial evidence keeps valid structured diagnostics and always emits a visible partial-evidence warning, alongside any reported evidence problems. Missing, incompatible, malformed, timed-out, cancelled, unsafe, or failed adapters produce a visible warning and use the bounded rendered-log fallback. A failed primary command with no actionable structured failure also falls back. In every case the primary validation outcome and exit code remain authoritative.
 
 ## Text envelope
 
@@ -134,7 +134,7 @@ Logs and sidecars are written atomically with mode `0600` below `.build/agent/lo
 
 Dev-tools rejects absolute and parent-traversal source paths, non-regular files, and symlinks that resolve outside the current run directory. Adapter output and every accepted source are bounded and redacted before durable persistence. The raw run scratch directory is removed after evidence is processed.
 
-Retention defaults to seven days and 1 GiB. Cleanup removes the oldest unleased jobs beyond either limit and always protects the current job. Active build reports can protect jobs with `.build/agent/leases/<lease-id>.json`:
+Retention defaults to seven days and 1 GiB. Cleanup removes the oldest unleased jobs beyond either limit, protects every live validation process independently of completed-artifact age, and eventually removes scratch/evidence orphaned by a terminated process. Active build reports can protect jobs with `.build/agent/leases/<lease-id>.json`:
 
 ```json
 {

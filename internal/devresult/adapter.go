@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 )
 
 type AdapterOptions struct {
@@ -50,9 +52,20 @@ func ExecuteAdapter(ctx context.Context, options AdapterOptions) AdapterResult {
 	runContext, cancel := context.WithTimeout(ctx, limits.Timeout)
 	defer cancel()
 	command := exec.CommandContext(runContext, options.Argv[0], options.Argv[1:]...)
+	configureAdapterProcess(command)
+	command.WaitDelay = 100 * time.Millisecond
+	command.Cancel = func() error {
+		if command.Process == nil {
+			return os.ErrProcessDone
+		}
+		return killAdapterProcessTree(command.Process)
+	}
 	command.Dir = options.WorkingDir
 	command.Stdin = bytes.NewReader(request)
-	command.Env = append(os.Environ(), RunIDEnvironment+"="+options.Request.RunID, RunDirEnvironment+"="+options.Request.RunDir)
+	command.Env = environmentWithOverrides(os.Environ(), map[string]string{
+		RunIDEnvironment:  options.Request.RunID,
+		RunDirEnvironment: options.Request.RunDir,
+	})
 	stdout := newBoundedBuffer(limits.StdoutBytes)
 	stderr := newBoundedBuffer(limits.StderrBytes)
 	command.Stdout = stdout
@@ -95,6 +108,30 @@ func ExecuteAdapter(ctx context.Context, options AdapterOptions) AdapterResult {
 	}
 	result.Response = &response
 	return result
+}
+
+func environmentWithOverrides(base []string, overrides map[string]string) []string {
+	environment := make([]string, 0, len(base)+len(overrides))
+	for _, item := range base {
+		name, _, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		replaced := false
+		for override := range overrides {
+			if strings.EqualFold(name, override) {
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			environment = append(environment, item)
+		}
+	}
+	for name, value := range overrides {
+		environment = append(environment, name+"="+value)
+	}
+	return environment
 }
 
 func validateDiagnosticsRequest(request DiagnosticsRequest) error {

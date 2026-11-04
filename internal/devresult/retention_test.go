@@ -53,11 +53,38 @@ func TestApplyRetentionProtectsOtherActiveValidationRuns(t *testing.T) {
 	run, err := CreateValidationRun(root, "test", now)
 	require.NoError(t, err)
 	createRetentionJob(t, root, run.ID, 8*24*time.Hour, 100)
+	require.NoError(t, os.Chtimes(filepath.Join(run.Dir, activeRunMarker), now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour)))
 
-	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 7 * 24 * time.Hour, MaxBytes: 1})
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: time.Nanosecond, MaxBytes: 1})
 	require.NoError(t, err)
 	assert.NotContains(t, report.Removed, run.ID)
 	assert.FileExists(t, filepath.Join(root, ".build", "agent", "results", run.ID+".json"))
+}
+
+func TestApplyRetentionRemovesDeadOrphanScratchWithoutTouchingSameNamedLog(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	runID := "test-orphan"
+	runDir := filepath.Join(root, ".build", "agent", "runs", runID)
+	require.NoError(t, os.MkdirAll(runDir, 0o700))
+	marker := []byte(`{"schema":"dev-tools/active-run/v1","pid":2147483647,"created_at":"2026-10-01T12:00:00Z"}`)
+	for path, data := range map[string][]byte{
+		filepath.Join(runDir, activeRunMarker): marker,
+		filepath.Join(runDir, "secret.xml"):    []byte("secret-bearing scratch"),
+	} {
+		require.NoError(t, os.WriteFile(path, data, 0o600))
+		require.NoError(t, os.Chtimes(path, now.Add(-8*24*time.Hour), now.Add(-8*24*time.Hour)))
+	}
+	require.NoError(t, os.Chtimes(runDir, now.Add(-8*24*time.Hour), now.Add(-8*24*time.Hour)))
+	unrelatedLog := filepath.Join(root, ".build", "agent", "logs", runID+".log")
+	require.NoError(t, os.MkdirAll(filepath.Dir(unrelatedLog), 0o700))
+	require.NoError(t, os.WriteFile(unrelatedLog, []byte("build-agent log"), 0o600))
+
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 7 * 24 * time.Hour, MaxBytes: 1 << 30})
+	require.NoError(t, err)
+	assert.Contains(t, report.Removed, runID)
+	assert.NoDirExists(t, runDir)
+	assert.FileExists(t, unrelatedLog)
 }
 
 func writeLease(t *testing.T, root, id string, lease Lease) {

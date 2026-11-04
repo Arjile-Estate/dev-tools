@@ -64,9 +64,10 @@ type AttemptSummary struct {
 }
 
 type Evidence struct {
-	Identity string `json:"identity,omitempty"`
-	Message  string `json:"message"`
-	Source   string `json:"source"`
+	Identity    string `json:"identity,omitempty"`
+	Message     string `json:"message"`
+	Source      string `json:"source"`
+	identityKey string
 }
 
 type Artifacts struct {
@@ -230,17 +231,24 @@ func collectStructuredEvidence(response DiagnosticsResponse, environment []strin
 	for _, diagnostic := range response.Failures {
 		message, count := Redact(formatDiagnostic(diagnostic), environment)
 		matches += count
-		failures = append(failures, Evidence{Identity: diagnostic.Identity, Message: message, Source: "diagnostics-adapter"})
+		identity, identityMatches := Redact(diagnostic.Identity, environment)
+		matches += identityMatches
+		failures = append(failures, Evidence{Identity: identity, Message: message, Source: "diagnostics-adapter", identityKey: diagnostic.Identity})
 	}
 	for _, diagnostic := range response.Warnings {
 		message, count := Redact(formatDiagnostic(diagnostic), environment)
 		matches += count
-		warnings = append(warnings, Evidence{Identity: diagnostic.Identity, Message: message, Source: "diagnostics-adapter"})
+		identity, identityMatches := Redact(diagnostic.Identity, environment)
+		matches += identityMatches
+		warnings = append(warnings, Evidence{Identity: identity, Message: message, Source: "diagnostics-adapter", identityKey: diagnostic.Identity})
 	}
 	for _, problem := range response.Problems {
 		message, count := Redact(problem.Message, environment)
 		matches += count
 		warnings = append(warnings, Evidence{Message: message, Source: "diagnostics-adapter"})
+	}
+	if response.EvidenceState == EvidencePartial && len(response.Problems) == 0 {
+		warnings = append(warnings, Evidence{Message: "Structured diagnostics evidence is partial.", Source: "diagnostics-adapter"})
 	}
 	return failures, warnings, matches
 }
@@ -261,7 +269,9 @@ func deduplicateEvidence(items []Evidence) []Evidence {
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		key := strings.ToLower(strings.TrimSpace(item.Message))
-		if identity := strings.TrimSpace(item.Identity); identity != "" {
+		if identity := strings.TrimSpace(item.identityKey); identity != "" {
+			key = "identity:" + strings.ToLower(identity)
+		} else if identity := strings.TrimSpace(item.Identity); identity != "" {
 			key = "identity:" + strings.ToLower(identity)
 		}
 		if key == "" {

@@ -653,10 +653,10 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 	if err != nil {
 		return nil, "unsafe structured evidence: " + err.Error(), evidence
 	}
-	for _, source := range validated {
+	for index, source := range validated {
 		evidence.Sources = append(evidence.Sources, devresult.RetainedSource{
 			Kind:    source.Kind,
-			Path:    source.Path,
+			Path:    retainedSourcePath(source.Path, index),
 			Content: redactRetainedEvidence(string(source.Content)),
 		})
 	}
@@ -666,6 +666,14 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 func redactRetainedEvidence(value string) string {
 	redacted, _ := devresult.Redact(value, os.Environ())
 	return redacted
+}
+
+func retainedSourcePath(path string, index int) string {
+	redacted := redactRetainedEvidence(path)
+	if redacted == path {
+		return path
+	}
+	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted))))
 }
 
 func diagnosticsAdapterWarning(result devresult.AdapterResult) string {

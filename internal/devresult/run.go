@@ -1,6 +1,7 @@
 package devresult
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,7 +16,14 @@ const (
 	RunIDEnvironment  = "DEV_TOOLS_RUN_ID"
 	RunDirEnvironment = "DEV_TOOLS_RUN_DIR"
 	activeRunMarker   = ".active"
+	activeRunSchemaV1 = "dev-tools/active-run/v1"
 )
+
+type activeRunRecord struct {
+	Schema    string    `json:"schema"`
+	PID       int       `json:"pid"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 type ValidationRun struct {
 	ID  string
@@ -47,7 +55,12 @@ func CreateValidationRun(root, command string, now time.Time) (ValidationRun, er
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return ValidationRun{}, fmt.Errorf("secure validation run: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, activeRunMarker), []byte(now.UTC().Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
+	marker, err := json.Marshal(activeRunRecord{Schema: activeRunSchemaV1, PID: os.Getpid(), CreatedAt: now.UTC()})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return ValidationRun{}, fmt.Errorf("encode active validation marker: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, activeRunMarker), append(marker, '\n'), 0o600); err != nil {
 		_ = os.RemoveAll(dir)
 		return ValidationRun{}, fmt.Errorf("mark validation run active: %w", err)
 	}

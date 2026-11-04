@@ -50,7 +50,7 @@ func ApplyRetention(root, currentRunID string, now time.Time, policy RetentionPo
 	if warning != "" {
 		return RetentionReport{Skipped: true, Warning: warning}, nil
 	}
-	active, err := loadActiveRuns(root, now, policy.MaxAge)
+	active, err := loadActiveRuns(root)
 	if err != nil {
 		return RetentionReport{}, err
 	}
@@ -79,7 +79,7 @@ func ApplyRetention(root, currentRunID string, now time.Time, policy RetentionPo
 	removed := make(map[string]bool)
 	report := RetentionReport{}
 	remove := func(job retentionJob) error {
-		if err := removeRetentionJob(root, job.id); err != nil {
+		if err := removeRetentionJob(root, job); err != nil {
 			return err
 		}
 		removed[job.id] = true
@@ -191,9 +191,10 @@ type retentionJob struct {
 	id       string
 	size     int64
 	modified time.Time
+	verified bool
 }
 
-func loadActiveRuns(root string, now time.Time, maxAge time.Duration) (map[string]bool, error) {
+func loadActiveRuns(root string) (map[string]bool, error) {
 	active := make(map[string]bool)
 	directory := filepath.Join(root, ".build", "agent", "runs")
 	entries, err := os.ReadDir(directory)
@@ -207,14 +208,18 @@ func loadActiveRuns(root string, now time.Time, maxAge time.Duration) (map[strin
 		if !entry.IsDir() || !safeJobPattern.MatchString(entry.Name()) {
 			continue
 		}
-		info, statErr := os.Stat(filepath.Join(directory, entry.Name(), activeRunMarker))
-		if errors.Is(statErr, os.ErrNotExist) {
+		data, readErr := os.ReadFile(filepath.Join(directory, entry.Name(), activeRunMarker))
+		if errors.Is(readErr, os.ErrNotExist) {
 			continue
 		}
-		if statErr != nil {
-			return nil, fmt.Errorf("inspect active validation run %q: %w", entry.Name(), statErr)
+		if readErr != nil {
+			return nil, fmt.Errorf("read active validation run %q: %w", entry.Name(), readErr)
 		}
-		if age := now.Sub(info.ModTime()); age <= maxAge {
+		var record activeRunRecord
+		if err := json.Unmarshal(data, &record); err != nil || record.Schema != activeRunSchemaV1 || record.PID <= 0 || record.CreatedAt.IsZero() {
+			return nil, fmt.Errorf("invalid active validation marker for %q", entry.Name())
+		}
+		if processAlive(record.PID) {
 			active[entry.Name()] = true
 		}
 	}
@@ -225,12 +230,14 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 	resultsDirectory := filepath.Join(root, ".build", "agent", "results")
 	entries, err := os.ReadDir(resultsDirectory)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		entries = nil
+		err = nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan DEV-RESULT sidecars: %w", err)
 	}
 	jobs := make([]retentionJob, 0, len(entries))
+	verified := make(map[string]bool)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -247,7 +254,8 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 		if json.Unmarshal(data, &result) != nil || result.Schema != SchemaV1 || result.Job != id {
 			continue
 		}
-		job := retentionJob{id: id}
+		job := retentionJob{id: id, verified: true}
+		verified[id] = true
 		paths := []string{
 			filepath.Join(resultsDirectory, entry.Name()),
 			filepath.Join(root, ".build", "agent", "logs", id+".log"),
@@ -268,6 +276,38 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 			}
 		}
 		jobs = append(jobs, job)
+	}
+	orphans := make(map[string]*retentionJob)
+	for _, directory := range []string{filepath.Join(root, ".build", "agent", "runs"), filepath.Join(root, ".build", "agent", "evidence")} {
+		entries, readErr := os.ReadDir(directory)
+		if errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("scan orphan DEV-RESULT artifacts: %w", readErr)
+		}
+		for _, entry := range entries {
+			id := entry.Name()
+			if !entry.IsDir() || verified[id] || !safeJobPattern.MatchString(id) {
+				continue
+			}
+			size, modified, statErr := artifactStats(filepath.Join(directory, id))
+			if statErr != nil {
+				return nil, fmt.Errorf("inspect orphan DEV-RESULT artifact %q: %w", id, statErr)
+			}
+			job := orphans[id]
+			if job == nil {
+				job = &retentionJob{id: id}
+				orphans[id] = job
+			}
+			job.size += size
+			if modified.After(job.modified) {
+				job.modified = modified
+			}
+		}
+	}
+	for _, job := range orphans {
+		jobs = append(jobs, *job)
 	}
 	return jobs, nil
 }
@@ -294,18 +334,23 @@ func artifactStats(path string) (int64, time.Time, error) {
 	return size, modified, err
 }
 
-func removeRetentionJob(root, runID string) error {
-	if !safeJobPattern.MatchString(runID) {
-		return fmt.Errorf("refuse to remove unsafe run id %q", runID)
+func removeRetentionJob(root string, job retentionJob) error {
+	if !safeJobPattern.MatchString(job.id) {
+		return fmt.Errorf("refuse to remove unsafe run id %q", job.id)
 	}
-	paths := []struct {
+	type retentionTarget struct {
 		path      string
 		recursive bool
-	}{
-		{path: filepath.Join(root, ".build", "agent", "results", runID+".json")},
-		{path: filepath.Join(root, ".build", "agent", "logs", runID+".log")},
-		{path: filepath.Join(root, ".build", "agent", "runs", runID), recursive: true},
-		{path: filepath.Join(root, ".build", "agent", "evidence", runID), recursive: true},
+	}
+	paths := []retentionTarget{
+		{path: filepath.Join(root, ".build", "agent", "runs", job.id), recursive: true},
+		{path: filepath.Join(root, ".build", "agent", "evidence", job.id), recursive: true},
+	}
+	if job.verified {
+		paths = append(paths,
+			retentionTarget{path: filepath.Join(root, ".build", "agent", "results", job.id+".json")},
+			retentionTarget{path: filepath.Join(root, ".build", "agent", "logs", job.id+".log")},
+		)
 	}
 	for _, target := range paths {
 		var err error

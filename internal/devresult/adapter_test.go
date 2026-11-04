@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +41,17 @@ func TestAdapterHelperProcess(t *testing.T) {
 			Schema: DiagnosticsResponseSchemaV1, EvidenceState: EvidenceComplete,
 			Warnings: []Diagnostic{{Identity: "working-directory", Message: workingDirectory}},
 		})
+	case "environment-count":
+		count := 0
+		for _, item := range os.Environ() {
+			if strings.HasPrefix(item, RunIDEnvironment+"=") || strings.HasPrefix(item, RunDirEnvironment+"=") {
+				count++
+			}
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(DiagnosticsResponse{
+			Schema: DiagnosticsResponseSchemaV1, EvidenceState: EvidenceComplete,
+			Warnings: []Diagnostic{{Identity: "environment-count", Message: fmt.Sprintf("%d", count)}},
+		})
 	case "partial":
 		_ = json.NewEncoder(os.Stdout).Encode(DiagnosticsResponse{
 			Schema: DiagnosticsResponseSchemaV1, EvidenceState: EvidencePartial,
@@ -56,7 +69,24 @@ func TestAdapterHelperProcess(t *testing.T) {
 		_ = json.NewEncoder(os.Stdout).Encode(DiagnosticsResponse{Schema: "dev-tools/diagnostics-response/v2", EvidenceState: EvidenceComplete})
 	case "sleep":
 		time.Sleep(3 * time.Second)
+	case "descendant":
+		marker := args[len(args)-2]
+		child := exec.Command(os.Args[0], "-test.run=^TestAdapterDescendantHolderProcess$", "--", marker)
+		child.Env = append(os.Environ(), "DEV_RESULT_DESCENDANT_HELPER=1")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		_ = child.Start()
+		time.Sleep(3 * time.Second)
 	}
+	os.Exit(0)
+}
+
+func TestAdapterDescendantHolderProcess(t *testing.T) {
+	if os.Getenv("DEV_RESULT_DESCENDANT_HELPER") != "1" {
+		return
+	}
+	time.Sleep(500 * time.Millisecond)
+	_ = os.WriteFile(os.Args[len(os.Args)-1], []byte("survived"), 0o600)
 	os.Exit(0)
 }
 
@@ -96,6 +126,25 @@ func TestExecuteAdapterUsesConfiguredWorkingDirectory(t *testing.T) {
 	})
 	require.NoError(t, result.Err)
 	assert.Equal(t, workingDirectory, result.Response.Warnings[0].Message)
+}
+
+func TestExecuteAdapterReplacesRunEnvironmentAndKillsDescendants(t *testing.T) {
+	t.Setenv("DEV_RESULT_ADAPTER_HELPER", "1")
+	t.Setenv(RunIDEnvironment, "outer-run")
+	t.Setenv(RunDirEnvironment, "/outer/run")
+	result := ExecuteAdapter(context.Background(), AdapterOptions{Argv: helperAdapter("environment-count"), Request: testRequest(), Limits: DefaultAdapterLimits()})
+	require.NoError(t, result.Err)
+	assert.Equal(t, "2", result.Response.Warnings[0].Message)
+
+	marker := filepath.Join(t.TempDir(), "descendant-survived")
+	limits := DefaultAdapterLimits()
+	limits.Timeout = 50 * time.Millisecond
+	started := time.Now()
+	result = ExecuteAdapter(context.Background(), AdapterOptions{Argv: helperAdapter("descendant", marker), Request: testRequest(), Limits: limits})
+	assert.True(t, result.TimedOut)
+	assert.Less(t, time.Since(started), time.Second)
+	time.Sleep(600 * time.Millisecond)
+	assert.NoFileExists(t, marker)
 }
 
 func TestExecuteAdapterBoundsTimeoutCancellationAndInvalidResponses(t *testing.T) {

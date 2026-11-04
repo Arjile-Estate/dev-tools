@@ -1,4 +1,4 @@
-//go:build linux
+//go:build !windows
 
 package devresult
 
@@ -7,22 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func openContainedSource(root, relative string) (*os.File, error) {
-	current, err := syscall.Open(root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	current, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	parts := strings.Split(filepath.Clean(relative), string(filepath.Separator))
 	for index, part := range parts {
-		flags := syscall.O_RDONLY | syscall.O_CLOEXEC | syscall.O_NOFOLLOW
+		flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 		if index < len(parts)-1 {
-			flags |= syscall.O_DIRECTORY
+			flags |= unix.O_DIRECTORY
 		}
-		next, openErr := syscall.Openat(current, part, flags, 0)
-		_ = syscall.Close(current)
+		next, openErr := unix.Openat(current, part, flags, 0)
+		_ = unix.Close(current)
 		if openErr != nil {
 			return nil, openErr
 		}
@@ -30,7 +31,7 @@ func openContainedSource(root, relative string) (*os.File, error) {
 	}
 	file := os.NewFile(uintptr(current), fmt.Sprintf("%s/%s", root, relative))
 	if file == nil {
-		_ = syscall.Close(current)
+		_ = unix.Close(current)
 		return nil, fmt.Errorf("create source file handle")
 	}
 	return file, nil

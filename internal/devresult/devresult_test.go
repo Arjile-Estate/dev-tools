@@ -115,6 +115,37 @@ func TestBuildPreservesDistinctStructuredDiagnosticIdentities(t *testing.T) {
 	assert.Equal(t, "checkout/second", result.Failures[1].Identity)
 }
 
+func TestBuildMarksPartialEvidenceWithoutProblems(t *testing.T) {
+	response := DiagnosticsResponse{
+		Schema:        DiagnosticsResponseSchemaV1,
+		EvidenceState: EvidencePartial,
+		Failures:      []Diagnostic{{Identity: "checkout/partial", Message: "checkout failed"}},
+	}
+	result, _ := Build(Input{Job: "test-partial", CommandName: "test", ExitCode: 1, Diagnostics: &response}, DefaultBudgets(), nil)
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, strings.ToLower(result.Warnings[0].Message), "partial")
+}
+
+func TestBuildRedactsDistinctStructuredIdentitiesWithoutCollapsingThem(t *testing.T) {
+	response := DiagnosticsResponse{
+		Schema:        DiagnosticsResponseSchemaV1,
+		EvidenceState: EvidenceComplete,
+		Failures: []Diagnostic{
+			{Identity: "checkout/alpha-secret", Message: "same failure"},
+			{Identity: "checkout/beta-secret", Message: "same failure"},
+		},
+	}
+	result, _ := Build(Input{Job: "test-redacted-identities", CommandName: "test", ExitCode: 1, Diagnostics: &response}, DefaultBudgets(), []string{
+		"FIRST_SECRET=alpha-secret",
+		"SECOND_SECRET=beta-secret",
+	})
+	require.Len(t, result.Failures, 2)
+	for _, failure := range result.Failures {
+		assert.NotContains(t, failure.Identity, "secret")
+		assert.Contains(t, failure.Identity, RedactionMarker)
+	}
+}
+
 func TestWriteAndLoadArtifactsArePrivateAndComplete(t *testing.T) {
 	root := t.TempDir()
 	result, retained := Build(Input{
