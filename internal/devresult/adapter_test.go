@@ -125,7 +125,11 @@ func TestExecuteAdapterUsesConfiguredWorkingDirectory(t *testing.T) {
 		Limits:     DefaultAdapterLimits(),
 	})
 	require.NoError(t, result.Err)
-	assert.Equal(t, workingDirectory, result.Response.Warnings[0].Message)
+	expectedDirectory, err := os.Stat(workingDirectory)
+	require.NoError(t, err)
+	actualDirectory, err := os.Stat(result.Response.Warnings[0].Message)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(expectedDirectory, actualDirectory))
 }
 
 func TestExecuteAdapterReplacesRunEnvironmentAndKillsDescendants(t *testing.T) {
