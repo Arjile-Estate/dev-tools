@@ -441,13 +441,29 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute command (non-watch mode)
+	resultConfig, resultEnabled := devResultCommandConfig(cfg, commandName, steps, cmdCfg.Watch)
 	execOpts := executor.CommandExecutionOptions{
 		Context:         cmd.Context(),
 		CommandName:     commandName,
 		Steps:           steps,
 		WorkingDir:      cmdCfg.ProjectDir,
 		PassthroughArgs: parsedArgs.PassthroughArgs,
-		CaptureOutput:   devResultEnabled(cfg, commandName, steps, cmdCfg.Watch),
+		CaptureOutput:   resultEnabled,
+	}
+	var validationRun devresult.ValidationRun
+	var resultWarnings []string
+	if resultEnabled {
+		validationRun, err = devresult.CreateValidationRun(cmdCfg.ProjectDir, commandName, time.Now())
+		if err != nil {
+			resultWarnings = append(resultWarnings, "run-scoped diagnostics are unavailable: "+err.Error())
+		} else {
+			execOpts.Environment = validationRun.Environment()
+			defer func() {
+				if cleanupErr := os.RemoveAll(validationRun.Dir); cleanupErr != nil {
+					logger.Warnf("could not remove validation scratch directory %q: %v", validationRun.Dir, cleanupErr)
+				}
+			}()
+		}
 	}
 
 	var result executor.ExecutionResult
@@ -457,25 +473,47 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		result = executor.ExecuteCommandWithOptions(execOpts)
 	}
 
-	resultConfig, resultEnabled := devResultCommandConfig(cfg, commandName, steps, cmdCfg.Watch)
 	if resultEnabled {
+		diagnostics, adapterWarning, retainedEvidence := collectDiagnostics(cmd.Context(), cmdCfg.ProjectDir, commandName, result, resultConfig.DiagnosticsAdapter, validationRun)
+		if adapterWarning != "" {
+			resultWarnings = append(resultWarnings, adapterWarning)
+		}
+		if cfg.DevResult != nil && validationRun.ID != "" {
+			retention, retentionErr := devresult.ApplyRetention(cmdCfg.ProjectDir, validationRun.ID, time.Now(), devresult.RetentionPolicy{
+				MaxAge:   cfg.DevResult.Retention.MaxAge,
+				MaxBytes: cfg.DevResult.Retention.MaxBytes,
+			})
+			if retentionErr != nil {
+				resultWarnings = append(resultWarnings, "DEV-RESULT retention unavailable: "+retentionErr.Error())
+			} else if retention.Warning != "" {
+				resultWarnings = append(resultWarnings, "DEV-RESULT retention warning: "+retention.Warning)
+			}
+		}
 		budgets := devResultBudgets(resultConfig)
+		job := validationRun.ID
+		if job == "" {
+			job = devresult.NewJobID(commandName, time.Now())
+		}
+		warnings := append([]string(nil), result.Warnings...)
+		warnings = append(warnings, resultWarnings...)
 		model, retained := devresult.Build(devresult.Input{
-			Job:               devresult.NewJobID(commandName, time.Now()),
-			CommandName:       commandName,
-			NormalizedCommand: devresult.NormalizeCommand(commandName, parsedArgs.PassthroughArgs),
-			ExitCode:          result.ReturnCode,
-			Duration:          time.Duration(result.DurationMs) * time.Millisecond,
-			Attempts:          result.Attempts,
-			Stdout:            result.Stdout,
-			Stderr:            result.Stderr,
-			Warnings:          result.Warnings,
-			TimedOut:          result.TimedOut,
-			Cancelled:         result.Cancelled,
+			Job:                        job,
+			CommandName:                commandName,
+			NormalizedCommand:          devresult.NormalizeCommand(commandName, parsedArgs.PassthroughArgs),
+			ExitCode:                   result.ReturnCode,
+			Duration:                   time.Duration(result.DurationMs) * time.Millisecond,
+			Attempts:                   result.Attempts,
+			Stdout:                     result.Stdout,
+			Stderr:                     result.Stderr,
+			Warnings:                   warnings,
+			TimedOut:                   result.TimedOut,
+			Cancelled:                  result.Cancelled,
+			Diagnostics:                diagnostics,
+			AdditionalRedactionMatches: retainedEvidence.RedactionMatches,
 		}, budgets, os.Environ())
 		compactMetadata := devresult.Compact(model, budgets)
 		model.Truncation = compactMetadata.Truncation
-		written, writeErr := devresult.WriteArtifactsForFormat(cmdCfg.ProjectDir, model, retained, budgets, cmdCfg.Format == "json")
+		written, writeErr := devresult.WriteArtifactsWithEvidenceForFormat(cmdCfg.ProjectDir, model, retained, retainedEvidence, budgets, cmdCfg.Format == "json")
 		if writeErr != nil {
 			logger.Warnf("DEV-RESULT artifacts unavailable: %v", writeErr)
 			written = devresult.WithArtifactWarning(model, writeErr)
@@ -549,11 +587,6 @@ func devResultCommandConfig(cfg *config.Config, commandName string, steps []conf
 	return commandConfig, true
 }
 
-func devResultEnabled(cfg *config.Config, commandName string, steps []config.CommandStep, watch bool) bool {
-	_, enabled := devResultCommandConfig(cfg, commandName, steps, watch)
-	return enabled
-}
-
 func devResultBudgets(commandConfig config.DevResultCommandConfig) devresult.Budgets {
 	budgets := devresult.DefaultBudgets()
 	applyBudget := func(target *devresult.Budget, override config.ResultBudgetConfig) {
@@ -569,6 +602,116 @@ func devResultBudgets(commandConfig config.DevResultCommandConfig) devresult.Bud
 	applyBudget(&budgets.Timeout, commandConfig.Timeout)
 	applyBudget(&budgets.Background, commandConfig.Background)
 	return budgets
+}
+
+func collectDiagnostics(ctx context.Context, projectDir, commandName string, execution executor.ExecutionResult, adapter *config.DiagnosticsAdapterConfig, run devresult.ValidationRun) (*devresult.DiagnosticsResponse, string, devresult.EvidenceBundle) {
+	if adapter == nil || run.ID == "" || run.Dir == "" {
+		return nil, "", devresult.EvidenceBundle{}
+	}
+	fresh, err := run.HasFreshEvidence(adapter.StartWhen)
+	if err != nil {
+		return nil, "structured diagnostics are unavailable: " + err.Error(), devresult.EvidenceBundle{}
+	}
+	if !fresh {
+		return nil, "", devresult.EvidenceBundle{}
+	}
+
+	limits := devresult.Limits{
+		Timeout:          adapter.Timeout,
+		StdoutBytes:      adapter.StdoutBytes,
+		StderrBytes:      adapter.StderrBytes,
+		MaxDiagnostics:   adapter.MaxDiagnostics,
+		PerSourceBytes:   adapter.MaxSourceBytes,
+		TotalSourceBytes: adapter.MaxTotalSourceBytes,
+	}
+	adapterResult := devresult.ExecuteAdapter(ctx, devresult.AdapterOptions{
+		Argv:       adapter.Command,
+		WorkingDir: projectDir,
+		Request: devresult.DiagnosticsRequest{
+			Schema:     devresult.DiagnosticsRequestSchemaV1,
+			RunID:      run.ID,
+			RunDir:     run.Dir,
+			Command:    commandName,
+			ExitCode:   execution.ReturnCode,
+			DurationMS: execution.DurationMs,
+			TimedOut:   execution.TimedOut,
+			Cancelled:  execution.Cancelled,
+		},
+		Limits: limits,
+	})
+	adapterResponse := ""
+	adapterResponseMatches := 0
+	if adapterResult.Response != nil {
+		redactedResponse, matches := devresult.RedactDiagnosticsResponse(*adapterResult.Response, os.Environ())
+		if encodedResponse, encodeErr := json.Marshal(redactedResponse); encodeErr == nil {
+			adapterResponse = string(encodedResponse)
+			adapterResponseMatches = matches
+		}
+	}
+	adapterStderr, adapterStderrMatches := redactRetainedEvidence(string(adapterResult.Stderr))
+	evidence := devresult.EvidenceBundle{
+		AdapterResponse:  adapterResponse,
+		AdapterStderr:    adapterStderr,
+		RedactionMatches: adapterResponseMatches + adapterStderrMatches,
+	}
+	if adapterResult.Err != nil {
+		return nil, diagnosticsAdapterWarning(adapterResult), evidence
+	}
+	if adapterResult.Response == nil {
+		return nil, "structured diagnostics are unavailable: adapter returned no response", evidence
+	}
+
+	validated, err := run.ValidateSources(adapterResult.Response.Sources, limits)
+	if err != nil {
+		return nil, "unsafe structured evidence: " + err.Error(), evidence
+	}
+	for index, source := range validated {
+		path, pathMatches := retainedSourcePath(source.Path, index)
+		content, contentMatches := redactRetainedEvidence(string(source.Content))
+		evidence.Sources = append(evidence.Sources, devresult.RetainedSource{
+			Kind:    source.Kind,
+			Path:    path,
+			Content: content,
+		})
+		evidence.RedactionMatches += pathMatches + contentMatches
+	}
+	return adapterResult.Response, "", evidence
+}
+
+func redactRetainedEvidence(value string) (string, int) {
+	return devresult.Redact(value, os.Environ())
+}
+
+func retainedSourcePath(path string, index int) (string, int) {
+	redacted, matches := redactRetainedEvidence(path)
+	if redacted == path {
+		return path, matches
+	}
+	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted)))), matches
+}
+
+func diagnosticsAdapterWarning(result devresult.AdapterResult) string {
+	if result.TimedOut {
+		return "structured diagnostics are unavailable: adapter timeout"
+	}
+	if result.Cancelled {
+		return "structured diagnostics are unavailable: adapter cancelled"
+	}
+	message := result.Err.Error()
+	if strings.Contains(message, "unsupported diagnostics response schema") {
+		received := "unknown"
+		if index := strings.LastIndex(message, "/v"); index >= 0 {
+			received = strings.Trim(message[index+2:], "\"' ")
+		}
+		return fmt.Sprintf("structured diagnostics are unavailable: expected version 1, received version %s", received)
+	}
+	if strings.Contains(message, "decode diagnostics adapter response") || strings.Contains(message, "trailing diagnostics adapter output") || strings.Contains(message, "more than one JSON response") {
+		return "structured diagnostics are unavailable: malformed adapter response: " + message
+	}
+	if strings.Contains(message, "diagnostic source") {
+		return "unsafe structured evidence: " + message
+	}
+	return "structured diagnostics are unavailable: " + message
 }
 
 // SetConfigLoader sets the config loader for the root command.

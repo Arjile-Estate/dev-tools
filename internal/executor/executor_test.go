@@ -855,6 +855,58 @@ func TestRetryDelayStopsWhenContextIsCancelled(t *testing.T) {
 	assert.True(t, result.Cancelled)
 }
 
+func TestInvocationEnvironmentIsMergedForDirectAndShellExecution(t *testing.T) {
+	t.Setenv("DEV_TOOLS_ENV_BASE", "from-process")
+	t.Setenv("DEV_TOOLS_ENV_OVERRIDE", "process-value")
+
+	direct := ExecuteCommandDirect(context.Background(), DirectExecuteOptions{
+		Command:       "sh",
+		Args:          []string{"-c", `printf '%s|%s' "$DEV_TOOLS_ENV_BASE" "$DEV_TOOLS_ENV_OVERRIDE"`},
+		CaptureOutput: true,
+		Environment:   map[string]string{"DEV_TOOLS_ENV_OVERRIDE": "direct-value"},
+	})
+	require.True(t, direct.Success)
+	assert.Equal(t, "from-process|direct-value", direct.Stdout)
+
+	shell := ExecuteShellCommand(context.Background(), ExecuteOptions{
+		Command:       `printf '%s|%s' "$DEV_TOOLS_ENV_BASE" "$DEV_TOOLS_ENV_OVERRIDE"`,
+		CaptureOutput: true,
+		Environment:   map[string]string{"DEV_TOOLS_ENV_OVERRIDE": "shell-value"},
+	})
+	require.True(t, shell.Success)
+	assert.Equal(t, "from-process|shell-value", shell.Stdout)
+	assert.Equal(t, "process-value", os.Getenv("DEV_TOOLS_ENV_OVERRIDE"))
+}
+
+func TestCommandExecutionEnvironmentIsIsolatedAndPreservedAcrossRetries(t *testing.T) {
+	t.Setenv("DEV_TOOLS_RUN_ID", "process-run")
+	workingDir := t.TempDir()
+
+	first := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:   "test",
+		WorkingDir:    workingDir,
+		CaptureOutput: true,
+		Environment:   map[string]string{"DEV_TOOLS_RUN_ID": "invocation-run"},
+		Steps: []config.CommandStep{{
+			Run:        config.RunCommand{`printf '%s\n' "$DEV_TOOLS_RUN_ID"; if [ ! -f attempted ]; then touch attempted; exit 42; fi`},
+			Retry:      1,
+			RetryDelay: "1ms",
+		}},
+	})
+	require.True(t, first.Success)
+	assert.Equal(t, 2, first.Attempts)
+	assert.Equal(t, "invocation-run\ninvocation-run\n", first.Stdout)
+	assert.Equal(t, "process-run", os.Getenv("DEV_TOOLS_RUN_ID"))
+
+	second := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:   "test",
+		CaptureOutput: true,
+		Steps:         []config.CommandStep{{Run: config.RunCommand{`printf '%s' "$DEV_TOOLS_RUN_ID"`}}},
+	})
+	require.True(t, second.Success)
+	assert.Equal(t, "process-run", second.Stdout)
+}
+
 func TestLoadEnvironmentVariables(t *testing.T) {
 	tests := []struct {
 		name        string

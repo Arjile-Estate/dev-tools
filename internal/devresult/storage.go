@@ -11,16 +11,33 @@ import (
 
 var safeJobPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]*$`)
 
+type RetainedSource struct {
+	Kind    string
+	Path    string
+	Content string
+}
+
+type EvidenceBundle struct {
+	AdapterResponse  string
+	AdapterStderr    string
+	Sources          []RetainedSource
+	RedactionMatches int
+}
+
 func WriteArtifacts(root string, result Result, retainedLog string) (Result, error) {
 	budgets := budgetsFromResult(result)
-	return writeArtifacts(root, result, retainedLog, budgets, false)
+	return writeArtifacts(root, result, retainedLog, budgets, false, EvidenceBundle{})
 }
 
 func WriteArtifactsForFormat(root string, result Result, retainedLog string, budgets Budgets, jsonFormat bool) (Result, error) {
-	return writeArtifacts(root, result, retainedLog, budgets, jsonFormat)
+	return writeArtifacts(root, result, retainedLog, budgets, jsonFormat, EvidenceBundle{})
 }
 
-func writeArtifacts(root string, result Result, retainedLog string, budgets Budgets, jsonFormat bool) (Result, error) {
+func WriteArtifactsWithEvidenceForFormat(root string, result Result, retainedLog string, evidence EvidenceBundle, budgets Budgets, jsonFormat bool) (Result, error) {
+	return writeArtifacts(root, result, retainedLog, budgets, jsonFormat, evidence)
+}
+
+func writeArtifacts(root string, result Result, retainedLog string, budgets Budgets, jsonFormat bool, evidence EvidenceBundle) (Result, error) {
 	if !safeJobPattern.MatchString(result.Job) {
 		return Result{}, fmt.Errorf("invalid DEV-RESULT job identifier %q", result.Job)
 	}
@@ -32,6 +49,19 @@ func writeArtifacts(root string, result Result, retainedLog string, budgets Budg
 	defer release()
 	result.Job = reservedJob
 	result.Artifacts = artifactPaths(result.Job)
+	if evidence.AdapterResponse != "" {
+		result.Artifacts.AdapterResponse = evidenceArtifactPath(result.Job, "adapter-response.json")
+	}
+	if evidence.AdapterStderr != "" {
+		result.Artifacts.AdapterStderr = evidenceArtifactPath(result.Job, "adapter-stderr.log")
+	}
+	for _, source := range evidence.Sources {
+		relative, cleanErr := cleanRelativeSourcePath(source.Path)
+		if cleanErr != nil {
+			return Result{}, cleanErr
+		}
+		result.Artifacts.Sources = append(result.Artifacts.Sources, evidenceArtifactPath(result.Job, filepath.ToSlash(filepath.Join("sources", relative))))
+	}
 	result.DrillDown = drillDown(result)
 	if jsonFormat {
 		compactJSON, compactErr := MarshalCompactJSON(result, budgets)
@@ -52,6 +82,31 @@ func writeArtifacts(root string, result Result, retainedLog string, budgets Budg
 
 	logPath := filepath.Join(root, filepath.FromSlash(result.Artifacts.Log))
 	resultPath := filepath.Join(root, filepath.FromSlash(result.Artifacts.Result))
+	evidenceDir := filepath.Join(root, ".build", "agent", "evidence", result.Job)
+	cleanupEvidence := false
+	defer func() {
+		if cleanupEvidence {
+			_ = os.RemoveAll(evidenceDir)
+		}
+	}()
+	if evidence.AdapterResponse != "" {
+		if err := atomicWrite(filepath.Join(root, filepath.FromSlash(result.Artifacts.AdapterResponse)), []byte(evidence.AdapterResponse), 0o600); err != nil {
+			return Result{}, fmt.Errorf("write diagnostics adapter response: %w", err)
+		}
+		cleanupEvidence = true
+	}
+	if evidence.AdapterStderr != "" {
+		if err := atomicWrite(filepath.Join(root, filepath.FromSlash(result.Artifacts.AdapterStderr)), []byte(evidence.AdapterStderr), 0o600); err != nil {
+			return Result{}, fmt.Errorf("write diagnostics adapter stderr: %w", err)
+		}
+		cleanupEvidence = true
+	}
+	for index, source := range evidence.Sources {
+		if err := atomicWrite(filepath.Join(root, filepath.FromSlash(result.Artifacts.Sources[index])), []byte(source.Content), 0o600); err != nil {
+			return Result{}, fmt.Errorf("write diagnostic source %q: %w", source.Path, err)
+		}
+		cleanupEvidence = true
+	}
 	if err := atomicWrite(logPath, []byte(retainedLog), 0o600); err != nil {
 		return Result{}, fmt.Errorf("write DEV-RESULT log: %w", err)
 	}
@@ -64,7 +119,12 @@ func writeArtifacts(root string, result Result, retainedLog string, budgets Budg
 		_ = os.Remove(logPath)
 		return Result{}, fmt.Errorf("write DEV-RESULT sidecar: %w", err)
 	}
+	cleanupEvidence = false
 	return result, nil
+}
+
+func evidenceArtifactPath(job, relative string) string {
+	return filepath.ToSlash(filepath.Join(".build", "agent", "evidence", job, filepath.FromSlash(relative)))
 }
 
 func budgetsFromResult(result Result) Budgets {
@@ -104,7 +164,44 @@ func LoadArtifacts(root, job string) (Result, string, error) {
 	if err != nil {
 		return Result{}, "", fmt.Errorf("read DEV-RESULT log: %w", err)
 	}
-	return result, string(logData), nil
+	retained := string(logData)
+	appendArtifact := func(title, relative string) error {
+		if relative == "" {
+			return nil
+		}
+		data, readErr := readEvidenceArtifact(root, job, relative)
+		if readErr != nil {
+			return readErr
+		}
+		retained += fmt.Sprintf("\n\n--- %s ---\n%s", title, string(data))
+		return nil
+	}
+	if err := appendArtifact("diagnostics adapter response", result.Artifacts.AdapterResponse); err != nil {
+		return Result{}, "", err
+	}
+	if err := appendArtifact("diagnostics adapter stderr", result.Artifacts.AdapterStderr); err != nil {
+		return Result{}, "", err
+	}
+	for _, source := range result.Artifacts.Sources {
+		if err := appendArtifact("diagnostic source "+filepath.Base(source), source); err != nil {
+			return Result{}, "", err
+		}
+	}
+	return result, retained, nil
+}
+
+func readEvidenceArtifact(root, job, relative string) ([]byte, error) {
+	clean := filepath.Clean(filepath.FromSlash(relative))
+	expected := filepath.Join(".build", "agent", "evidence", job)
+	contained, err := pathIsWithin(expected, clean)
+	if err != nil || !contained {
+		return nil, fmt.Errorf("invalid retained evidence path %q", relative)
+	}
+	data, err := os.ReadFile(filepath.Join(root, clean))
+	if err != nil {
+		return nil, fmt.Errorf("read retained evidence %q: %w", relative, err)
+	}
+	return data, nil
 }
 
 func reserveJob(root, requested string) (string, func(), error) {
