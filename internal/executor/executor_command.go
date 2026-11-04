@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ type ExecuteOptions struct {
 	WorkingDir    string
 	Daemon        bool
 	CommandName   string
+	Environment   map[string]string
 }
 
 // DirectExecuteOptions contains options for direct command execution (no shell)
@@ -30,6 +32,7 @@ type DirectExecuteOptions struct {
 	Args          []string // Command arguments
 	CaptureOutput bool
 	WorkingDir    string
+	Environment   map[string]string
 }
 
 // CommandExecutionOptions contains options for command execution with steps
@@ -40,6 +43,7 @@ type CommandExecutionOptions struct {
 	WorkingDir      string               // Working directory
 	PassthroughArgs []string             // Arguments to pass through to commands
 	CaptureOutput   bool                 // Capture distinct stdout/stderr for DEV-RESULT
+	Environment     map[string]string    // Invocation-local environment overrides
 }
 
 // ExecuteCommandDirect executes a command directly without shell interpretation
@@ -47,6 +51,7 @@ type CommandExecutionOptions struct {
 // as it prevents shell injection attacks. Context allows for cancellation and timeouts.
 func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) ExecutionResult {
 	cmd := exec.CommandContext(ctx, opts.Command, opts.Args...)
+	cmd.Env = mergedEnvironment(opts.Environment)
 
 	if opts.WorkingDir != "" {
 		cmd.Dir = opts.WorkingDir
@@ -120,6 +125,7 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 // Context allows for cancellation and timeouts
 func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResult {
 	cmd := exec.CommandContext(ctx, "sh", "-c", opts.Command)
+	cmd.Env = mergedEnvironment(opts.Environment)
 
 	if opts.WorkingDir != "" {
 		cmd.Dir = opts.WorkingDir
@@ -388,10 +394,10 @@ func checkDaemonAlreadyRunning(commandName, command string) int {
 // executeWithRetry executes a command with retry logic based on step configuration
 // ExecuteCommandStep executes a single command step with all its components
 func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
-	return executeCommandStep(context.Background(), step, commandName, workingDir, passthroughArgs, false)
+	return executeCommandStep(context.Background(), step, commandName, workingDir, passthroughArgs, false, nil)
 }
 
-func executeCommandStep(ctx context.Context, step config.CommandStep, commandName, workingDir string, passthroughArgs []string, captureOutput bool) (result ExecutionResult) {
+func executeCommandStep(ctx context.Context, step config.CommandStep, commandName, workingDir string, passthroughArgs []string, captureOutput bool, environment map[string]string) (result ExecutionResult) {
 	logger.Infof("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Validate and resolve execution directory
@@ -451,7 +457,7 @@ func executeCommandStep(ctx context.Context, step config.CommandStep, commandNam
 		}
 
 		// Execute with retry logic
-		result = executeWithRetry(ctx, step, command, executionDir, commandName, captureOutput)
+		result = executeWithRetry(ctx, step, command, executionDir, commandName, captureOutput, environment)
 		if captureOutput {
 			stdout.WriteString(result.Stdout)
 			stderr.WriteString(result.Stderr)
@@ -571,7 +577,7 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 
 	for i, step := range opts.Steps {
 		logger.Infof("Executing step %d/%d", i+1, len(opts.Steps))
-		result := executeCommandStep(ctx, step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs, opts.CaptureOutput)
+		result := executeCommandStep(ctx, step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs, opts.CaptureOutput, opts.Environment)
 		if opts.CaptureOutput {
 			stdout.WriteString(result.Stdout)
 			stderr.WriteString(result.Stderr)
@@ -626,6 +632,39 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 		result.Stderr = stderr.String()
 	}
 	return result
+}
+
+// mergedEnvironment overlays invocation-specific values on the process
+// environment without mutating global process state. Existing key order is
+// retained and newly introduced keys are appended deterministically.
+func mergedEnvironment(overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	environment := append([]string(nil), os.Environ()...)
+	indexes := make(map[string]int, len(environment))
+	for index, entry := range environment {
+		name, _, found := strings.Cut(entry, "=")
+		if found {
+			indexes[name] = index
+		}
+	}
+
+	newNames := make([]string, 0, len(overrides))
+	for name, value := range overrides {
+		entry := name + "=" + value
+		if index, found := indexes[name]; found {
+			environment[index] = entry
+			continue
+		}
+		newNames = append(newNames, name)
+	}
+	sort.Strings(newNames)
+	for _, name := range newNames {
+		environment = append(environment, name+"="+overrides[name])
+	}
+	return environment
 }
 
 // getContainerName extracts container name from service definition

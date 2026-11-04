@@ -69,8 +69,11 @@ type Evidence struct {
 }
 
 type Artifacts struct {
-	Log    string `json:"log"`
-	Result string `json:"result"`
+	Log             string   `json:"log"`
+	Result          string   `json:"result"`
+	AdapterResponse string   `json:"adapter_response,omitempty"`
+	AdapterStderr   string   `json:"adapter_stderr,omitempty"`
+	Sources         []string `json:"sources,omitempty"`
 }
 
 type DrillDown struct {
@@ -117,17 +120,19 @@ type Result struct {
 }
 
 type Input struct {
-	Job               string
-	CommandName       string
-	NormalizedCommand string
-	ExitCode          int
-	Duration          time.Duration
-	Attempts          int
-	Stdout            string
-	Stderr            string
-	Warnings          []string
-	TimedOut          bool
-	Cancelled         bool
+	Job                string
+	CommandName        string
+	NormalizedCommand  string
+	ExitCode           int
+	Duration           time.Duration
+	Attempts           int
+	Stdout             string
+	Stderr             string
+	Warnings           []string
+	TimedOut           bool
+	Cancelled          bool
+	Diagnostics        *DiagnosticsResponse
+	DiagnosticsWarning string
 }
 
 var (
@@ -171,6 +176,22 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	}
 
 	failures, warnings := collectEvidence(stdout, stderr, redactedWarnings, outcome)
+	structuredMatches := 0
+	if input.Diagnostics != nil {
+		structuredFailures, structuredWarnings, matches := collectStructuredEvidence(*input.Diagnostics, environment)
+		structuredMatches += matches
+		if len(structuredFailures) > 0 || outcome == OutcomePass {
+			failures = structuredFailures
+		}
+		warnings = append(structuredWarnings, warnings...)
+	}
+	if strings.TrimSpace(input.DiagnosticsWarning) != "" {
+		warning, matches := Redact(input.DiagnosticsWarning, environment)
+		structuredMatches += matches
+		warnings = append(warnings, Evidence{Message: warning, Source: "diagnostics-adapter"})
+	}
+	failures = deduplicateEvidence(failures)
+	warnings = deduplicateEvidence(warnings)
 	exitCode := input.ExitCode
 	result := Result{
 		Schema:     SchemaV1,
@@ -183,8 +204,8 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 		Failures:   failures,
 		Warnings:   warnings,
 		Redaction: Redaction{
-			Applied: stdoutMatches+stderrMatches+commandMatches+warningMatches > 0,
-			Matches: stdoutMatches + stderrMatches + commandMatches + warningMatches,
+			Applied: stdoutMatches+stderrMatches+commandMatches+warningMatches+structuredMatches > 0,
+			Matches: stdoutMatches + stderrMatches + commandMatches + warningMatches + structuredMatches,
 		},
 	}
 	result.Summary = summary(result)
@@ -199,6 +220,56 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	retained := fmt.Sprintf("DEV-RESULT-LOG v1\njob: %s\ncommand: %s\n\n--- stdout ---\n%s\n--- stderr ---\n%s", result.Job, result.Command.Normalized, stdout, stderr)
 	result.RawLineCount = strings.Count(retained, "\n") + 1
 	return result, retained
+}
+
+func collectStructuredEvidence(response DiagnosticsResponse, environment []string) ([]Evidence, []Evidence, int) {
+	failures := make([]Evidence, 0, len(response.Failures))
+	warnings := make([]Evidence, 0, len(response.Warnings)+len(response.Problems))
+	matches := 0
+	for _, diagnostic := range response.Failures {
+		message, count := Redact(formatDiagnostic(diagnostic), environment)
+		matches += count
+		failures = append(failures, Evidence{Message: message, Source: "diagnostics-adapter"})
+	}
+	for _, diagnostic := range response.Warnings {
+		message, count := Redact(formatDiagnostic(diagnostic), environment)
+		matches += count
+		warnings = append(warnings, Evidence{Message: message, Source: "diagnostics-adapter"})
+	}
+	for _, problem := range response.Problems {
+		message, count := Redact(problem.Message, environment)
+		matches += count
+		warnings = append(warnings, Evidence{Message: message, Source: "diagnostics-adapter"})
+	}
+	return failures, warnings, matches
+}
+
+func formatDiagnostic(diagnostic Diagnostic) string {
+	location := diagnostic.File
+	if location != "" && diagnostic.Line > 0 {
+		location = fmt.Sprintf("%s:%d", location, diagnostic.Line)
+	}
+	if location == "" {
+		return diagnostic.Message
+	}
+	return fmt.Sprintf("%s (%s)", diagnostic.Message, location)
+}
+
+func deduplicateEvidence(items []Evidence) []Evidence {
+	result := make([]Evidence, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		key := strings.ToLower(strings.TrimSpace(item.Message))
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	return result
 }
 
 func summary(result Result) string {
@@ -223,20 +294,23 @@ func WithArtifactWarning(result Result, err error) Result {
 }
 
 func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome Outcome) ([]Evidence, []Evidence) {
-	type sourcedText struct{ text, source string }
+	type sourcedText struct {
+		text, source string
+		forceWarning bool
+	}
 	var lines []sourcedText
-	for _, stream := range []sourcedText{{stdout, "stdout"}, {stderr, "stderr"}} {
+	for _, stream := range []sourcedText{{text: stdout, source: "stdout"}, {text: stderr, source: "stderr"}} {
 		normalized := strings.ReplaceAll(stream.text, "\r", "\n")
 		for _, line := range strings.Split(normalized, "\n") {
 			line = strings.TrimSpace(ansiPattern.ReplaceAllString(line, ""))
 			if line == "" || noiseLine(line) {
 				continue
 			}
-			lines = append(lines, sourcedText{line, stream.source})
+			lines = append(lines, sourcedText{text: line, source: stream.source})
 		}
 	}
 	for _, warning := range configuredWarnings {
-		lines = append(lines, sourcedText{strings.TrimSpace(ansiPattern.ReplaceAllString(warning, "")), "dev-tools"})
+		lines = append(lines, sourcedText{text: strings.TrimSpace(ansiPattern.ReplaceAllString(warning, "")), source: "dev-tools", forceWarning: true})
 	}
 
 	var failures, warnings []Evidence
@@ -245,7 +319,7 @@ func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome
 	var fallback []Evidence
 	for _, line := range lines {
 		key := strings.ToLower(line.text)
-		if warningPattern.MatchString(line.text) {
+		if line.forceWarning || warningPattern.MatchString(line.text) {
 			if _, exists := seenWarnings[key]; !exists {
 				seenWarnings[key] = struct{}{}
 				warnings = append(warnings, Evidence{Message: line.text, Source: line.source})

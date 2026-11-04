@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +22,15 @@ type ResultBudgetConfig struct {
 const (
 	MinDevResultLines = 7
 	MinDevResultBytes = 1024
+
+	DefaultDiagnosticsAdapterTimeout                   = 2 * time.Second
+	DefaultDiagnosticsAdapterStdoutBytes         int64 = 1 << 20
+	DefaultDiagnosticsAdapterStderrBytes         int64 = 64 << 10
+	DefaultDiagnosticsAdapterMaxDiagnostics            = 1000
+	DefaultDiagnosticsAdapterMaxSourceBytes      int64 = 10 << 20
+	DefaultDiagnosticsAdapterMaxTotalSourceBytes int64 = 50 << 20
+	DefaultDevResultRetentionMaxAge                    = 7 * 24 * time.Hour
+	DefaultDevResultRetentionMaxBytes            int64 = 1 << 30
 )
 
 func (b *ResultBudgetConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -46,15 +57,225 @@ func (b *ResultBudgetConfig) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type DevResultCommandConfig struct {
-	Enabled    bool               `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Success    ResultBudgetConfig `yaml:"success,omitempty" json:"success,omitempty"`
-	Failure    ResultBudgetConfig `yaml:"failure,omitempty" json:"failure,omitempty"`
-	Timeout    ResultBudgetConfig `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	Background ResultBudgetConfig `yaml:"background,omitempty" json:"background,omitempty"`
+	Enabled            bool                      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Success            ResultBudgetConfig        `yaml:"success,omitempty" json:"success,omitempty"`
+	Failure            ResultBudgetConfig        `yaml:"failure,omitempty" json:"failure,omitempty"`
+	Timeout            ResultBudgetConfig        `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Background         ResultBudgetConfig        `yaml:"background,omitempty" json:"background,omitempty"`
+	DiagnosticsAdapter *DiagnosticsAdapterConfig `yaml:"diagnostics_adapter,omitempty" json:"diagnostics_adapter,omitempty"`
+}
+
+// DiagnosticsAdapterConfig defines a directly invoked repository diagnostics adapter.
+type DiagnosticsAdapterConfig struct {
+	Command             []string      `yaml:"command" json:"command"`
+	StartWhen           []string      `yaml:"start_when" json:"start_when"`
+	Timeout             time.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	StdoutBytes         int64         `yaml:"stdout_bytes,omitempty" json:"stdout_bytes,omitempty"`
+	StderrBytes         int64         `yaml:"stderr_bytes,omitempty" json:"stderr_bytes,omitempty"`
+	MaxDiagnostics      int           `yaml:"max_diagnostics,omitempty" json:"max_diagnostics,omitempty"`
+	MaxSourceBytes      int64         `yaml:"max_source_bytes,omitempty" json:"max_source_bytes,omitempty"`
+	MaxTotalSourceBytes int64         `yaml:"max_total_source_bytes,omitempty" json:"max_total_source_bytes,omitempty"`
+}
+
+// UnmarshalYAML applies the diagnostics adapter resource defaults and rejects
+// empty executable arguments, evidence patterns, and non-positive limits.
+func (c *DiagnosticsAdapterConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawDiagnosticsAdapter struct {
+		Command             []string `yaml:"command"`
+		StartWhen           []string `yaml:"start_when"`
+		Timeout             *string  `yaml:"timeout"`
+		StdoutBytes         *int64   `yaml:"stdout_bytes"`
+		StderrBytes         *int64   `yaml:"stderr_bytes"`
+		MaxDiagnostics      *int     `yaml:"max_diagnostics"`
+		MaxSourceBytes      *int64   `yaml:"max_source_bytes"`
+		MaxTotalSourceBytes *int64   `yaml:"max_total_source_bytes"`
+	}
+
+	var raw rawDiagnosticsAdapter
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	decoded := DiagnosticsAdapterConfig{
+		Command:             raw.Command,
+		StartWhen:           raw.StartWhen,
+		Timeout:             DefaultDiagnosticsAdapterTimeout,
+		StdoutBytes:         DefaultDiagnosticsAdapterStdoutBytes,
+		StderrBytes:         DefaultDiagnosticsAdapterStderrBytes,
+		MaxDiagnostics:      DefaultDiagnosticsAdapterMaxDiagnostics,
+		MaxSourceBytes:      DefaultDiagnosticsAdapterMaxSourceBytes,
+		MaxTotalSourceBytes: DefaultDiagnosticsAdapterMaxTotalSourceBytes,
+	}
+	if raw.Timeout != nil {
+		parsed, err := time.ParseDuration(*raw.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid diagnostics_adapter timeout: %w", err)
+		}
+		if parsed <= 0 {
+			return fmt.Errorf("diagnostics_adapter timeout must be greater than zero")
+		}
+		decoded.Timeout = parsed
+	}
+	if err := applyPositiveInt64("stdout_bytes", raw.StdoutBytes, &decoded.StdoutBytes); err != nil {
+		return err
+	}
+	if err := applyPositiveInt64("stderr_bytes", raw.StderrBytes, &decoded.StderrBytes); err != nil {
+		return err
+	}
+	if raw.MaxDiagnostics != nil {
+		if *raw.MaxDiagnostics <= 0 {
+			return fmt.Errorf("diagnostics_adapter max_diagnostics must be greater than zero")
+		}
+		decoded.MaxDiagnostics = *raw.MaxDiagnostics
+	}
+	if err := applyPositiveInt64("max_source_bytes", raw.MaxSourceBytes, &decoded.MaxSourceBytes); err != nil {
+		return err
+	}
+	if err := applyPositiveInt64("max_total_source_bytes", raw.MaxTotalSourceBytes, &decoded.MaxTotalSourceBytes); err != nil {
+		return err
+	}
+	if err := decoded.applyDefaultsAndValidate(); err != nil {
+		return err
+	}
+
+	*c = decoded
+	return nil
+}
+
+func (c *DiagnosticsAdapterConfig) applyDefaultsAndValidate() error {
+	if len(c.Command) == 0 {
+		return fmt.Errorf("diagnostics_adapter command must contain at least one argument")
+	}
+	for _, argument := range c.Command {
+		if strings.TrimSpace(argument) == "" {
+			return fmt.Errorf("diagnostics_adapter command arguments must not be empty")
+		}
+	}
+	if len(c.StartWhen) == 0 {
+		return fmt.Errorf("diagnostics_adapter start_when must contain at least one pattern")
+	}
+	for _, pattern := range c.StartWhen {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("diagnostics_adapter start_when patterns must not be empty")
+		}
+	}
+
+	if c.Timeout < 0 {
+		return fmt.Errorf("diagnostics_adapter timeout must be greater than zero")
+	}
+	if c.Timeout == 0 {
+		c.Timeout = DefaultDiagnosticsAdapterTimeout
+	}
+	if c.StdoutBytes < 0 {
+		return fmt.Errorf("diagnostics_adapter stdout_bytes must be greater than zero")
+	}
+	if c.StdoutBytes == 0 {
+		c.StdoutBytes = DefaultDiagnosticsAdapterStdoutBytes
+	}
+	if c.StderrBytes < 0 {
+		return fmt.Errorf("diagnostics_adapter stderr_bytes must be greater than zero")
+	}
+	if c.StderrBytes == 0 {
+		c.StderrBytes = DefaultDiagnosticsAdapterStderrBytes
+	}
+	if c.MaxDiagnostics < 0 {
+		return fmt.Errorf("diagnostics_adapter max_diagnostics must be greater than zero")
+	}
+	if c.MaxDiagnostics == 0 {
+		c.MaxDiagnostics = DefaultDiagnosticsAdapterMaxDiagnostics
+	}
+	if c.MaxSourceBytes < 0 {
+		return fmt.Errorf("diagnostics_adapter max_source_bytes must be greater than zero")
+	}
+	if c.MaxSourceBytes == 0 {
+		c.MaxSourceBytes = DefaultDiagnosticsAdapterMaxSourceBytes
+	}
+	if c.MaxTotalSourceBytes < 0 {
+		return fmt.Errorf("diagnostics_adapter max_total_source_bytes must be greater than zero")
+	}
+	if c.MaxTotalSourceBytes == 0 {
+		c.MaxTotalSourceBytes = DefaultDiagnosticsAdapterMaxTotalSourceBytes
+	}
+	return nil
+}
+
+func applyPositiveInt64(name string, value *int64, destination *int64) error {
+	if value == nil {
+		return nil
+	}
+	if *value <= 0 {
+		return fmt.Errorf("diagnostics_adapter %s must be greater than zero", name)
+	}
+	*destination = *value
+	return nil
+}
+
+type RetentionConfig struct {
+	MaxAge   time.Duration `yaml:"max_age,omitempty" json:"max_age,omitempty"`
+	MaxBytes int64         `yaml:"max_bytes,omitempty" json:"max_bytes,omitempty"`
+}
+
+func (c *RetentionConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawRetention struct {
+		MaxAge   *string `yaml:"max_age"`
+		MaxBytes *int64  `yaml:"max_bytes"`
+	}
+	var raw rawRetention
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	decoded := defaultRetentionConfig()
+	if raw.MaxAge != nil {
+		parsed, err := time.ParseDuration(*raw.MaxAge)
+		if err != nil {
+			return fmt.Errorf("invalid DEV-RESULT retention max_age: %w", err)
+		}
+		if parsed < 0 {
+			return fmt.Errorf("DEV-RESULT retention max_age must not be negative")
+		}
+		if parsed > 0 {
+			decoded.MaxAge = parsed
+		}
+	}
+	if raw.MaxBytes != nil {
+		if *raw.MaxBytes < 0 {
+			return fmt.Errorf("DEV-RESULT retention max_bytes must not be negative")
+		}
+		if *raw.MaxBytes > 0 {
+			decoded.MaxBytes = *raw.MaxBytes
+		}
+	}
+	*c = decoded
+	return nil
+}
+
+func defaultRetentionConfig() RetentionConfig {
+	return RetentionConfig{
+		MaxAge:   DefaultDevResultRetentionMaxAge,
+		MaxBytes: DefaultDevResultRetentionMaxBytes,
+	}
 }
 
 type DevResultConfig struct {
-	Commands map[string]DevResultCommandConfig `yaml:"commands" json:"commands"`
+	Commands  map[string]DevResultCommandConfig `yaml:"commands" json:"commands"`
+	Retention RetentionConfig                   `yaml:"retention,omitempty" json:"retention,omitempty"`
+}
+
+func (c *DevResultConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawDevResultConfig DevResultConfig
+	decoded := rawDevResultConfig{Retention: defaultRetentionConfig()}
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	if decoded.Retention.MaxAge == 0 {
+		decoded.Retention.MaxAge = DefaultDevResultRetentionMaxAge
+	}
+	if decoded.Retention.MaxBytes == 0 {
+		decoded.Retention.MaxBytes = DefaultDevResultRetentionMaxBytes
+	}
+	*c = DevResultConfig(decoded)
+	return nil
 }
 
 // Config represents the complete development configuration

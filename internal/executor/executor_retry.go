@@ -11,7 +11,7 @@ import (
 // executeWithRetry executes a command with retry logic based on step configuration
 // Supports configurable retry attempts, delays, and exit code filtering
 // Context allows for cancellation and timeouts
-func executeWithRetry(ctx context.Context, step config.CommandStep, command, executionDir, commandName string, captureOutput bool) ExecutionResult {
+func executeWithRetry(ctx context.Context, step config.CommandStep, command, executionDir, commandName string, captureOutput bool, environment map[string]string) ExecutionResult {
 	maxAttempts := step.Retry + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -56,6 +56,7 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 			WorkingDir:    executionDir,
 			Daemon:        step.Daemon,
 			CommandName:   commandName,
+			Environment:   environment,
 		})
 		attempted = append(attempted, command)
 		if captureOutput {

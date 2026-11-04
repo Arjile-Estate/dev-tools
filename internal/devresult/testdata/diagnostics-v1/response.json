@@ -1,0 +1,26 @@
+{
+  "schema": "dev-tools/diagnostics-response/v1",
+  "evidence_state": "partial",
+  "failures": [
+    {
+      "identity": "checkout/rejects-expired-card",
+      "message": "expected an expired card to be rejected",
+      "package": "checkout",
+      "file": "checkout/card_test.go",
+      "line": 73,
+      "suite": "Card validation",
+      "test": "rejects an expired card"
+    }
+  ],
+  "problems": [
+    {
+      "message": "coverage evidence was not produced"
+    }
+  ],
+  "sources": [
+    {
+      "kind": "junit",
+      "path": "junit/checkout.xml"
+    }
+  ]
+}

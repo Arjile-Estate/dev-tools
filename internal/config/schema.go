@@ -50,6 +50,9 @@ const ConfigSchema = `{
             "enum": ["test", "test:focused", "build", "lint", "lint:dead-code", "typecheck"]
           },
           "additionalProperties": {"$ref": "#/definitions/devResultCommand"}
+        },
+        "retention": {
+          "$ref": "#/definitions/devResultRetention"
         }
       },
       "required": ["commands"],
@@ -72,7 +75,39 @@ const ConfigSchema = `{
         "success": {"$ref": "#/definitions/resultBudget"},
         "failure": {"$ref": "#/definitions/resultBudget"},
         "timeout": {"$ref": "#/definitions/resultBudget"},
-        "background": {"$ref": "#/definitions/resultBudget"}
+        "background": {"$ref": "#/definitions/resultBudget"},
+        "diagnostics_adapter": {"$ref": "#/definitions/diagnosticsAdapter"}
+      },
+      "additionalProperties": false
+    },
+    "diagnosticsAdapter": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "start_when": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "timeout": {"type": "integer", "minimum": 1},
+        "stdout_bytes": {"type": "integer", "minimum": 1},
+        "stderr_bytes": {"type": "integer", "minimum": 1},
+        "max_diagnostics": {"type": "integer", "minimum": 1},
+        "max_source_bytes": {"type": "integer", "minimum": 1},
+        "max_total_source_bytes": {"type": "integer", "minimum": 1}
+      },
+      "required": ["command", "start_when"],
+      "additionalProperties": false
+    },
+    "devResultRetention": {
+      "type": "object",
+      "properties": {
+        "max_age": {"type": "integer", "minimum": 1},
+        "max_bytes": {"type": "integer", "minimum": 1}
       },
       "additionalProperties": false
     },
@@ -180,6 +215,24 @@ func ValidateConfig(cfg *Config) error {
 	// Validate that commands is not empty
 	if len(cfg.Commands) == 0 {
 		return fmt.Errorf("configuration must have at least one command defined")
+	}
+	if cfg.DevResult != nil {
+		if cfg.DevResult.Retention.MaxAge == 0 {
+			cfg.DevResult.Retention.MaxAge = DefaultDevResultRetentionMaxAge
+		}
+		if cfg.DevResult.Retention.MaxBytes == 0 {
+			cfg.DevResult.Retention.MaxBytes = DefaultDevResultRetentionMaxBytes
+		}
+		for commandName, commandConfig := range cfg.DevResult.Commands {
+			if commandConfig.DiagnosticsAdapter != nil && commandName != "test" && commandName != "test:focused" {
+				return fmt.Errorf("diagnostics_adapter is only supported for test and test:focused, not %s", commandName)
+			}
+			if commandConfig.DiagnosticsAdapter != nil {
+				if err := commandConfig.DiagnosticsAdapter.applyDefaultsAndValidate(); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	// Convert config to JSON for validation

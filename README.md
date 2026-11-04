@@ -311,16 +311,22 @@ dev_result:
   commands:
     test:
       enabled: true
+      diagnostics_adapter:
+        command: [node, tools/dev-tools-diagnostics.mjs]
+        start_when: [junit/**/*.xml, turbo-summary.json]
     lint:
       enabled: true
       failure:
         lines: 120
         bytes: 16384
+  retention:
+    max_age: 168h
+    max_bytes: 1073741824
 ```
 
 Supported command names are `test`, `test:focused`, `build`, `lint`, `lint:dead-code`, and `typecheck`. An absent, unlisted, or disabled entry preserves the command's existing streaming, text/JSON output, artifact behavior, and exit code.
 
-Enabled commands emit a bounded `DEV-RESULT v1` envelope and retain complete redacted streams under `.build/agent/`. Inspect an existing result without rerunning validation:
+Enabled commands emit a bounded `DEV-RESULT v1` envelope and retain complete redacted streams under `.build/agent/`. `test` and `test:focused` may additionally use a directly invoked repository diagnostics adapter; each invocation receives isolated `DEV_TOOLS_RUN_ID` and `DEV_TOOLS_RUN_DIR` values. Inspect an existing result without rerunning validation:
 
 ```bash
 dev-tools result <job>
@@ -329,7 +335,7 @@ dev-tools result <job> --failures
 dev-tools result <job> --warnings
 ```
 
-`dev-tools result` is retrieval-only; it is not a pipe processor or alternate command runner. See [DEV-RESULT v1](docs/dev-result-v1.md) for the schema, budgets, redaction rules, and artifact contract.
+`dev-tools result` is retrieval-only; it is not a pipe processor or alternate command runner. See [DEV-RESULT v1](docs/dev-result-v1.md) for the diagnostics JSON contract, fallback behavior, limits, redaction rules, retention leases, and artifact contract.
 
 ### Configuration Validation
 
