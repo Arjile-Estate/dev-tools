@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"dev-tools/internal/colors"
 	"dev-tools/internal/commands"
 	"dev-tools/internal/config"
+	"dev-tools/internal/devresult"
 	"dev-tools/internal/executor"
 )
 
@@ -440,10 +442,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Execute command (non-watch mode)
 	execOpts := executor.CommandExecutionOptions{
+		Context:         cmd.Context(),
 		CommandName:     commandName,
 		Steps:           steps,
 		WorkingDir:      cmdCfg.ProjectDir,
 		PassthroughArgs: parsedArgs.PassthroughArgs,
+		CaptureOutput:   devResultEnabled(cfg, commandName, steps, cmdCfg.Watch),
 	}
 
 	var result executor.ExecutionResult
@@ -453,8 +457,39 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		result = executor.ExecuteCommandWithOptions(execOpts)
 	}
 
-	// Output based on format
-	if cmdCfg.Format == "json" {
+	resultConfig, resultEnabled := devResultCommandConfig(cfg, commandName, steps, cmdCfg.Watch)
+	if resultEnabled {
+		budgets := devResultBudgets(resultConfig)
+		model, retained := devresult.Build(devresult.Input{
+			Job:               devresult.NewJobID(commandName, time.Now()),
+			CommandName:       commandName,
+			NormalizedCommand: devresult.NormalizeCommand(commandName, parsedArgs.PassthroughArgs),
+			ExitCode:          result.ReturnCode,
+			Duration:          time.Duration(result.DurationMs) * time.Millisecond,
+			Attempts:          result.Attempts,
+			Stdout:            result.Stdout,
+			Stderr:            result.Stderr,
+			Warnings:          result.Warnings,
+			TimedOut:          result.TimedOut,
+			Cancelled:         result.Cancelled,
+		}, budgets, os.Environ())
+		compactMetadata := devresult.Compact(model, budgets)
+		model.Truncation = compactMetadata.Truncation
+		written, writeErr := devresult.WriteArtifactsForFormat(cmdCfg.ProjectDir, model, retained, budgets, cmdCfg.Format == "json")
+		if writeErr != nil {
+			logger.Warnf("DEV-RESULT artifacts unavailable: %v", writeErr)
+			written = devresult.WithArtifactWarning(model, writeErr)
+		}
+		if cmdCfg.Format == "json" {
+			jsonBytes, marshalErr := devresult.MarshalCompactJSON(written, budgets)
+			if marshalErr != nil {
+				jsonBytes = []byte(fmt.Sprintf("{\"schema\":%q,\"outcome\":%q,\"exit_code\":%d,\"error\":%q}\n", devresult.SchemaV1, written.Outcome, result.ReturnCode, marshalErr.Error()))
+			}
+			_, _ = fmt.Fprint(cmd.OutOrStdout(), string(jsonBytes))
+		} else {
+			_, _ = fmt.Fprint(cmd.OutOrStdout(), devresult.RenderText(written, budgets))
+		}
+	} else if cmdCfg.Format == "json" {
 		// JSON output mode
 		jsonOutput, err := formatResultAsJSON(result)
 		if err != nil {
@@ -476,7 +511,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Log the full output for debugging
-		if result.Stdout != "" || result.Stderr != "" {
+		if !resultEnabled && (result.Stdout != "" || result.Stderr != "") {
 			logger.Warnf("Command '%s' failed output - stdout: %s, stderr: %s", failedLabel, result.Stdout, result.Stderr)
 		}
 
@@ -496,6 +531,44 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Command completed successfully")
 	return nil
+}
+
+func devResultCommandConfig(cfg *config.Config, commandName string, steps []config.CommandStep, watch bool) (config.DevResultCommandConfig, bool) {
+	if cfg == nil || cfg.DevResult == nil || watch || !devresult.SupportedCommand(commandName) {
+		return config.DevResultCommandConfig{}, false
+	}
+	commandConfig, exists := cfg.DevResult.Commands[commandName]
+	if !exists || !commandConfig.Enabled {
+		return config.DevResultCommandConfig{}, false
+	}
+	for _, step := range steps {
+		if step.Background || step.Daemon {
+			return config.DevResultCommandConfig{}, false
+		}
+	}
+	return commandConfig, true
+}
+
+func devResultEnabled(cfg *config.Config, commandName string, steps []config.CommandStep, watch bool) bool {
+	_, enabled := devResultCommandConfig(cfg, commandName, steps, watch)
+	return enabled
+}
+
+func devResultBudgets(commandConfig config.DevResultCommandConfig) devresult.Budgets {
+	budgets := devresult.DefaultBudgets()
+	applyBudget := func(target *devresult.Budget, override config.ResultBudgetConfig) {
+		if override.Lines > 0 {
+			target.Lines = override.Lines
+		}
+		if override.Bytes > 0 {
+			target.Bytes = override.Bytes
+		}
+	}
+	applyBudget(&budgets.Success, commandConfig.Success)
+	applyBudget(&budgets.Failure, commandConfig.Failure)
+	applyBudget(&budgets.Timeout, commandConfig.Timeout)
+	applyBudget(&budgets.Background, commandConfig.Background)
+	return budgets
 }
 
 // SetConfigLoader sets the config loader for the root command.

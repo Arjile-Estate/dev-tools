@@ -745,6 +745,116 @@ func TestExecuteCommandWithOptions(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandWithOptionsCapturesAllForegroundStepEvidence(t *testing.T) {
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:   "test",
+		WorkingDir:    t.TempDir(),
+		CaptureOutput: true,
+		Steps: []config.CommandStep{
+			{Run: config.RunCommand{"printf 'step-one'; printf 'error-one' >&2"}},
+			{Run: config.RunCommand{"printf 'step-two'; printf 'warning: cache' >&2"}},
+		},
+	})
+
+	require.True(t, result.Success)
+	assert.Contains(t, result.Stdout, "step-one")
+	assert.Contains(t, result.Stdout, "step-two")
+	assert.Contains(t, result.Stderr, "error-one")
+	assert.Contains(t, result.Stderr, "warning: cache")
+	assert.Equal(t, []string{
+		"printf 'step-one'; printf 'error-one' >&2",
+		"printf 'step-two'; printf 'warning: cache' >&2",
+	}, result.AttemptedCommands)
+	assert.Equal(t, 2, result.Attempts)
+}
+
+func TestExecuteCommandWithOptionsCapturesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		cancel()
+	}()
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		Context:       ctx,
+		CommandName:   "lint",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{
+			{Run: config.RunCommand{"printf 'started'; sleep 5"}},
+		},
+	})
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+	assert.Contains(t, result.Stdout, "started")
+}
+
+func TestContinueOnErrorDoesNotSwallowCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		cancel()
+	}()
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		Context:       ctx,
+		CommandName:   "lint",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{{
+			Run:             config.RunCommand{"printf 'started'; sleep 5", "printf 'must-not-run'"},
+			ContinueOnError: true,
+		}},
+	})
+
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+	assert.NotContains(t, result.Stdout, "must-not-run")
+}
+
+func TestContinueOnErrorNormalizesToleratedFailureExitCode(t *testing.T) {
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		CommandName:   "lint",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{{
+			Run:             config.RunCommand{"printf 'tolerated failure' >&2; exit 42"},
+			ContinueOnError: true,
+		}},
+	})
+
+	assert.True(t, result.Success)
+	assert.Equal(t, 0, result.ReturnCode)
+	assert.False(t, result.Cancelled)
+	assert.False(t, result.TimedOut)
+}
+
+func TestCapturedExecutionResultTreatsHandledSignalAsCancellation(t *testing.T) {
+	result := capturedExecutionResult(context.Background(), nil, true, "handled", "")
+
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+	assert.Equal(t, -1, result.ReturnCode)
+}
+
+func TestRetryDelayStopsWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	result := ExecuteCommandWithOptions(CommandExecutionOptions{
+		Context:       ctx,
+		CommandName:   "test",
+		CaptureOutput: true,
+		Steps: []config.CommandStep{{
+			Run:        config.RunCommand{"printf 'first'; exit 1"},
+			Retry:      1,
+			RetryDelay: "5s",
+		}},
+	})
+
+	assert.Less(t, time.Since(started), time.Second)
+	assert.False(t, result.Success)
+	assert.True(t, result.Cancelled)
+}
+
 func TestLoadEnvironmentVariables(t *testing.T) {
 	tests := []struct {
 		name        string

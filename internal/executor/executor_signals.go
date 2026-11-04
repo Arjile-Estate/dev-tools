@@ -1,18 +1,44 @@
 package executor
 
 import (
+	"context"
 	"dev-tools/internal/logger"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // waitForProcessWithSignalHandling waits for a process to complete while handling signals
 // It forwards SIGINT and SIGTERM to the child process for graceful shutdown
 func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
+	err, _ := waitForProcessWithSignalHandlingStatus(cmd)
+	return err
+}
+
+func waitForRetryDelay(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signalChan)
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case sig := <-signalChan:
+		logger.Infof("Received signal %v during retry delay", sig)
+		return context.Canceled
+	}
+}
+
+func waitForProcessWithSignalHandlingStatus(cmd *exec.Cmd) (error, bool) {
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signalChan)
 
 	done := make(chan error, 1)
 	go func() {
@@ -21,7 +47,7 @@ func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
 
 	select {
 	case err := <-done:
-		return err
+		return err, false
 	case sig := <-signalChan:
 		logger.Infof("Received signal %v, terminating process", sig)
 		if cmd.Process != nil {
@@ -36,6 +62,6 @@ func waitForProcessWithSignalHandling(cmd *exec.Cmd) error {
 				}
 			}
 		}
-		return <-done
+		return <-done, true
 	}
 }

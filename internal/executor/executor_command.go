@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"dev-tools/internal/logger"
 	"fmt"
@@ -33,10 +34,12 @@ type DirectExecuteOptions struct {
 
 // CommandExecutionOptions contains options for command execution with steps
 type CommandExecutionOptions struct {
+	Context         context.Context      // Cancellation context; defaults to context.Background
 	CommandName     string               // Name of the command being executed
 	Steps           []config.CommandStep // Steps to execute
 	WorkingDir      string               // Working directory
 	PassthroughArgs []string             // Arguments to pass through to commands
+	CaptureOutput   bool                 // Capture distinct stdout/stderr for DEV-RESULT
 }
 
 // ExecuteCommandDirect executes a command directly without shell interpretation
@@ -50,42 +53,15 @@ func ExecuteCommandDirect(ctx context.Context, opts DirectExecuteOptions) Execut
 	}
 
 	if opts.CaptureOutput {
-		output, err := cmd.CombinedOutput()
-		success := err == nil
-		returnCode := 0
-		stderr := ""
-
-		if err != nil {
-			// Check if context was cancelled
-			if ctx.Err() == context.Canceled {
-				return ExecutionResult{
-					Success:    false,
-					Stderr:     "command cancelled",
-					ReturnCode: -1,
-				}
-			}
-			if ctx.Err() == context.DeadlineExceeded {
-				return ExecutionResult{
-					Success:    false,
-					Stderr:     "command timeout exceeded",
-					ReturnCode: -1,
-				}
-			}
-
-			if exitError, ok := err.(*exec.ExitError); ok {
-				returnCode = exitError.ExitCode()
-			} else {
-				returnCode = -1
-			}
-			stderr = err.Error()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Start()
+		cancelledBySignal := false
+		if err == nil {
+			err, cancelledBySignal = waitForProcessWithSignalHandlingStatus(cmd)
 		}
-
-		return ExecutionResult{
-			Success:    success,
-			Stdout:     string(output),
-			Stderr:     stderr,
-			ReturnCode: returnCode,
-		}
+		return capturedExecutionResult(ctx, err, cancelledBySignal, stdout.String(), stderr.String())
 	}
 
 	// Stream output directly to stdout/stderr
@@ -183,42 +159,15 @@ func ExecuteShellCommand(ctx context.Context, opts ExecuteOptions) ExecutionResu
 	}
 
 	if opts.CaptureOutput {
-		output, err := cmd.CombinedOutput()
-		success := err == nil
-		returnCode := 0
-		stderr := ""
-
-		if err != nil {
-			// Check if context was cancelled
-			if ctx.Err() == context.Canceled {
-				return ExecutionResult{
-					Success:    false,
-					Stderr:     "command cancelled",
-					ReturnCode: -1,
-				}
-			}
-			if ctx.Err() == context.DeadlineExceeded {
-				return ExecutionResult{
-					Success:    false,
-					Stderr:     "command timeout exceeded",
-					ReturnCode: -1,
-				}
-			}
-
-			if exitError, ok := err.(*exec.ExitError); ok {
-				returnCode = exitError.ExitCode()
-			} else {
-				returnCode = -1
-			}
-			stderr = err.Error()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Start()
+		cancelledBySignal := false
+		if err == nil {
+			err, cancelledBySignal = waitForProcessWithSignalHandlingStatus(cmd)
 		}
-
-		return ExecutionResult{
-			Success:    success,
-			Stdout:     string(output),
-			Stderr:     stderr,
-			ReturnCode: returnCode,
-		}
+		return capturedExecutionResult(ctx, err, cancelledBySignal, stdout.String(), stderr.String())
 	}
 
 	// For daemon processes running in foreground, track PID
@@ -438,7 +387,11 @@ func checkDaemonAlreadyRunning(commandName, command string) int {
 
 // executeWithRetry executes a command with retry logic based on step configuration
 // ExecuteCommandStep executes a single command step with all its components
-func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) (result ExecutionResult) {
+func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string, passthroughArgs []string) ExecutionResult {
+	return executeCommandStep(context.Background(), step, commandName, workingDir, passthroughArgs, false)
+}
+
+func executeCommandStep(ctx context.Context, step config.CommandStep, commandName, workingDir string, passthroughArgs []string, captureOutput bool) (result ExecutionResult) {
 	logger.Infof("Executing command step (background=%t, daemon=%t)", step.Background, step.Daemon)
 
 	// Validate and resolve execution directory
@@ -474,6 +427,10 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 	if len(step.Run) == 0 {
 		return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
 	}
+	var stdout, stderr strings.Builder
+	var warnings []string
+	var attemptedCommands []string
+	attempts := 0
 
 	for _, baseCommand := range []string(step.Run) {
 		command := appendPassthroughArgs(baseCommand, passthroughArgs)
@@ -494,11 +451,37 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 		}
 
 		// Execute with retry logic
-		result := executeWithRetry(context.Background(), step, command, executionDir, commandName)
+		result = executeWithRetry(ctx, step, command, executionDir, commandName, captureOutput)
+		if captureOutput {
+			stdout.WriteString(result.Stdout)
+			stderr.WriteString(result.Stderr)
+		}
+		warnings = append(warnings, result.Warnings...)
+		attemptedCommands = append(attemptedCommands, result.AttemptedCommands...)
+		attempts += result.Attempts
+		if result.Cancelled || result.TimedOut {
+			result.FailedCommand = command
+			result.ServicesStarted = servicesStarted
+			if captureOutput {
+				result.Stdout = stdout.String()
+				result.Stderr = stderr.String()
+			}
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
+			return result
+		}
 
 		if !result.Success && !step.Background && !step.ContinueOnError {
 			result.FailedCommand = command
 			result.ServicesStarted = servicesStarted
+			if captureOutput {
+				result.Stdout = stdout.String()
+				result.Stderr = stderr.String()
+			}
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			return result
 		}
 
@@ -509,13 +492,16 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			if err := CreateEnhancedPIDFile(pidFile, result.PID, commandName, command); err != nil {
 				warning := fmt.Sprintf("Failed to create PID file: %v", NewDaemonError(result.PID, pidFile, err))
 				logger.Warnf("%s", warning)
-				result.Warnings = append(result.Warnings, warning)
+				warnings = append(warnings, warning)
 			} else {
 				logger.Infof("Created enhanced PID file %s for background daemon process", pidFile)
 				fmt.Printf("%s\n", colors.Success("Running job '%s' in the background. PID: %d, PID file: %s",
 					command, result.PID, pidFile))
 			}
 			result.ServicesStarted = servicesStarted
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			return result
 		}
 
@@ -524,11 +510,47 @@ func ExecuteCommandStep(step config.CommandStep, commandName, workingDir string,
 			logger.Infof("Command started with PID %d", result.PID)
 			fmt.Printf("%s\n", colors.Success("Running job '%s' in the background", command))
 			result.ServicesStarted = servicesStarted
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			return result
 		}
 	}
 
-	return ExecutionResult{Success: true, ServicesStarted: servicesStarted}
+	result.Success = true
+	result.ReturnCode = 0
+	result.Cancelled = false
+	result.TimedOut = false
+	result.FailedCommand = ""
+	result.ServicesStarted = servicesStarted
+	if captureOutput {
+		result.Stdout = stdout.String()
+		result.Stderr = stderr.String()
+	}
+	result.Warnings = warnings
+	result.AttemptedCommands = attemptedCommands
+	result.Attempts = attempts
+	return result
+}
+
+func capturedExecutionResult(ctx context.Context, err error, cancelledBySignal bool, stdout, stderr string) ExecutionResult {
+	if ctx.Err() == context.Canceled || cancelledBySignal {
+		return ExecutionResult{Success: false, Stdout: stdout, Stderr: stderr + "command cancelled", ReturnCode: -1, Cancelled: true}
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return ExecutionResult{Success: false, Stdout: stdout, Stderr: stderr + "command timeout exceeded", ReturnCode: -1, TimedOut: true}
+	}
+	if err == nil {
+		return ExecutionResult{Success: true, Stdout: stdout, Stderr: stderr, ReturnCode: 0}
+	}
+	returnCode := -1
+	if exitError, ok := err.(*exec.ExitError); ok {
+		returnCode = exitError.ExitCode()
+	}
+	if stderr == "" {
+		stderr = err.Error()
+	}
+	return ExecutionResult{Success: false, Stdout: stdout, Stderr: stderr, ReturnCode: returnCode}
 }
 
 // ExecuteCommandWithOptions executes a command using the options struct pattern
@@ -538,10 +560,25 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 
 	var servicesStarted []string
 	var finalResult ExecutionResult
+	var stdout, stderr strings.Builder
+	var warnings []string
+	var attemptedCommands []string
+	attempts := 0
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	for i, step := range opts.Steps {
 		logger.Infof("Executing step %d/%d", i+1, len(opts.Steps))
-		result := ExecuteCommandStep(step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs)
+		result := executeCommandStep(ctx, step, opts.CommandName, opts.WorkingDir, opts.PassthroughArgs, opts.CaptureOutput)
+		if opts.CaptureOutput {
+			stdout.WriteString(result.Stdout)
+			stderr.WriteString(result.Stderr)
+		}
+		warnings = append(warnings, result.Warnings...)
+		attemptedCommands = append(attemptedCommands, result.AttemptedCommands...)
+		attempts += result.Attempts
 
 		// Track services started in this step
 		if len(result.ServicesStarted) > 0 {
@@ -553,6 +590,13 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 			result.CommandName = opts.CommandName
 			result.DurationMs = time.Since(startTime).Milliseconds()
 			result.ServicesStarted = servicesStarted
+			if opts.CaptureOutput {
+				result.Stdout = stdout.String()
+				result.Stderr = stderr.String()
+			}
+			result.Warnings = warnings
+			result.AttemptedCommands = attemptedCommands
+			result.Attempts = attempts
 			result.StartTime = startTime
 			return result
 		}
@@ -564,16 +608,24 @@ func ExecuteCommandWithOptions(opts CommandExecutionOptions) ExecutionResult {
 	duration := time.Since(startTime).Milliseconds()
 	logger.Infof("Command '%s' completed successfully in %dms", opts.CommandName, duration)
 
-	return ExecutionResult{
-		Success:         true,
-		CommandName:     opts.CommandName,
-		DurationMs:      duration,
-		ServicesStarted: servicesStarted,
-		StartTime:       startTime,
-		Stdout:          finalResult.Stdout,
-		Stderr:          finalResult.Stderr,
-		PID:             finalResult.PID,
+	result := ExecutionResult{
+		Success:           true,
+		CommandName:       opts.CommandName,
+		DurationMs:        duration,
+		ServicesStarted:   servicesStarted,
+		StartTime:         startTime,
+		Stdout:            finalResult.Stdout,
+		Stderr:            finalResult.Stderr,
+		PID:               finalResult.PID,
+		Warnings:          warnings,
+		AttemptedCommands: attemptedCommands,
+		Attempts:          attempts,
 	}
+	if opts.CaptureOutput {
+		result.Stdout = stdout.String()
+		result.Stderr = stderr.String()
+	}
+	return result
 }
 
 // getContainerName extracts container name from service definition

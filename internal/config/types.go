@@ -12,10 +12,56 @@ type LogsConfig struct {
 	Size int    `yaml:"size,omitempty"`
 }
 
+type ResultBudgetConfig struct {
+	Lines int `yaml:"lines,omitempty" json:"lines,omitempty"`
+	Bytes int `yaml:"bytes,omitempty" json:"bytes,omitempty"`
+}
+
+const (
+	MinDevResultLines = 7
+	MinDevResultBytes = 1024
+)
+
+func (b *ResultBudgetConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawBudget ResultBudgetConfig
+	var decoded rawBudget
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	for index := 0; index+1 < len(value.Content); index += 2 {
+		name := value.Content[index].Value
+		switch name {
+		case "lines":
+			if decoded.Lines < MinDevResultLines {
+				return fmt.Errorf("DEV-RESULT lines must be greater than or equal to %d", MinDevResultLines)
+			}
+		case "bytes":
+			if decoded.Bytes < MinDevResultBytes {
+				return fmt.Errorf("DEV-RESULT bytes must be greater than or equal to %d", MinDevResultBytes)
+			}
+		}
+	}
+	*b = ResultBudgetConfig(decoded)
+	return nil
+}
+
+type DevResultCommandConfig struct {
+	Enabled    bool               `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Success    ResultBudgetConfig `yaml:"success,omitempty" json:"success,omitempty"`
+	Failure    ResultBudgetConfig `yaml:"failure,omitempty" json:"failure,omitempty"`
+	Timeout    ResultBudgetConfig `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Background ResultBudgetConfig `yaml:"background,omitempty" json:"background,omitempty"`
+}
+
+type DevResultConfig struct {
+	Commands map[string]DevResultCommandConfig `yaml:"commands" json:"commands"`
+}
+
 // Config represents the complete development configuration
 type Config struct {
-	Logs     *LogsConfig              `yaml:"logs,omitempty"`
-	Commands map[string][]CommandStep `yaml:"commands"`
+	Logs      *LogsConfig              `yaml:"logs,omitempty"`
+	Commands  map[string][]CommandStep `yaml:"commands"`
+	DevResult *DevResultConfig         `yaml:"dev_result,omitempty" json:"dev_result,omitempty"`
 }
 
 // CommandStep represents a single step in a command execution

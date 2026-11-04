@@ -100,6 +100,9 @@ Validate configuration file
 ### `dev-tools completion <shell>`
 Generate shell completion script
 
+### `dev-tools result <job>`
+Retrieve a stored DEV-RESULT summary or its full, failure, or warning evidence
+
 
 ## Best Practices for AI Assistants
 
@@ -113,7 +116,7 @@ Generate shell completion script
 - `--verbose` or `-v`: Enable detailed logging
 - `--project-dir <path>` or `-p <path>`: Run commands in a different directory
 - `--watch` or `-w`: Watch mode - re-run command on file changes (requires watch config)
-- `--format <format>`: Output format - text or json (default: text, currently status command only)
+- `--format <format>`: Output format - text or json (default: text; supported by status and command results)
 - `--no-color`: Disable colored output (useful for parsing)
 
 ### Debugging

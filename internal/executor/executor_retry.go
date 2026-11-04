@@ -11,7 +11,7 @@ import (
 // executeWithRetry executes a command with retry logic based on step configuration
 // Supports configurable retry attempts, delays, and exit code filtering
 // Context allows for cancellation and timeouts
-func executeWithRetry(ctx context.Context, step config.CommandStep, command, executionDir, commandName string) ExecutionResult {
+func executeWithRetry(ctx context.Context, step config.CommandStep, command, executionDir, commandName string, captureOutput bool) ExecutionResult {
 	maxAttempts := step.Retry + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -28,22 +28,45 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 	}
 
 	var result ExecutionResult
+	var stdout, stderr string
+	var attempted []string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
 			logger.Infof("Retry attempt %d/%d after %v delay", attempt, maxAttempts, retryDelay)
-			time.Sleep(retryDelay)
+			if delayErr := waitForRetryDelay(ctx, retryDelay); delayErr != nil {
+				result = ExecutionResult{Success: false, ReturnCode: -1}
+				if delayErr == context.DeadlineExceeded {
+					result.TimedOut = true
+					result.Stderr = "command timeout exceeded during retry delay"
+				} else {
+					result.Cancelled = true
+					result.Stderr = "command cancelled during retry delay"
+				}
+				if captureOutput {
+					stderr += result.Stderr
+				}
+				break
+			}
 		}
 
 		result = ExecuteShellCommand(ctx, ExecuteOptions{
 			Command:       command,
 			Background:    step.Background,
-			CaptureOutput: step.Background,
+			CaptureOutput: step.Background || captureOutput,
 			WorkingDir:    executionDir,
 			Daemon:        step.Daemon,
 			CommandName:   commandName,
 		})
+		attempted = append(attempted, command)
+		if captureOutput {
+			stdout += result.Stdout
+			stderr += result.Stderr
+		}
 
 		if result.Success {
+			break
+		}
+		if result.Cancelled || result.TimedOut {
 			break
 		}
 
@@ -65,6 +88,12 @@ func executeWithRetry(ctx context.Context, step config.CommandStep, command, exe
 			break
 		}
 	}
+	if captureOutput {
+		result.Stdout = stdout
+		result.Stderr = stderr
+	}
+	result.AttemptedCommands = attempted
+	result.Attempts = len(attempted)
 
 	return result
 }

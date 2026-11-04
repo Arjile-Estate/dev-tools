@@ -243,12 +243,16 @@ func MergeConfigWithDefaults(userConfig, defaults *Config) *Config {
 	}
 
 	merged := &Config{
-		Commands: make(map[string][]CommandStep),
+		Commands:  make(map[string][]CommandStep),
+		DevResult: defaults.DevResult,
 	}
 
 	// Preserve logs config from user
 	if userConfig.Logs != nil {
 		merged.Logs = userConfig.Logs
+	}
+	if userConfig.DevResult != nil {
+		merged.DevResult = userConfig.DevResult
 	}
 
 	// Start with defaults
