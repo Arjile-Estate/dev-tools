@@ -586,11 +586,6 @@ func devResultCommandConfig(cfg *config.Config, commandName string, steps []conf
 	return commandConfig, true
 }
 
-func devResultEnabled(cfg *config.Config, commandName string, steps []config.CommandStep, watch bool) bool {
-	_, enabled := devResultCommandConfig(cfg, commandName, steps, watch)
-	return enabled
-}
-
 func devResultBudgets(commandConfig config.DevResultCommandConfig) devresult.Budgets {
 	budgets := devresult.DefaultBudgets()
 	applyBudget := func(target *devresult.Budget, override config.ResultBudgetConfig) {
