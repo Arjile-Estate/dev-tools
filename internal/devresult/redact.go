@@ -41,6 +41,38 @@ func Redact(input string, environment []string) (string, int) {
 	return redacted, matches
 }
 
+func RedactDiagnosticsResponse(response DiagnosticsResponse, environment []string) (DiagnosticsResponse, int) {
+	redacted := response
+	redacted.Failures = append([]Diagnostic(nil), response.Failures...)
+	redacted.Warnings = append([]Diagnostic(nil), response.Warnings...)
+	redacted.Problems = append([]EvidenceProblem(nil), response.Problems...)
+	redacted.Sources = append([]DiagnosticSource(nil), response.Sources...)
+	matches := 0
+	redactString := func(value *string) {
+		var count int
+		*value, count = Redact(*value, environment)
+		matches += count
+	}
+	for _, diagnostics := range [][]Diagnostic{redacted.Failures, redacted.Warnings} {
+		for index := range diagnostics {
+			redactString(&diagnostics[index].Identity)
+			redactString(&diagnostics[index].Message)
+			redactString(&diagnostics[index].Package)
+			redactString(&diagnostics[index].File)
+			redactString(&diagnostics[index].Suite)
+			redactString(&diagnostics[index].Test)
+		}
+	}
+	for index := range redacted.Problems {
+		redactString(&redacted.Problems[index].Message)
+	}
+	for index := range redacted.Sources {
+		redactString(&redacted.Sources[index].Kind)
+		redactString(&redacted.Sources[index].Path)
+	}
+	return redacted, matches
+}
+
 func redactCapturedSecret(input string, pattern *regexp.Regexp) (string, int) {
 	matches := 0
 	redacted := pattern.ReplaceAllStringFunc(input, func(match string) string {

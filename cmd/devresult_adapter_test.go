@@ -153,6 +153,10 @@ func TestARJ3539AdapterHelperProcess(t *testing.T) {
 		value := response(devresult.EvidenceComplete)
 		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "secret-demo-12345.xml"}}
 		encode(value)
+	case "escaped-secret":
+		_, _ = fmt.Fprint(os.Stdout, `{"schema":"dev-tools/diagnostics-response/v1","evidence_state":"complete","failures":[{"identity":"checkout/escaped","message":"\u0073\u0065\u0063\u0072\u0065\u0074\u002d\u0064\u0065\u006d\u006f\u002d\u0031\u0032\u0033\u0034\u0035"}]}`)
+	case "malformed-escaped-secret":
+		_, _ = fmt.Fprint(os.Stdout, `{"schema":"dev-tools/diagnostics-response/v1","evidence_state":"complete","failures":[{"identity":"checkout/escaped","message":"\u0073\u0065\u0063\u0072\u0065\u0074\u002d\u0064\u0065\u006d\u006f\u002d\u0031\u0032\u0033\u0034\u0035"}]`)
 	case "traversal":
 		value := response(devresult.EvidenceComplete)
 		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "../test-010/checkout.xml"}}
@@ -417,6 +421,42 @@ func TestRunCommandDiagnostics(t *testing.T) {
 		require.NoError(t, json.Unmarshal(resultData, &stored))
 		assert.True(t, stored.Redaction.Applied)
 		assert.GreaterOrEqual(t, stored.Redaction.Matches, 3)
+	})
+
+	t.Run("escaped_JSON_secrets_are_redacted_before_retention", func(t *testing.T) {
+		t.Setenv("ARJ3539_TOKEN", "secret-demo-12345")
+		projectDir := t.TempDir()
+		runner := arj3539EvidenceExecutor(t, "checkout.xml", "<testsuite/>", arj3539Failure("test", 10, "ordinary failure"))
+		arj3539Install(t, arj3539Config(arj3539Adapter("escaped-secret"), false), runner)
+		_, err := arj3539RunRoot(projectDir, "test")
+		arj3539RequireExitCode(t, err, 10)
+		job := arj3539OnlyJob(t, projectDir)
+		resultData, readErr := os.ReadFile(filepath.Join(projectDir, ".build", "agent", "results", job+".json"))
+		require.NoError(t, readErr)
+		var stored devresult.Result
+		require.NoError(t, json.Unmarshal(resultData, &stored))
+		require.NotEmpty(t, stored.Artifacts.AdapterResponse)
+		responseData, readErr := os.ReadFile(filepath.Join(projectDir, filepath.FromSlash(stored.Artifacts.AdapterResponse)))
+		require.NoError(t, readErr)
+		assert.NotContains(t, string(responseData), `\u0073\u0065\u0063\u0072\u0065\u0074`)
+		var response devresult.DiagnosticsResponse
+		require.NoError(t, json.Unmarshal(responseData, &response))
+		require.Len(t, response.Failures, 1)
+		assert.Equal(t, devresult.RedactionMarker, response.Failures[0].Message)
+	})
+
+	t.Run("malformed_JSON_is_not_retained_as_an_unredacted_response", func(t *testing.T) {
+		t.Setenv("ARJ3539_TOKEN", "secret-demo-12345")
+		projectDir := t.TempDir()
+		runner := arj3539EvidenceExecutor(t, "checkout.xml", "<testsuite/>", arj3539Failure("test", 10, "ordinary failure"))
+		arj3539Install(t, arj3539Config(arj3539Adapter("malformed-escaped-secret"), false), runner)
+		_, err := arj3539RunRoot(projectDir, "test")
+		arj3539RequireExitCode(t, err, 10)
+		resultData, readErr := os.ReadFile(filepath.Join(projectDir, ".build", "agent", "results", arj3539OnlyJob(t, projectDir)+".json"))
+		require.NoError(t, readErr)
+		var stored devresult.Result
+		require.NoError(t, json.Unmarshal(resultData, &stored))
+		assert.Empty(t, stored.Artifacts.AdapterResponse)
 	})
 
 	t.Run("R4.E2_rejects_parent_traversal_source", func(t *testing.T) {

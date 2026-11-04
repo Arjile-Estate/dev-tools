@@ -639,7 +639,15 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		},
 		Limits: limits,
 	})
-	adapterResponse, adapterResponseMatches := redactRetainedEvidence(string(adapterResult.Stdout))
+	adapterResponse := ""
+	adapterResponseMatches := 0
+	if adapterResult.Response != nil {
+		redactedResponse, matches := devresult.RedactDiagnosticsResponse(*adapterResult.Response, os.Environ())
+		if encodedResponse, encodeErr := json.Marshal(redactedResponse); encodeErr == nil {
+			adapterResponse = string(encodedResponse)
+			adapterResponseMatches = matches
+		}
+	}
 	adapterStderr, adapterStderrMatches := redactRetainedEvidence(string(adapterResult.Stderr))
 	evidence := devresult.EvidenceBundle{
 		AdapterResponse:  adapterResponse,
