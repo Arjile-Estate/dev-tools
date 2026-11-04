@@ -122,19 +122,20 @@ type Result struct {
 }
 
 type Input struct {
-	Job                string
-	CommandName        string
-	NormalizedCommand  string
-	ExitCode           int
-	Duration           time.Duration
-	Attempts           int
-	Stdout             string
-	Stderr             string
-	Warnings           []string
-	TimedOut           bool
-	Cancelled          bool
-	Diagnostics        *DiagnosticsResponse
-	DiagnosticsWarning string
+	Job                        string
+	CommandName                string
+	NormalizedCommand          string
+	ExitCode                   int
+	Duration                   time.Duration
+	Attempts                   int
+	Stdout                     string
+	Stderr                     string
+	Warnings                   []string
+	TimedOut                   bool
+	Cancelled                  bool
+	Diagnostics                *DiagnosticsResponse
+	DiagnosticsWarning         string
+	AdditionalRedactionMatches int
 }
 
 var (
@@ -178,7 +179,7 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	}
 
 	failures, warnings := collectEvidence(stdout, stderr, redactedWarnings, outcome)
-	structuredMatches := 0
+	structuredMatches := input.AdditionalRedactionMatches
 	if input.Diagnostics != nil {
 		structuredFailures, structuredWarnings, matches := collectStructuredEvidence(*input.Diagnostics, environment)
 		structuredMatches += matches

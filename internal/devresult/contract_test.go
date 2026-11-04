@@ -75,6 +75,11 @@ func TestDiagnosticsContractRejectsExcessRecordsAndInvalidStates(t *testing.T) {
 	assert.ErrorContains(t, ValidateDiagnosticsResponse(response, limits), "diagnostic record limit")
 
 	response.Warnings = nil
+	assert.ErrorContains(t, ValidateDiagnosticsResponse(response, limits), "diagnostic record limit")
+	response.Problems = nil
+	response.Sources = []DiagnosticSource{{Kind: "junit", Path: "one.xml"}}
+	assert.ErrorContains(t, ValidateDiagnosticsResponse(response, limits), "diagnostic record limit")
+	response.Sources = nil
 	require.NoError(t, ValidateDiagnosticsResponse(response, limits))
 	response.EvidenceState = EvidenceUnavailable
 	assert.ErrorContains(t, ValidateDiagnosticsResponse(response, limits), "unavailable evidence cannot contain diagnostics")

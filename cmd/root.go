@@ -497,18 +497,19 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		warnings := append([]string(nil), result.Warnings...)
 		warnings = append(warnings, resultWarnings...)
 		model, retained := devresult.Build(devresult.Input{
-			Job:               job,
-			CommandName:       commandName,
-			NormalizedCommand: devresult.NormalizeCommand(commandName, parsedArgs.PassthroughArgs),
-			ExitCode:          result.ReturnCode,
-			Duration:          time.Duration(result.DurationMs) * time.Millisecond,
-			Attempts:          result.Attempts,
-			Stdout:            result.Stdout,
-			Stderr:            result.Stderr,
-			Warnings:          warnings,
-			TimedOut:          result.TimedOut,
-			Cancelled:         result.Cancelled,
-			Diagnostics:       diagnostics,
+			Job:                        job,
+			CommandName:                commandName,
+			NormalizedCommand:          devresult.NormalizeCommand(commandName, parsedArgs.PassthroughArgs),
+			ExitCode:                   result.ReturnCode,
+			Duration:                   time.Duration(result.DurationMs) * time.Millisecond,
+			Attempts:                   result.Attempts,
+			Stdout:                     result.Stdout,
+			Stderr:                     result.Stderr,
+			Warnings:                   warnings,
+			TimedOut:                   result.TimedOut,
+			Cancelled:                  result.Cancelled,
+			Diagnostics:                diagnostics,
+			AdditionalRedactionMatches: retainedEvidence.RedactionMatches,
 		}, budgets, os.Environ())
 		compactMetadata := devresult.Compact(model, budgets)
 		model.Truncation = compactMetadata.Truncation
@@ -638,9 +639,12 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		},
 		Limits: limits,
 	})
+	adapterResponse, adapterResponseMatches := redactRetainedEvidence(string(adapterResult.Stdout))
+	adapterStderr, adapterStderrMatches := redactRetainedEvidence(string(adapterResult.Stderr))
 	evidence := devresult.EvidenceBundle{
-		AdapterResponse: redactRetainedEvidence(string(adapterResult.Stdout)),
-		AdapterStderr:   redactRetainedEvidence(string(adapterResult.Stderr)),
+		AdapterResponse:  adapterResponse,
+		AdapterStderr:    adapterStderr,
+		RedactionMatches: adapterResponseMatches + adapterStderrMatches,
 	}
 	if adapterResult.Err != nil {
 		return nil, diagnosticsAdapterWarning(adapterResult), evidence
@@ -654,26 +658,28 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		return nil, "unsafe structured evidence: " + err.Error(), evidence
 	}
 	for index, source := range validated {
+		path, pathMatches := retainedSourcePath(source.Path, index)
+		content, contentMatches := redactRetainedEvidence(string(source.Content))
 		evidence.Sources = append(evidence.Sources, devresult.RetainedSource{
 			Kind:    source.Kind,
-			Path:    retainedSourcePath(source.Path, index),
-			Content: redactRetainedEvidence(string(source.Content)),
+			Path:    path,
+			Content: content,
 		})
+		evidence.RedactionMatches += pathMatches + contentMatches
 	}
 	return adapterResult.Response, "", evidence
 }
 
-func redactRetainedEvidence(value string) string {
-	redacted, _ := devresult.Redact(value, os.Environ())
-	return redacted
+func redactRetainedEvidence(value string) (string, int) {
+	return devresult.Redact(value, os.Environ())
 }
 
-func retainedSourcePath(path string, index int) string {
-	redacted := redactRetainedEvidence(path)
+func retainedSourcePath(path string, index int) (string, int) {
+	redacted, matches := redactRetainedEvidence(path)
 	if redacted == path {
-		return path
+		return path, matches
 	}
-	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted))))
+	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted)))), matches
 }
 
 func diagnosticsAdapterWarning(result devresult.AdapterResult) string {

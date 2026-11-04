@@ -112,11 +112,12 @@ func ValidateDiagnosticsResponse(response DiagnosticsResponse, limits Limits) er
 	default:
 		return fmt.Errorf("invalid evidence state %q", response.EvidenceState)
 	}
-	count := len(response.Failures) + len(response.Warnings)
+	diagnosticCount := len(response.Failures) + len(response.Warnings)
+	count := diagnosticCount + len(response.Problems) + len(response.Sources)
 	if count > limits.MaxDiagnostics {
 		return fmt.Errorf("diagnostic record limit exceeded: got %d, limit %d", count, limits.MaxDiagnostics)
 	}
-	if response.EvidenceState == EvidenceUnavailable && count != 0 {
+	if response.EvidenceState == EvidenceUnavailable && diagnosticCount != 0 {
 		return fmt.Errorf("unavailable evidence cannot contain diagnostics")
 	}
 	for group, diagnostics := range map[string][]Diagnostic{"failure": response.Failures, "warning": response.Warnings} {

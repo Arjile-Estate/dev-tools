@@ -9,12 +9,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
 const LeaseSchemaV1 = "dev-tools/retention-lease/v1"
+
+const retentionRemnantGrace = 5 * time.Minute
 
 type Lease struct {
 	Schema    string    `json:"schema"`
@@ -88,7 +91,7 @@ func ApplyRetention(root, currentRunID string, now time.Time, policy RetentionPo
 		return nil
 	}
 	for _, job := range jobs {
-		if protected[job.id] || now.Sub(job.modified) <= policy.MaxAge {
+		if protected[job.id] || recentRetentionRemnant(job, now) || now.Sub(job.modified) <= policy.MaxAge {
 			continue
 		}
 		if err := remove(job); err != nil {
@@ -99,7 +102,7 @@ func ApplyRetention(root, currentRunID string, now time.Time, policy RetentionPo
 		if total <= policy.MaxBytes {
 			break
 		}
-		if protected[job.id] || removed[job.id] {
+		if protected[job.id] || removed[job.id] || recentRetentionRemnant(job, now) {
 			continue
 		}
 		if err := remove(job); err != nil {
@@ -188,10 +191,18 @@ func decodeLease(data []byte) (Lease, error) {
 }
 
 type retentionJob struct {
-	id       string
-	size     int64
-	modified time.Time
-	verified bool
+	id           string
+	size         int64
+	modified     time.Time
+	verified     bool
+	remnantPaths []string
+}
+
+var generatedJobPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*-[0-9]{8}T[0-9]{6}\.[0-9]{9}Z(?:-[A-Za-z0-9]+)*$`)
+var atomicTemporaryPattern = regexp.MustCompile(`^\.dev-result-[0-9]+$`)
+
+func recentRetentionRemnant(job retentionJob, now time.Time) bool {
+	return len(job.remnantPaths) > 0 && now.Sub(job.modified) < retentionRemnantGrace
 }
 
 func loadActiveRuns(root string) (map[string]bool, error) {
@@ -236,7 +247,29 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan DEV-RESULT sidecars: %w", err)
 	}
-	jobs := make([]retentionJob, 0, len(entries))
+	jobsByID := make(map[string]*retentionJob)
+	jobFor := func(id string) *retentionJob {
+		job := jobsByID[id]
+		if job == nil {
+			job = &retentionJob{id: id}
+			jobsByID[id] = job
+		}
+		return job
+	}
+	addArtifact := func(job *retentionJob, path string) error {
+		size, modified, statErr := artifactStats(path)
+		if errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		}
+		if statErr != nil {
+			return statErr
+		}
+		job.size += size
+		if modified.After(job.modified) {
+			job.modified = modified
+		}
+		return nil
+	}
 	verified := make(map[string]bool)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
@@ -254,7 +287,8 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 		if json.Unmarshal(data, &result) != nil || result.Schema != SchemaV1 || result.Job != id {
 			continue
 		}
-		job := retentionJob{id: id, verified: true}
+		job := jobFor(id)
+		job.verified = true
 		verified[id] = true
 		paths := []string{
 			filepath.Join(resultsDirectory, entry.Name()),
@@ -263,21 +297,11 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 			filepath.Join(root, ".build", "agent", "evidence", id),
 		}
 		for _, path := range paths {
-			size, modified, statErr := artifactStats(path)
-			if errors.Is(statErr, os.ErrNotExist) {
-				continue
-			}
-			if statErr != nil {
+			if statErr := addArtifact(job, path); statErr != nil {
 				return nil, fmt.Errorf("inspect retention artifact for %q: %w", id, statErr)
 			}
-			job.size += size
-			if modified.After(job.modified) {
-				job.modified = modified
-			}
 		}
-		jobs = append(jobs, job)
 	}
-	orphans := make(map[string]*retentionJob)
 	for _, directory := range []string{filepath.Join(root, ".build", "agent", "runs"), filepath.Join(root, ".build", "agent", "evidence")} {
 		entries, readErr := os.ReadDir(directory)
 		if errors.Is(readErr, os.ErrNotExist) {
@@ -291,22 +315,67 @@ func scanRetentionJobs(root string) ([]retentionJob, error) {
 			if !entry.IsDir() || verified[id] || !safeJobPattern.MatchString(id) {
 				continue
 			}
-			size, modified, statErr := artifactStats(filepath.Join(directory, id))
-			if statErr != nil {
+			job := jobFor(id)
+			if statErr := addArtifact(job, filepath.Join(directory, id)); statErr != nil {
 				return nil, fmt.Errorf("inspect orphan DEV-RESULT artifact %q: %w", id, statErr)
-			}
-			job := orphans[id]
-			if job == nil {
-				job = &retentionJob{id: id}
-				orphans[id] = job
-			}
-			job.size += size
-			if modified.After(job.modified) {
-				job.modified = modified
 			}
 		}
 	}
-	for _, job := range orphans {
+	addRemnant := func(id, path string) error {
+		job := jobFor(id)
+		if err := addArtifact(job, path); err != nil {
+			return err
+		}
+		job.remnantPaths = append(job.remnantPaths, path)
+		return nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		path := filepath.Join(resultsDirectory, name)
+		switch {
+		case atomicTemporaryPattern.MatchString(name):
+			if err := addRemnant("temp-results-"+strings.TrimPrefix(name, ".dev-result-"), path); err != nil {
+				return nil, fmt.Errorf("inspect temporary DEV-RESULT artifact %q: %w", name, err)
+			}
+		case strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".lock"):
+			id := strings.TrimSuffix(strings.TrimPrefix(name, "."), ".lock")
+			if safeJobPattern.MatchString(id) {
+				if err := addRemnant(id, path); err != nil {
+					return nil, fmt.Errorf("inspect DEV-RESULT reservation %q: %w", id, err)
+				}
+			}
+		}
+	}
+	logsDirectory := filepath.Join(root, ".build", "agent", "logs")
+	logEntries, readErr := os.ReadDir(logsDirectory)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("scan DEV-RESULT logs: %w", readErr)
+	}
+	for _, entry := range logEntries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		path := filepath.Join(logsDirectory, name)
+		switch {
+		case atomicTemporaryPattern.MatchString(name):
+			if err := addRemnant("temp-logs-"+strings.TrimPrefix(name, ".dev-result-"), path); err != nil {
+				return nil, fmt.Errorf("inspect temporary DEV-RESULT log %q: %w", name, err)
+			}
+		case filepath.Ext(name) == ".log":
+			id := strings.TrimSuffix(name, ".log")
+			if !verified[id] && generatedJobPattern.MatchString(id) {
+				if err := addRemnant(id, path); err != nil {
+					return nil, fmt.Errorf("inspect orphan DEV-RESULT log %q: %w", id, err)
+				}
+			}
+		}
+	}
+	jobs := make([]retentionJob, 0, len(jobsByID))
+	for _, job := range jobsByID {
 		jobs = append(jobs, *job)
 	}
 	return jobs, nil
@@ -352,6 +421,12 @@ func removeRetentionJob(root string, job retentionJob) error {
 			retentionTarget{path: filepath.Join(root, ".build", "agent", "logs", job.id+".log")},
 		)
 	}
+	for _, path := range job.remnantPaths {
+		if !validRetentionRemnantPath(root, path) {
+			return fmt.Errorf("refuse to remove unsafe retention remnant %q", path)
+		}
+		paths = append(paths, retentionTarget{path: path})
+	}
 	for _, target := range paths {
 		var err error
 		if target.recursive {
@@ -367,4 +442,29 @@ func removeRetentionJob(root string, job retentionJob) error {
 		}
 	}
 	return nil
+}
+
+func validRetentionRemnantPath(root, path string) bool {
+	clean := filepath.Clean(path)
+	name := filepath.Base(clean)
+	resultsDirectory := filepath.Join(root, ".build", "agent", "results")
+	logsDirectory := filepath.Join(root, ".build", "agent", "logs")
+	switch filepath.Dir(clean) {
+	case resultsDirectory:
+		if atomicTemporaryPattern.MatchString(name) {
+			return true
+		}
+		if strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".lock") {
+			id := strings.TrimSuffix(strings.TrimPrefix(name, "."), ".lock")
+			return safeJobPattern.MatchString(id)
+		}
+	case logsDirectory:
+		if atomicTemporaryPattern.MatchString(name) {
+			return true
+		}
+		if filepath.Ext(name) == ".log" {
+			return generatedJobPattern.MatchString(strings.TrimSuffix(name, ".log"))
+		}
+	}
+	return false
 }

@@ -47,6 +47,52 @@ func TestApplyRetentionIgnoresUnrelatedAgentLogs(t *testing.T) {
 	assert.FileExists(t, path)
 }
 
+func TestApplyRetentionCountsAndRemovesCrashRemnants(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	job := "test-20261104T100000.000000000Z-123456"
+	paths := []string{
+		filepath.Join(root, ".build", "agent", "results", "."+job+".lock"),
+		filepath.Join(root, ".build", "agent", "results", ".dev-result-123456"),
+		filepath.Join(root, ".build", "agent", "logs", job+".log"),
+	}
+	for index, path := range paths {
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, make([]byte, 32+index), 0o600))
+		age := time.Hour
+		if index == 0 {
+			age = 8 * 24 * time.Hour
+		}
+		require.NoError(t, os.Chtimes(path, now.Add(-age), now.Add(-age)))
+	}
+	unrelated := filepath.Join(root, ".build", "agent", "logs", "arj-3539-implementation-test.log")
+	require.NoError(t, os.WriteFile(unrelated, make([]byte, 64), 0o600))
+	require.NoError(t, os.Chtimes(unrelated, now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour)))
+
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: 7 * 24 * time.Hour, MaxBytes: 1})
+	require.NoError(t, err)
+	assert.NotEmpty(t, report.Removed)
+	for _, path := range paths {
+		assert.NoFileExists(t, path)
+	}
+	assert.FileExists(t, unrelated)
+}
+
+func TestApplyRetentionPreservesRecentAtomicWrite(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(root, ".build", "agent", "results", ".dev-result-654321")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, make([]byte, 64), 0o600))
+	require.NoError(t, os.Chtimes(path, now, now))
+
+	report, err := ApplyRetention(root, "", now, RetentionPolicy{MaxAge: time.Nanosecond, MaxBytes: 1})
+	require.NoError(t, err)
+	assert.Empty(t, report.Removed)
+	assert.NotEmpty(t, report.Warning)
+	assert.FileExists(t, path)
+}
+
 func TestApplyRetentionProtectsOtherActiveValidationRuns(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)

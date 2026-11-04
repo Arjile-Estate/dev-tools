@@ -18,9 +18,10 @@ type RetainedSource struct {
 }
 
 type EvidenceBundle struct {
-	AdapterResponse string
-	AdapterStderr   string
-	Sources         []RetainedSource
+	AdapterResponse  string
+	AdapterStderr    string
+	Sources          []RetainedSource
+	RedactionMatches int
 }
 
 func WriteArtifacts(root string, result Result, retainedLog string) (Result, error) {

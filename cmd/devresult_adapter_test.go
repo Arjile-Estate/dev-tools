@@ -149,6 +149,10 @@ func TestARJ3539AdapterHelperProcess(t *testing.T) {
 		value.Failures = []devresult.Diagnostic{{Identity: "checkout/secret-demo-12345", Message: "token secret-demo-12345 rejected"}}
 		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "secret-demo-12345.xml"}}
 		encode(value)
+	case "retained-secret-only":
+		value := response(devresult.EvidenceComplete)
+		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "secret-demo-12345.xml"}}
+		encode(value)
 	case "traversal":
 		value := response(devresult.EvidenceComplete)
 		value.Sources = []devresult.DiagnosticSource{{Kind: "junit", Path: "../test-010/checkout.xml"}}
@@ -398,6 +402,21 @@ func TestRunCommandDiagnostics(t *testing.T) {
 		retained := arj3539ReadTree(t, filepath.Join(projectDir, ".build", "agent"))
 		assert.NotContains(t, retained, "secret-demo-12345")
 		assert.Contains(t, retained, devresult.RedactionMarker)
+	})
+
+	t.Run("retained_evidence_redactions_are_counted", func(t *testing.T) {
+		t.Setenv("ARJ3539_TOKEN", "secret-demo-12345")
+		projectDir := t.TempDir()
+		runner := arj3539EvidenceExecutor(t, "secret-demo-12345.xml", "<failure token=\"secret-demo-12345\"/>", arj3539Failure("test", 10, "ordinary failure"))
+		arj3539Install(t, arj3539Config(arj3539Adapter("retained-secret-only"), false), runner)
+		_, err := arj3539RunRoot(projectDir, "test")
+		arj3539RequireExitCode(t, err, 10)
+		resultData, readErr := os.ReadFile(filepath.Join(projectDir, ".build", "agent", "results", arj3539OnlyJob(t, projectDir)+".json"))
+		require.NoError(t, readErr)
+		var stored devresult.Result
+		require.NoError(t, json.Unmarshal(resultData, &stored))
+		assert.True(t, stored.Redaction.Applied)
+		assert.GreaterOrEqual(t, stored.Redaction.Matches, 3)
 	})
 
 	t.Run("R4.E2_rejects_parent_traversal_source", func(t *testing.T) {
