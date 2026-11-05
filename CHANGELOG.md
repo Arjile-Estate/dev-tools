@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The DEV-RESULT rendered-log fallback ignores pnpm and Turbo banners and totals, and reports package-manager failure echoes only when no other actionable line exists.
-- **Breaking:** commands with a diagnostics adapter need at least 8 lines in every overridden DEV-RESULT budget; a lower override (previously valid for `test` adapters) now fails configuration loading.
+- At the 7-line minimum budget the text envelope drops the `diagnostics:` line instead of overflowing; the sidecar keeps it.
+- Compact JSON output keeps evidence longer under its byte budget: it drops per-diagnostic detail fields and shortens messages before dropping a failure or warning, and omits drill-down commands for empty evidence.
+- The rendered-log fallback also ignores Turbo 2 `command finished with error` echoes, keeps compiler code frames, and shows the first log line beside an echo when no line reads as a failure.
+- Adapter fallback reasons come from typed adapter results instead of error-text matching, and fallbacks are logged to the activity log.
 
 ## [1.6.2] - 2026-07-10
 

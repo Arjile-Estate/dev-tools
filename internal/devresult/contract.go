@@ -1,6 +1,7 @@
 package devresult
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,9 @@ const (
 	DiagnosticsRequestSchemaV1  = "dev-tools/diagnostics-request/v1"
 	DiagnosticsResponseSchemaV1 = "dev-tools/diagnostics-response/v1"
 )
+
+// ErrUnsafeSource marks a returned source path that could leave the run directory.
+var ErrUnsafeSource = errors.New("unsafe diagnostic source")
 
 type EvidenceState string
 
@@ -153,7 +157,7 @@ func ValidateDiagnosticsResponse(response DiagnosticsResponse, limits Limits) er
 		}
 		path := filepath.FromSlash(source.Path)
 		if source.Path == "" || filepath.IsAbs(path) || filepath.Clean(path) == "." || filepath.Clean(path) == ".." || strings.HasPrefix(filepath.Clean(path), ".."+string(filepath.Separator)) {
-			return fmt.Errorf("diagnostic source %d must use a relative source path", index)
+			return fmt.Errorf("%w: diagnostic source %d must use a relative source path", ErrUnsafeSource, index)
 		}
 	}
 	return nil

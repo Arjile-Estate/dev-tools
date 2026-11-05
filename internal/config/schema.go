@@ -207,22 +207,6 @@ const ConfigSchema = `{
   }
 }`
 
-func validateAdapterBudgets(commandName string, commandConfig DevResultCommandConfig) error {
-	for _, outcome := range []struct {
-		name   string
-		budget ResultBudgetConfig
-	}{
-		{"success", commandConfig.Success},
-		{"failure", commandConfig.Failure},
-		{"timeout", commandConfig.Timeout},
-	} {
-		if outcome.budget.Lines > 0 && outcome.budget.Lines < MinDevResultAdapterLines {
-			return fmt.Errorf("DEV-RESULT %s lines for %s must be greater than or equal to %d when a diagnostics_adapter is configured", outcome.name, commandName, MinDevResultAdapterLines)
-		}
-	}
-	return nil
-}
-
 // ValidateConfig validates a config object against the schema
 func ValidateConfig(cfg *Config) error {
 	if cfg == nil {
@@ -240,12 +224,9 @@ func ValidateConfig(cfg *Config) error {
 		if cfg.DevResult.Retention.MaxBytes == 0 {
 			cfg.DevResult.Retention.MaxBytes = DefaultDevResultRetentionMaxBytes
 		}
-		for commandName, commandConfig := range cfg.DevResult.Commands {
+		for _, commandConfig := range cfg.DevResult.Commands {
 			if commandConfig.DiagnosticsAdapter != nil {
 				if err := commandConfig.DiagnosticsAdapter.applyDefaultsAndValidate(); err != nil {
-					return err
-				}
-				if err := validateAdapterBudgets(commandName, commandConfig); err != nil {
 					return err
 				}
 			}

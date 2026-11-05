@@ -125,6 +125,14 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 		assert.Contains(t, output, "DEV-RESULT v1 PASS")
 		assert.Contains(t, output, "warnings: shown 1/1")
 		assert.Contains(t, output, "- unused export rentLabel (src/rent.ts) [exports]")
+
+		jsonOutput, jsonErr := arj3539RunRoot(t.TempDir(), "--format", "json", "lint:dead-code")
+		require.NoError(t, jsonErr)
+		var compact devresult.Result
+		require.NoError(t, json.Unmarshal([]byte(jsonOutput), &compact))
+		assert.Equal(t, devresult.OutcomePass, compact.Outcome)
+		require.Len(t, compact.Warnings, 1, jsonOutput)
+		assert.Contains(t, compact.Warnings[0].Message, "unused export rentLabel")
 	})
 
 	t.Run("R1.E3_typecheck_without_an_adapter_is_unchanged", func(t *testing.T) {
