@@ -208,13 +208,16 @@ const ConfigSchema = `{
 }`
 
 func validateAdapterBudgets(commandName string, commandConfig DevResultCommandConfig) error {
-	for outcome, budget := range map[string]ResultBudgetConfig{
-		"success": commandConfig.Success,
-		"failure": commandConfig.Failure,
-		"timeout": commandConfig.Timeout,
+	for _, outcome := range []struct {
+		name   string
+		budget ResultBudgetConfig
+	}{
+		{"success", commandConfig.Success},
+		{"failure", commandConfig.Failure},
+		{"timeout", commandConfig.Timeout},
 	} {
-		if budget.Lines > 0 && budget.Lines < MinDevResultAdapterLines {
-			return fmt.Errorf("DEV-RESULT %s lines for %s must be greater than or equal to %d when a diagnostics_adapter is configured", outcome, commandName, MinDevResultAdapterLines)
+		if outcome.budget.Lines > 0 && outcome.budget.Lines < MinDevResultAdapterLines {
+			return fmt.Errorf("DEV-RESULT %s lines for %s must be greater than or equal to %d when a diagnostics_adapter is configured", outcome.name, commandName, MinDevResultAdapterLines)
 		}
 	}
 	return nil

@@ -166,10 +166,11 @@ type Input struct {
 var (
 	ansiPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 	// bannerPattern matches pnpm script headers and Turbo banners or totals, optionally behind a
-	// Turbo `pkg:task: ` prefix; they never carry a diagnostic.
-	bannerPattern = regexp.MustCompile(`^(?:\S+:\S+: )?(?:> |• |turbo \d+\.\d+|>>> FULL TURBO|(?:Tasks|Cached|Time):\s)`)
+	// Turbo `pkg:task: ` prefix (a task name, never a line number); noiseLine keeps any that
+	// still reads as a failure.
+	bannerPattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?(?:> |• |turbo \d+\.\d+|>>> FULL TURBO|(?:Tasks|Cached|Time):\s)`)
 	// echoPattern matches package-manager and Turbo lines that only repeat that a task failed.
-	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_[A-Z_]+|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s)`)
+	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_[A-Z_]+|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
 	failurePattern  = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
 	warningPattern  = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
 	progressPattern = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)
@@ -449,7 +450,7 @@ func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome
 }
 
 func noiseLine(line string) bool {
-	if progressPattern.MatchString(line) || bannerPattern.MatchString(line) {
+	if progressPattern.MatchString(line) || (bannerPattern.MatchString(line) && !failurePattern.MatchString(line)) {
 		return true
 	}
 	lower := strings.ToLower(line)

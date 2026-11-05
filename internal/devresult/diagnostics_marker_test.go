@@ -1,6 +1,7 @@
 package devresult
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +21,33 @@ func TestValidateDiagnosticsResponseChecksColumns(t *testing.T) {
 	response.Failures[0].Line = 3
 	response.Failures[0].Column = -1
 	assert.ErrorContains(t, ValidateDiagnosticsResponse(response, DefaultAdapterLimits()), "invalid column")
+}
+
+func TestRedactDiagnosticsResponseCoversEveryStringField(t *testing.T) {
+	const secret = "secret-demo-12345"
+	environment := []string{"BUILD_API_TOKEN=" + secret}
+	var diagnostic Diagnostic
+	value := reflect.ValueOf(&diagnostic).Elem()
+	for index := 0; index < value.NumField(); index++ {
+		if value.Field(index).Kind() == reflect.String {
+			value.Field(index).SetString("token " + secret)
+		}
+	}
+	response := DiagnosticsResponse{Schema: DiagnosticsResponseSchemaV1, EvidenceState: EvidenceComplete,
+		Failures: []Diagnostic{diagnostic}, Warnings: []Diagnostic{diagnostic}}
+
+	redacted, matches := RedactDiagnosticsResponse(response, environment)
+
+	for _, group := range [][]Diagnostic{redacted.Failures, redacted.Warnings} {
+		redactedValue := reflect.ValueOf(group[0])
+		for index := 0; index < redactedValue.NumField(); index++ {
+			field := redactedValue.Field(index)
+			if field.Kind() == reflect.String {
+				assert.NotContains(t, field.String(), secret, "Diagnostic.%s", redactedValue.Type().Field(index).Name)
+			}
+		}
+	}
+	assert.Positive(t, matches)
 }
 
 func TestFormatDiagnosticOmitsAbsentParts(t *testing.T) {
@@ -99,4 +127,19 @@ func TestCollectEvidenceDropsBannersAndDemotesEchoes(t *testing.T) {
 	failures, _ = collectEvidence(stdout, "", nil, OutcomeFail)
 	require.Len(t, failures, 1)
 	assert.Equal(t, "ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  web@0.0.0 build: `vite build`", failures[0].Message)
+}
+
+func TestCollectEvidenceKeepsActionableLinesThatResembleBanners(t *testing.T) {
+	stderr := "> Compilation failed; see the compiler error output\n" +
+		"src/a.ts:3: > unexpected token\n" +
+		"Failed: the migration could not lock the table\n"
+	failures, _ := collectEvidence("", stderr, nil, OutcomeFail)
+	messages := make([]string, 0, len(failures))
+	for _, failure := range failures {
+		messages = append(messages, failure.Message)
+	}
+	assert.Contains(t, messages, "> Compilation failed; see the compiler error output")
+	assert.Contains(t, messages, "Failed: the migration could not lock the table")
+	assert.True(t, noiseLine("web:build: > web@0.0.0 build /repo/apps/web"))
+	assert.False(t, noiseLine("src/a.ts:3: > unexpected token"))
 }
