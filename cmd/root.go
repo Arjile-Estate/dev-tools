@@ -516,8 +516,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			DiagnosticsFallbackReason:  collected.fallbackReason,
 			AdditionalRedactionMatches: retainedEvidence.RedactionMatches,
 		}, budgets, os.Environ())
-		compactMetadata := devresult.Compact(model, budgets)
-		model.Truncation = compactMetadata.Truncation
+		// Seed the text envelope's truncation; JSON output computes its own from its byte budget.
+		if cmdCfg.Format != "json" {
+			model.Truncation = devresult.Compact(model, budgets).Truncation
+		}
 		written, writeErr := devresult.WriteArtifactsWithEvidenceForFormat(cmdCfg.ProjectDir, model, retained, retainedEvidence, budgets, cmdCfg.Format == "json")
 		if writeErr != nil {
 			logger.Warnf("DEV-RESULT artifacts unavailable: %v", writeErr)

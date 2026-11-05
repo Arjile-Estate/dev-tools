@@ -282,6 +282,25 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 		assert.Contains(t, jsonOutput, `"diagnostics":{"mode":"structured"}`)
 	})
 
+	t.Run("JSON_at_a_7-line_budget_keeps_evidence_untruncated", func(t *testing.T) {
+		projectDir := t.TempDir()
+		runner := arj3539EvidenceExecutor(t, "turbo-summary.json", "{}", arj3539Failure("build", 1, "build failed"))
+		cfg := arj3515Config("build", arj3515Adapter("ui-build"))
+		resultConfig := cfg.DevResult.Commands["build"]
+		resultConfig.Failure = config.ResultBudgetConfig{Lines: 7, Bytes: 4096}
+		cfg.DevResult.Commands["build"] = resultConfig
+		arj3539Install(t, cfg, runner)
+
+		output, err := arj3539RunRoot(projectDir, "--format", "json", "build")
+
+		arj3539RequireExitCode(t, err, 1)
+		var compact devresult.Result
+		require.NoError(t, json.Unmarshal([]byte(output), &compact), output)
+		require.Len(t, compact.Failures, 1, output)
+		assert.False(t, compact.Truncation.Truncated, output)
+		assert.False(t, arj3515Sidecar(t, projectDir).Truncation.Truncated)
+	})
+
 	t.Run("R4.E2_marks_a_malformed_adapter_fallback_deterministically", func(t *testing.T) {
 		var lines []string
 		var sidecars []*devresult.DiagnosticsSummary
