@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The DEV-RESULT rendered-log fallback ignores pnpm and Turbo banners and totals, and reports package-manager failure echoes only when no other actionable line exists.
-- Commands with a diagnostics adapter need at least 8 lines in every overridden DEV-RESULT budget.
+- **Breaking:** commands with a diagnostics adapter need at least 8 lines in every overridden DEV-RESULT budget; a lower override (previously valid for `test` adapters) now fails configuration loading.
 
 ## [1.6.2] - 2026-07-10
 

@@ -129,6 +129,14 @@ func TestCollectEvidenceDropsBannersAndDemotesEchoes(t *testing.T) {
 	assert.Equal(t, "ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  web@0.0.0 build: `vite build`", failures[0].Message)
 }
 
+func TestCollectEvidenceKeepsPnpmRootCauses(t *testing.T) {
+	stderr := " ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\" because pnpm-lock.yaml is not up to date\n" +
+		"Failure reason:\n"
+	failures, _ := collectEvidence("", stderr, nil, OutcomeFail)
+	require.NotEmpty(t, failures)
+	assert.Equal(t, "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\" because pnpm-lock.yaml is not up to date", failures[0].Message)
+}
+
 func TestCollectEvidenceKeepsActionableLinesThatResembleBanners(t *testing.T) {
 	stderr := "> Compilation failed; see the compiler error output\n" +
 		"src/a.ts:3: > unexpected token\n" +

@@ -170,7 +170,7 @@ var (
 	// still reads as a failure.
 	bannerPattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?(?:> |• |turbo \d+\.\d+|>>> FULL TURBO|(?:Tasks|Cached|Time):\s)`)
 	// echoPattern matches package-manager and Turbo lines that only repeat that a task failed.
-	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_[A-Z_]+|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
+	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_RECURSIVE_(?:RUN|EXEC)_FIRST_FAIL\b|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
 	failurePattern  = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
 	warningPattern  = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
 	progressPattern = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)

@@ -150,7 +150,7 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 
 		arj3539RequireExitCode(t, err, 1)
 		assert.Contains(t, output, "(packages/ui/src/button.ts:12:5) [TS2322]")
-		failures := arj3515SidecarFailures(t, projectDir)
+		failures := arj3515Sidecar(t, projectDir).Failures
 		require.Len(t, failures, 1)
 		assert.Equal(t, "ui#build", failures[0].Task)
 		assert.Equal(t, "ui", failures[0].Package)
@@ -216,14 +216,16 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 
 	t.Run("R3.E2_skips_an_optional_missing_source_quietly", func(t *testing.T) {
 		projectDir := t.TempDir()
+		counter := filepath.Join(projectDir, "adapter-counter")
 		runner := &arj3539Executor{run: func(opts executor.CommandExecutionOptions) executor.ExecutionResult {
 			return arj3539Failure(opts.CommandName, 2, "Error: Cannot find module 'vite'")
 		}}
-		arj3539Install(t, arj3515Config("build", arj3515Adapter("counter", filepath.Join(projectDir, "adapter-counter"))), runner)
+		arj3539Install(t, arj3515Config("build", arj3515Adapter("counter", counter)), runner)
 
 		output, err := arj3539RunRoot(projectDir, "build")
 
 		arj3539RequireExitCode(t, err, 2)
+		assert.NoFileExists(t, counter)
 		assert.NotContains(t, output, "is missing")
 		assert.NotContains(t, output, "warnings:")
 		assert.Contains(t, output, "- Error: Cannot find module 'vite'")
@@ -387,11 +389,6 @@ func arj3515Sidecar(t *testing.T, projectDir string) devresult.Result {
 	var result devresult.Result
 	require.NoError(t, json.Unmarshal(data, &result))
 	return result
-}
-
-func arj3515SidecarFailures(t *testing.T, projectDir string) []devresult.Evidence {
-	t.Helper()
-	return arj3515Sidecar(t, projectDir).Failures
 }
 
 func arj3515Line(t *testing.T, output, prefix string) string {

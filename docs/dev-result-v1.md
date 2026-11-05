@@ -90,7 +90,7 @@ Default adapter limits are a 2-second runtime, 1 MiB stdout, 64 KiB stderr, 1,00
 
 Validation responses that break these rules (for example a column without a line) are reported as an invalid adapter response.
 
-Complete evidence replaces rendered-log failures. Partial evidence keeps valid structured diagnostics and always emits a visible partial-evidence warning, alongside any reported evidence problems. Missing, incompatible, malformed, timed-out, cancelled, unsafe, or failed adapters produce a visible warning and use the bounded rendered-log fallback. A failed primary command with no actionable structured failure also falls back. In every case the primary validation outcome and exit code remain authoritative.
+Complete evidence replaces rendered-log failures. Partial evidence keeps valid structured diagnostics and always emits a visible partial-evidence warning, alongside any reported evidence problems. Missing, incompatible, malformed, timed-out, cancelled, unsafe, or failed adapter executables produce a visible warning and use the bounded rendered-log fallback. A failed primary command with no actionable structured failure also falls back. In every case the primary validation outcome and exit code remain authoritative.
 
 ## Text envelope
 
@@ -118,7 +118,7 @@ The `command:` line shows ` | scope: <arguments>` when passthrough arguments wer
 
 Commands with a diagnostics adapter always render a `diagnostics:` line: `diagnostics: structured` when the adapter's evidence was used, or `diagnostics: fallback (<reason>)` when the result comes from the rendered log. The reason is short and deterministic, such as `malformed adapter response`, `invalid adapter response`, `adapter timeout`, `expected version 1, received version 2`, `unsafe structured evidence`, `structured source turbo-summary.json is missing`, `no structured evidence was written`, `structured evidence unavailable`, or `no actionable structured failure`. The detailed cause stays in the warnings. Commands without an adapter render no `diagnostics:` line. Because of that extra line, a command with an adapter needs at least 8 lines in every budget it overrides.
 
-The rendered-log fallback drops pnpm script headers (`> pkg@1.0.0 build /path`), Turbo banners (`turbo 2.5.4`, `• Packages in scope: …`) and the `Tasks:`, `Cached:`, and `Time:` totals, including behind a Turbo `pkg:task:` prefix. Package-manager and Turbo lines that only repeat that a task failed (`ELIFECYCLE`, `ERR_PNPM_…`, `pkg#task: command (…) exited (1)`, `ERROR run failed: …`, `Failed: …`) are used as the failure only when no other actionable line exists, so a failure is never hidden.
+The rendered-log fallback drops pnpm script headers (`> pkg@1.0.0 build /path`), Turbo banners (`turbo 2.5.4`, `• Packages in scope: …`) and the `Tasks:`, `Cached:`, and `Time:` totals, including behind a Turbo `pkg:task:` prefix. Package-manager and Turbo lines that only repeat that a task failed (`ELIFECYCLE`, `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `pkg#task: command (…) exited (1)`, `ERROR run failed: …`, `Failed: …`) are used as the failure only when no other actionable line exists, so a failure is never hidden.
 
 ## JSON sidecar
 
