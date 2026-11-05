@@ -126,13 +126,20 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 		assert.Contains(t, output, "warnings: shown 1/1")
 		assert.Contains(t, output, "- unused export rentLabel (src/rent.ts) [exports]")
 
-		jsonOutput, jsonErr := arj3539RunRoot(t.TempDir(), "--format", "json", "lint:dead-code")
+		jsonDir := t.TempDir()
+		jsonOutput, jsonErr := arj3539RunRoot(jsonDir, "--format", "json", "lint:dead-code")
 		require.NoError(t, jsonErr)
 		var compact devresult.Result
 		require.NoError(t, json.Unmarshal([]byte(jsonOutput), &compact))
 		assert.Equal(t, devresult.OutcomePass, compact.Outcome)
 		require.Len(t, compact.Warnings, 1, jsonOutput)
 		assert.Contains(t, compact.Warnings[0].Message, "unused export rentLabel")
+		retained := arj3515Sidecar(t, jsonDir)
+		require.Len(t, retained.Warnings, 1)
+		assert.Equal(t, "knip:exports:src/rent.ts:rentLabel", retained.Warnings[0].Identity)
+		assert.Equal(t, "src/rent.ts", retained.Warnings[0].File)
+		assert.Equal(t, "exports", retained.Warnings[0].Rule)
+		assert.Equal(t, "unused export rentLabel (src/rent.ts) [exports]", retained.Warnings[0].Message)
 	})
 
 	t.Run("R1.E3_typecheck_without_an_adapter_is_unchanged", func(t *testing.T) {

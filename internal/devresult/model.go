@@ -144,9 +144,11 @@ type Result struct {
 }
 
 type Input struct {
-	Job                        string
-	CommandName                string
-	NormalizedCommand          string
+	Job               string
+	CommandName       string
+	NormalizedCommand string
+	// Scope holds the passthrough arguments already inside NormalizedCommand, whose redaction
+	// count covers them; Build redacts Scope without counting it again.
 	Scope                      string
 	ExitCode                   int
 	Duration                   time.Duration
@@ -169,14 +171,14 @@ var (
 	// Turbo `pkg:task: ` prefix (a task name, never a line number); noiseLine keeps any that
 	// still reads as a failure.
 	bannerPattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?(?:> |• |turbo \d+\.\d+|>>> FULL TURBO|(?:Tasks|Cached|Time):\s)`)
-	// echoPattern matches package-manager and Turbo lines that only repeat that a task failed.
 	// codeFramePattern matches a compiler code frame such as `> 12 | const rent = …`, which
 	// shares the `> ` prefix of pnpm script headers but points at the failing source line.
 	codeFramePattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?>\s*\d+\s*\|`)
-	echoPattern      = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_RECURSIVE_(?:RUN|EXEC)_FIRST_FAIL\b|^(?:\S+:\S+: )?(?:ERROR: command finished with error: )?(?:\S+#\S+: )?command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
-	failurePattern   = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
-	warningPattern   = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
-	progressPattern  = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)
+	// echoPattern matches package-manager and Turbo lines that only repeat that a task failed.
+	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_RECURSIVE_(?:RUN|EXEC)_FIRST_FAIL\b|^(?:\S+:\S+: )?ERROR: command finished with error: (?:\S+#\S+: )?command \(.*\) .*exited \(\d+\)|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
+	failurePattern  = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
+	warningPattern  = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
+	progressPattern = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)
 )
 
 func Build(input Input, budgets Budgets, environment []string) (Result, string) {
@@ -554,6 +556,13 @@ func Compact(result Result, budgets Budgets) Result {
 
 func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 	compact := Compact(result, budgets)
+	// Compact may drop the diagnostics line to fit the text line budget; one-line JSON keeps
+	// the marker until byte pressure removes it below.
+	if result.Diagnostics != nil {
+		diagnostics := *result.Diagnostics
+		diagnostics.Reason = truncateText(diagnostics.Reason, 160)
+		compact.Diagnostics = &diagnostics
+	}
 	// Like the text envelope, name a drill-down only for evidence that exists.
 	if compact.Truncation.Total.Failures == 0 {
 		compact.DrillDown.Failures = ""

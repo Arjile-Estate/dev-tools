@@ -478,9 +478,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		retainedEvidence := collected.evidence
 		if collected.warning != "" {
 			resultWarnings = append(resultWarnings, collected.warning)
-			logger.Warnf("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, collected.warning)
+			warning, _ := redactRetainedEvidence(collected.warning)
+			logger.Warnf("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, warning)
 		} else if collected.fallbackReason != "" {
-			logger.Infof("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, collected.fallbackReason)
+			reason, _ := redactRetainedEvidence(collected.fallbackReason)
+			logger.Infof("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, reason)
 		}
 		if cfg.DevResult != nil && validationRun.ID != "" {
 			retention, retentionErr := devresult.ApplyRetention(cmdCfg.ProjectDir, validationRun.ID, time.Now(), devresult.RetentionPolicy{
@@ -626,18 +628,18 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		return collectedDiagnostics{}
 	}
 	if run.ID == "" || run.Dir == "" {
-		return collectedDiagnostics{}.fallBack("", "run-scoped diagnostics are unavailable")
+		return fallback(collectedDiagnostics{}, "", "run-scoped diagnostics are unavailable")
 	}
 	fresh, err := run.HasFreshEvidence(adapter.StartWhen)
 	if err != nil {
-		return collectedDiagnostics{}.fallBack("structured diagnostics are unavailable: "+err.Error(), devresult.ReasonAdapterUnavailable)
+		return fallback(collectedDiagnostics{}, "structured diagnostics are unavailable: "+err.Error(), devresult.ReasonAdapterUnavailable)
 	}
 	if !fresh {
 		if adapter.Required {
 			missing := "structured source " + strings.Join(adapter.StartWhen, " or ") + " is missing"
-			return collectedDiagnostics{}.fallBack(missing, missing)
+			return fallback(collectedDiagnostics{}, missing, missing)
 		}
-		return collectedDiagnostics{}.fallBack("", "no structured evidence was written")
+		return fallback(collectedDiagnostics{}, "", "no structured evidence was written")
 	}
 
 	limits := devresult.Limits{
@@ -682,12 +684,12 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		return adapterFallback(collected, adapterResult)
 	}
 	if adapterResult.Response == nil {
-		return collected.fallBack("structured diagnostics are unavailable: adapter returned no response", "adapter returned no response")
+		return fallback(collected, "structured diagnostics are unavailable: adapter returned no response", "adapter returned no response")
 	}
 
 	validated, err := run.ValidateSources(adapterResult.Response.Sources, limits)
 	if err != nil {
-		return collected.fallBack("unsafe structured evidence: "+err.Error(), devresult.ReasonUnsafeEvidence)
+		return fallback(collected, "unsafe structured evidence: "+err.Error(), devresult.ReasonUnsafeEvidence)
 	}
 	for index, source := range validated {
 		path, pathMatches := retainedSourcePath(source.Path, index)
@@ -715,9 +717,9 @@ func retainedSourcePath(path string, index int) (string, int) {
 	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted)))), matches
 }
 
-// fallBack records why structured diagnostics were not used: the visible warning (empty for a
+// fallback records why structured diagnostics were not used: the visible warning (empty for a
 // quiet fallback) and the short reason the result's diagnostics marker carries.
-func (collected collectedDiagnostics) fallBack(warning, reason string) collectedDiagnostics {
+func fallback(collected collectedDiagnostics, warning, reason string) collectedDiagnostics {
 	collected.warning = warning
 	collected.fallbackReason = reason
 	return collected
@@ -725,20 +727,20 @@ func (collected collectedDiagnostics) fallBack(warning, reason string) collected
 
 // adapterFallback turns a failed adapter run into its visible warning and marker reason.
 func adapterFallback(collected collectedDiagnostics, result devresult.AdapterResult) collectedDiagnostics {
-	switch result.Reason {
+	reason := result.Reason
+	if reason == "" {
+		reason = devresult.ReasonAdapterUnavailable
+	}
+	switch reason {
 	case devresult.ReasonUnsafeEvidence:
-		return collected.fallBack("unsafe structured evidence: "+result.Err.Error(), result.Reason)
+		return fallback(collected, "unsafe structured evidence: "+result.Err.Error(), reason)
 	case devresult.ReasonMalformedResponse:
-		return collected.fallBack("structured diagnostics are unavailable: malformed adapter response: "+result.Err.Error(), result.Reason)
+		return fallback(collected, "structured diagnostics are unavailable: malformed adapter response: "+result.Err.Error(), reason)
 	case devresult.ReasonAdapterTimeout, devresult.ReasonAdapterCancelled:
-		return collected.fallBack("structured diagnostics are unavailable: "+result.Reason, result.Reason)
-	case "":
-		return collected.fallBack("structured diagnostics are unavailable: "+result.Err.Error(), devresult.ReasonAdapterUnavailable)
+		return fallback(collected, "structured diagnostics are unavailable: "+reason, reason)
+	default:
+		return fallback(collected, "structured diagnostics are unavailable: "+result.Err.Error(), reason)
 	}
-	if strings.HasPrefix(result.Reason, "expected version") {
-		return collected.fallBack("structured diagnostics are unavailable: "+result.Reason, result.Reason)
-	}
-	return collected.fallBack("structured diagnostics are unavailable: "+result.Err.Error(), result.Reason)
 }
 
 // SetConfigLoader sets the config loader for the root command.
