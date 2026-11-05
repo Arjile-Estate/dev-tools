@@ -129,3 +129,27 @@ func TestCompactJSONIgnoresTheTextLineBudget(t *testing.T) {
 	text := RenderText(result, budgets)
 	assert.Contains(t, text, "failures=0/1", "the 7-line text envelope still has no room for the failure")
 }
+
+func TestCompactJSONKeepsMoreEvidenceThanTheTextEnvelopeByShortening(t *testing.T) {
+	budgets := DefaultBudgets()
+	budgets.Failure = Budget{Lines: 80, Bytes: 1600}
+	long := strings.Repeat("the rent revision index lookup failed for the lease ", 4)
+	var failures []Diagnostic
+	for index := 0; index < 6; index++ {
+		failures = append(failures, Diagnostic{Identity: "f" + strings.Repeat("x", index), Message: long, File: "apps/api/src/rent.ts", Line: index + 1})
+	}
+	response := DiagnosticsResponse{Schema: DiagnosticsResponseSchemaV1, EvidenceState: EvidenceComplete, Failures: failures}
+	result, _ := Build(Input{Job: "build-long", CommandName: "build", ExitCode: 1, Diagnostics: &response, DiagnosticsConfigured: true}, budgets, nil)
+
+	text := Compact(result, budgets)
+	data, err := MarshalCompactJSON(result, budgets)
+	require.NoError(t, err)
+	var compact Result
+	require.NoError(t, json.Unmarshal(data, &compact))
+
+	assert.LessOrEqual(t, len(data), budgets.Failure.Bytes)
+	assert.Greater(t, len(compact.Failures), len(text.Failures), "shortened JSON keeps more failures than the text envelope")
+	assert.Equal(t, 6, compact.Truncation.Total.Failures)
+	assert.Len(t, result.Failures, 6, "the input result is not mutated")
+	assert.Equal(t, long+" (apps/api/src/rent.ts:1)", result.Failures[0].Message)
+}

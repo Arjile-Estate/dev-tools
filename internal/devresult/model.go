@@ -556,21 +556,11 @@ func Compact(result Result, budgets Budgets) Result {
 }
 
 func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
-	// JSON is one line, so only the byte budget applies: select evidence without the text
-	// envelope's line limit, then report against the real budget.
-	unlimitedLines := budgets
-	for _, budget := range []*Budget{&unlimitedLines.Success, &unlimitedLines.Failure, &unlimitedLines.Timeout, &unlimitedLines.Background} {
-		budget.Lines = math.MaxInt32
-	}
-	compact := Compact(result, unlimitedLines)
+	// JSON selects its own evidence against its byte budget: start from the text compaction's
+	// metadata limits but none of its line or byte selection, then report the real budget.
+	unlimited := Budget{Lines: math.MaxInt32, Bytes: math.MaxInt32}
+	compact := Compact(result, Budgets{Success: unlimited, Failure: unlimited, Timeout: unlimited, Background: unlimited})
 	compact.Truncation.Budget = budgetFor(result.Outcome, budgets)
-	// Compact may drop the diagnostics line to fit the text byte budget; one-line JSON keeps
-	// the marker until byte pressure removes it below.
-	if result.Diagnostics != nil {
-		diagnostics := *result.Diagnostics
-		diagnostics.Reason = truncateText(diagnostics.Reason, 160)
-		compact.Diagnostics = &diagnostics
-	}
 	// Like the text envelope, name a drill-down only for evidence that exists.
 	if compact.Truncation.Total.Failures == 0 {
 		compact.DrillDown.Failures = ""
