@@ -108,3 +108,24 @@ func TestCollectEvidenceKeepsUnkeywordedContextBesideAnEcho(t *testing.T) {
 	assert.Equal(t, "src/rent.ts(4,9): Type 'string' is not assignable to type 'number'.", failures[0].Message)
 	assert.Equal(t, "ELIFECYCLE  Command failed with exit code 2.", failures[1].Message)
 }
+
+func TestCompactJSONIgnoresTheTextLineBudget(t *testing.T) {
+	budgets := DefaultBudgets()
+	budgets.Failure = Budget{Lines: 7, Bytes: 4096}
+	response := DiagnosticsResponse{Schema: DiagnosticsResponseSchemaV1, EvidenceState: EvidenceComplete,
+		Failures: []Diagnostic{{Identity: "tsc:a", Message: "Type 'string' is not assignable to type 'number'.", Task: "ui#build", File: "packages/ui/src/button.ts", Line: 12, Column: 5, Rule: "TS2322"}}}
+	result, _ := Build(Input{Job: "build-seven", CommandName: "build", ExitCode: 1, Diagnostics: &response, DiagnosticsConfigured: true}, budgets, nil)
+
+	data, err := MarshalCompactJSON(result, budgets)
+	require.NoError(t, err)
+	var compact Result
+	require.NoError(t, json.Unmarshal(data, &compact))
+	require.Len(t, compact.Failures, 1, string(data))
+	require.NotNil(t, compact.Diagnostics)
+	assert.Equal(t, DiagnosticsStructured, compact.Diagnostics.Mode)
+	assert.Equal(t, Budget{Lines: 7, Bytes: 4096}, compact.Truncation.Budget)
+	assert.False(t, compact.Truncation.Truncated)
+
+	text := RenderText(result, budgets)
+	assert.Contains(t, text, "failures=0/1", "the 7-line text envelope still has no room for the failure")
+}

@@ -3,6 +3,7 @@ package devresult
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -555,8 +556,15 @@ func Compact(result Result, budgets Budgets) Result {
 }
 
 func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
-	compact := Compact(result, budgets)
-	// Compact may drop the diagnostics line to fit the text line budget; one-line JSON keeps
+	// JSON is one line, so only the byte budget applies: select evidence without the text
+	// envelope's line limit, then report against the real budget.
+	unlimitedLines := budgets
+	for _, budget := range []*Budget{&unlimitedLines.Success, &unlimitedLines.Failure, &unlimitedLines.Timeout, &unlimitedLines.Background} {
+		budget.Lines = math.MaxInt32
+	}
+	compact := Compact(result, unlimitedLines)
+	compact.Truncation.Budget = budgetFor(result.Outcome, budgets)
+	// Compact may drop the diagnostics line to fit the text byte budget; one-line JSON keeps
 	// the marker until byte pressure removes it below.
 	if result.Diagnostics != nil {
 		diagnostics := *result.Diagnostics
