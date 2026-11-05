@@ -1,0 +1,24 @@
+{
+  "schema": "dev-tools/diagnostics-response/v1",
+  "evidence_state": "complete",
+  "failures": [
+    {
+      "identity": "tsc:TS2322:packages/ui/src/button.ts:12:5",
+      "message": "Type 'string' is not assignable to type 'number'.",
+      "package": "ui",
+      "task": "ui#build",
+      "file": "packages/ui/src/button.ts",
+      "line": 12,
+      "column": 5,
+      "rule": "TS2322"
+    }
+  ],
+  "warnings": [
+    {
+      "identity": "turbo:dependents:ui#build",
+      "message": "2 dependent task failures omitted: docs#build, web#build",
+      "task": "ui#build"
+    }
+  ],
+  "sources": [{"kind": "turbo-summary", "path": "turbo-summary.json"}]
+}

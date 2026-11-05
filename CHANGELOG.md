@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- DEV-RESULT diagnostics adapters are available for `build`, `typecheck`, `lint`, and `lint:dead-code`, not only `test` and `test:focused`.
+- Diagnostics responses may carry optional `column`, `rule`, and `task` fields; results render them as `<task>: <message> (<file>:<line>:<column>) [<rule>]`. Older dev-tools releases reject responses that carry these fields.
+- `diagnostics_adapter.required: true` reports `structured source <patterns> is missing` when the command wrote no structured evidence.
+- DEV-RESULT text and JSON results mark whether diagnostics came from structured evidence or the rendered log (`diagnostics: structured` / `diagnostics: fallback (<reason>)`), and record the requested passthrough scope as `command.scope`.
+
+### Changed
+- The DEV-RESULT rendered-log fallback ignores pnpm and Turbo banners and totals, and reports package-manager failure echoes only when no other actionable line exists.
+- Commands with a diagnostics adapter need at least 8 lines in every overridden DEV-RESULT budget.
+
 ## [1.6.2] - 2026-07-10
 
 ### Fixed

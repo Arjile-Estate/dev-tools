@@ -93,6 +93,7 @@ const ConfigSchema = `{
           "minItems": 1,
           "items": {"type": "string", "minLength": 1}
         },
+        "required": {"type": "boolean"},
         "timeout": {"type": "integer", "minimum": 1},
         "stdout_bytes": {"type": "integer", "minimum": 1},
         "stderr_bytes": {"type": "integer", "minimum": 1},
@@ -206,6 +207,19 @@ const ConfigSchema = `{
   }
 }`
 
+func validateAdapterBudgets(commandName string, commandConfig DevResultCommandConfig) error {
+	for outcome, budget := range map[string]ResultBudgetConfig{
+		"success": commandConfig.Success,
+		"failure": commandConfig.Failure,
+		"timeout": commandConfig.Timeout,
+	} {
+		if budget.Lines > 0 && budget.Lines < MinDevResultAdapterLines {
+			return fmt.Errorf("DEV-RESULT %s lines for %s must be greater than or equal to %d when a diagnostics_adapter is configured", outcome, commandName, MinDevResultAdapterLines)
+		}
+	}
+	return nil
+}
+
 // ValidateConfig validates a config object against the schema
 func ValidateConfig(cfg *Config) error {
 	if cfg == nil {
@@ -224,11 +238,11 @@ func ValidateConfig(cfg *Config) error {
 			cfg.DevResult.Retention.MaxBytes = DefaultDevResultRetentionMaxBytes
 		}
 		for commandName, commandConfig := range cfg.DevResult.Commands {
-			if commandConfig.DiagnosticsAdapter != nil && commandName != "test" && commandName != "test:focused" {
-				return fmt.Errorf("diagnostics_adapter is only supported for test and test:focused, not %s", commandName)
-			}
 			if commandConfig.DiagnosticsAdapter != nil {
 				if err := commandConfig.DiagnosticsAdapter.applyDefaultsAndValidate(); err != nil {
+					return err
+				}
+				if err := validateAdapterBudgets(commandName, commandConfig); err != nil {
 					return err
 				}
 			}

@@ -474,9 +474,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if resultEnabled {
-		diagnostics, adapterWarning, retainedEvidence := collectDiagnostics(cmd.Context(), cmdCfg.ProjectDir, commandName, result, resultConfig.DiagnosticsAdapter, validationRun)
-		if adapterWarning != "" {
-			resultWarnings = append(resultWarnings, adapterWarning)
+		collected := collectDiagnostics(cmd.Context(), cmdCfg.ProjectDir, commandName, result, resultConfig.DiagnosticsAdapter, validationRun)
+		retainedEvidence := collected.evidence
+		if collected.warning != "" {
+			resultWarnings = append(resultWarnings, collected.warning)
 		}
 		if cfg.DevResult != nil && validationRun.ID != "" {
 			retention, retentionErr := devresult.ApplyRetention(cmdCfg.ProjectDir, validationRun.ID, time.Now(), devresult.RetentionPolicy{
@@ -500,6 +501,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			Job:                        job,
 			CommandName:                commandName,
 			NormalizedCommand:          devresult.NormalizeCommand(commandName, parsedArgs.PassthroughArgs),
+			Scope:                      devresult.NormalizeScope(parsedArgs.PassthroughArgs),
 			ExitCode:                   result.ReturnCode,
 			Duration:                   time.Duration(result.DurationMs) * time.Millisecond,
 			Attempts:                   result.Attempts,
@@ -508,7 +510,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			Warnings:                   warnings,
 			TimedOut:                   result.TimedOut,
 			Cancelled:                  result.Cancelled,
-			Diagnostics:                diagnostics,
+			Diagnostics:                collected.response,
+			DiagnosticsConfigured:      resultConfig.DiagnosticsAdapter != nil,
+			DiagnosticsFallbackReason:  collected.fallbackReason,
 			AdditionalRedactionMatches: retainedEvidence.RedactionMatches,
 		}, budgets, os.Environ())
 		compactMetadata := devresult.Compact(model, budgets)
@@ -604,16 +608,33 @@ func devResultBudgets(commandConfig config.DevResultCommandConfig) devresult.Bud
 	return budgets
 }
 
-func collectDiagnostics(ctx context.Context, projectDir, commandName string, execution executor.ExecutionResult, adapter *config.DiagnosticsAdapterConfig, run devresult.ValidationRun) (*devresult.DiagnosticsResponse, string, devresult.EvidenceBundle) {
-	if adapter == nil || run.ID == "" || run.Dir == "" {
-		return nil, "", devresult.EvidenceBundle{}
+// collectedDiagnostics is the outcome of one adapter run: the validated response (nil on
+// fallback), the visible warning, the retained evidence, and the short fallback reason the
+// result's diagnostics marker carries.
+type collectedDiagnostics struct {
+	response       *devresult.DiagnosticsResponse
+	warning        string
+	evidence       devresult.EvidenceBundle
+	fallbackReason string
+}
+
+func collectDiagnostics(ctx context.Context, projectDir, commandName string, execution executor.ExecutionResult, adapter *config.DiagnosticsAdapterConfig, run devresult.ValidationRun) collectedDiagnostics {
+	if adapter == nil {
+		return collectedDiagnostics{}
+	}
+	if run.ID == "" || run.Dir == "" {
+		return collectedDiagnostics{fallbackReason: "run-scoped diagnostics are unavailable"}
 	}
 	fresh, err := run.HasFreshEvidence(adapter.StartWhen)
 	if err != nil {
-		return nil, "structured diagnostics are unavailable: " + err.Error(), devresult.EvidenceBundle{}
+		return collectedDiagnostics{warning: "structured diagnostics are unavailable: " + err.Error(), fallbackReason: "structured diagnostics are unavailable"}
 	}
 	if !fresh {
-		return nil, "", devresult.EvidenceBundle{}
+		if adapter.Required {
+			missing := "structured source " + strings.Join(adapter.StartWhen, " or ") + " is missing"
+			return collectedDiagnostics{warning: missing, fallbackReason: missing}
+		}
+		return collectedDiagnostics{fallbackReason: "no structured evidence was written"}
 	}
 
 	limits := devresult.Limits{
@@ -649,33 +670,39 @@ func collectDiagnostics(ctx context.Context, projectDir, commandName string, exe
 		}
 	}
 	adapterStderr, adapterStderrMatches := redactRetainedEvidence(string(adapterResult.Stderr))
-	evidence := devresult.EvidenceBundle{
+	collected := collectedDiagnostics{evidence: devresult.EvidenceBundle{
 		AdapterResponse:  adapterResponse,
 		AdapterStderr:    adapterStderr,
 		RedactionMatches: adapterResponseMatches + adapterStderrMatches,
-	}
+	}}
 	if adapterResult.Err != nil {
-		return nil, diagnosticsAdapterWarning(adapterResult), evidence
+		collected.warning, collected.fallbackReason = diagnosticsAdapterWarning(adapterResult)
+		return collected
 	}
 	if adapterResult.Response == nil {
-		return nil, "structured diagnostics are unavailable: adapter returned no response", evidence
+		collected.warning = "structured diagnostics are unavailable: adapter returned no response"
+		collected.fallbackReason = "adapter returned no response"
+		return collected
 	}
 
 	validated, err := run.ValidateSources(adapterResult.Response.Sources, limits)
 	if err != nil {
-		return nil, "unsafe structured evidence: " + err.Error(), evidence
+		collected.warning = "unsafe structured evidence: " + err.Error()
+		collected.fallbackReason = "unsafe structured evidence"
+		return collected
 	}
 	for index, source := range validated {
 		path, pathMatches := retainedSourcePath(source.Path, index)
 		content, contentMatches := redactRetainedEvidence(string(source.Content))
-		evidence.Sources = append(evidence.Sources, devresult.RetainedSource{
+		collected.evidence.Sources = append(collected.evidence.Sources, devresult.RetainedSource{
 			Kind:    source.Kind,
 			Path:    path,
 			Content: content,
 		})
-		evidence.RedactionMatches += pathMatches + contentMatches
+		collected.evidence.RedactionMatches += pathMatches + contentMatches
 	}
-	return adapterResult.Response, "", evidence
+	collected.response = adapterResult.Response
+	return collected
 }
 
 func redactRetainedEvidence(value string) (string, int) {
@@ -690,12 +717,14 @@ func retainedSourcePath(path string, index int) (string, int) {
 	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted)))), matches
 }
 
-func diagnosticsAdapterWarning(result devresult.AdapterResult) string {
+// diagnosticsAdapterWarning returns the visible warning for a failed adapter run and the short,
+// deterministic reason the diagnostics marker reports.
+func diagnosticsAdapterWarning(result devresult.AdapterResult) (string, string) {
 	if result.TimedOut {
-		return "structured diagnostics are unavailable: adapter timeout"
+		return "structured diagnostics are unavailable: adapter timeout", "adapter timeout"
 	}
 	if result.Cancelled {
-		return "structured diagnostics are unavailable: adapter cancelled"
+		return "structured diagnostics are unavailable: adapter cancelled", "adapter cancelled"
 	}
 	message := result.Err.Error()
 	if strings.Contains(message, "unsupported diagnostics response schema") {
@@ -703,15 +732,19 @@ func diagnosticsAdapterWarning(result devresult.AdapterResult) string {
 		if index := strings.LastIndex(message, "/v"); index >= 0 {
 			received = strings.Trim(message[index+2:], "\"' ")
 		}
-		return fmt.Sprintf("structured diagnostics are unavailable: expected version 1, received version %s", received)
+		reason := fmt.Sprintf("expected version 1, received version %s", received)
+		return "structured diagnostics are unavailable: " + reason, reason
 	}
 	if strings.Contains(message, "decode diagnostics adapter response") || strings.Contains(message, "trailing diagnostics adapter output") || strings.Contains(message, "more than one JSON response") {
-		return "structured diagnostics are unavailable: malformed adapter response: " + message
+		return "structured diagnostics are unavailable: malformed adapter response: " + message, "malformed adapter response"
 	}
 	if strings.Contains(message, "diagnostic source") {
-		return "unsafe structured evidence: " + message
+		return "unsafe structured evidence: " + message, "unsafe structured evidence"
 	}
-	return "structured diagnostics are unavailable: " + message
+	if strings.Contains(message, "invalid diagnostics adapter response") {
+		return "structured diagnostics are unavailable: " + message, "invalid adapter response"
+	}
+	return "structured diagnostics are unavailable: " + message, "structured diagnostics are unavailable"
 }
 
 // SetConfigLoader sets the config loader for the root command.

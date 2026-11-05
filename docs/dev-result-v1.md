@@ -14,6 +14,12 @@ dev_result:
       diagnostics_adapter:
         command: [node, tools/dev-tools-diagnostics.mjs]
         start_when: [junit/**/*.xml, turbo-summary.json]
+    build:
+      enabled: true
+      diagnostics_adapter:
+        command: [node, tools/dev-tools-diagnostics.mjs]
+        start_when: [turbo-summary.json]
+        required: true
     lint:
       enabled: true
       failure:
@@ -30,7 +36,9 @@ There is no pipe mode and no second validation runner. `dev-tools result` only r
 
 ## Repository diagnostics adapter
 
-`test` and `test:focused` may configure one diagnostics adapter. For every enabled foreground validation, dev-tools creates a unique private run directory and adds `DEV_TOOLS_RUN_ID` and `DEV_TOOLS_RUN_DIR` only to that command invocation. The validation command keeps its existing selection, coverage, cache, timing, retry, and exit-code behavior. The adapter starts after validation only when a `start_when` glob matches a file created inside that run directory.
+Every supported command (`test`, `test:focused`, `build`, `typecheck`, `lint`, and `lint:dead-code`) may configure one diagnostics adapter. Test and build diagnostics share the same request and response schemas; the adapter reads the request's `command` to know which kind of run it is. For every enabled foreground validation, dev-tools creates a unique private run directory and adds `DEV_TOOLS_RUN_ID` and `DEV_TOOLS_RUN_DIR` only to that command invocation. The validation command keeps its existing selection, coverage, cache, timing, retry, and exit-code behavior. The adapter starts after validation only when a `start_when` glob matches a file created inside that run directory.
+
+When no `start_when` evidence was written, the adapter does not start. By default that is quiet: the result uses the rendered log. With `required: true` the result also warns `structured source <patterns> is missing`, so a crash before the tool wrote its report is visible. Either way the primary exit code is unchanged.
 
 `command` is an argument vector, not a shell command. Dev-tools executes it directly from the project directory, writes exactly one JSON request to standard input, and accepts exactly one JSON response from standard output. Shell syntax inside an argument is passed literally.
 
@@ -74,7 +82,13 @@ The version 1 response is:
 
 `evidence_state` is `complete`, `partial`, or `unavailable`. Every failure and warning has a stable `identity` and a non-empty `message`; location and test metadata are optional. Source paths are relative to the current run directory.
 
+Build and static-analysis adapters may also send `column`, `rule` (a compiler or analyzer diagnostic identifier such as `TS2322` or `no-debugger`), and `task` (the tool-specific task that failed, such as the Turbo task `ui#build`). A `column` requires a `line`; a column without a line makes the response invalid. Dev-tools renders each diagnostic as `<task>: <message> (<file>:<line>:<column>) [<rule>]`, leaving out every part the adapter did not send, so adapters that never send these fields render exactly as before. The sidecar keeps `package`, `task`, `file`, `line`, `column`, and `rule` on each structured failure and warning.
+
+These three fields were added after the first release of the adapter contract. A dev-tools binary that predates them rejects a response carrying them as malformed and falls back to the rendered log, so an adapter should only send them to a dev-tools release whose changelog lists them. `internal/devresult/testdata/diagnostics-v1/build-response.json` is a conforming build response.
+
 Default adapter limits are a 2-second runtime, 1 MiB stdout, 64 KiB stderr, 1,000 diagnostic records, 10 MiB per source, and 50 MiB across sources. They may be overridden with `timeout`, `stdout_bytes`, `stderr_bytes`, `max_diagnostics`, `max_source_bytes`, and `max_total_source_bytes` under `diagnostics_adapter`.
+
+Validation responses that break these rules (for example a column without a line) are reported as an invalid adapter response.
 
 Complete evidence replaces rendered-log failures. Partial evidence keeps valid structured diagnostics and always emits a visible partial-evidence warning, alongside any reported evidence problems. Missing, incompatible, malformed, timed-out, cancelled, unsafe, or failed adapters produce a visible warning and use the bounded rendered-log fallback. A failed primary command with no actionable structured failure also falls back. In every case the primary validation outcome and exit code remain authoritative.
 
@@ -84,9 +98,10 @@ The first line identifies the schema version and final outcome:
 
 ```text
 DEV-RESULT v1 FAIL
-command: dev-tools build
+command: dev-tools build --filter web | scope: --filter web
 exit: 42 | duration: 3.41s | attempts: 1/1
 summary: Validation failed with 9 distinct failure(s) and 2 warning(s).
+diagnostics: structured
 failures: shown 2/9
 - internal/parser.go:84: expected identifier before closing brace
 - cmd/root.go:312: result artifact was not written
@@ -99,12 +114,19 @@ truncation: true | lines=12/80 | bytes=733/12288 | failures=2/9 | warnings=1/2
 
 Failure and warning sections are omitted when their totals are zero. Required metadata, artifact paths, drill-down commands, and truncation counts remain visible. Evidence is normalized by removing ANSI sequences, progress updates, repeated lines, and other non-actionable noise before applying the budget.
 
+The `command:` line shows ` | scope: <arguments>` when passthrough arguments were given, so the requested scope stays separate from the task or package a diagnostic names.
+
+Commands with a diagnostics adapter always render a `diagnostics:` line: `diagnostics: structured` when the adapter's evidence was used, or `diagnostics: fallback (<reason>)` when the result comes from the rendered log. The reason is short and deterministic, such as `malformed adapter response`, `invalid adapter response`, `adapter timeout`, `expected version 1, received version 2`, `unsafe structured evidence`, `structured source turbo-summary.json is missing`, `no structured evidence was written`, `structured evidence unavailable`, or `no actionable structured failure`. The detailed cause stays in the warnings. Commands without an adapter render no `diagnostics:` line. Because of that extra line, a command with an adapter needs at least 8 lines in every budget it overrides.
+
+The rendered-log fallback drops pnpm script headers (`> pkg@1.0.0 build /path`), Turbo banners (`turbo 2.5.4`, `• Packages in scope: …`) and the `Tasks:`, `Cached:`, and `Time:` totals, including behind a Turbo `pkg:task:` prefix. Package-manager and Turbo lines that only repeat that a task failed (`ELIFECYCLE`, `ERR_PNPM_…`, `pkg#task: command (…) exited (1)`, `ERROR run failed: …`, `Failed: …`) are used as the failure only when no other actionable line exists, so a failure is never hidden.
+
 ## JSON sidecar
 
 The sidecar uses `schema: dev-result/v1` and contains:
 
 - a collision-safe job identifier;
-- the outcome and normalized command;
+- the outcome, normalized command, and requested `command.scope`;
+- the `diagnostics` marker (`mode` and `reason`) when the command has a diagnostics adapter;
 - exit code, duration, and attempt counts;
 - summary, distinct failures, and warnings;
 - repository-relative artifact paths and retrieval commands;

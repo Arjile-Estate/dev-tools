@@ -326,7 +326,7 @@ dev_result:
 
 Supported command names are `test`, `test:focused`, `build`, `lint`, `lint:dead-code`, and `typecheck`. An absent, unlisted, or disabled entry preserves the command's existing streaming, text/JSON output, artifact behavior, and exit code.
 
-Enabled commands emit a bounded `DEV-RESULT v1` envelope and retain complete redacted streams under `.build/agent/`. `test` and `test:focused` may additionally use a directly invoked repository diagnostics adapter; each invocation receives isolated `DEV_TOOLS_RUN_ID` and `DEV_TOOLS_RUN_DIR` values. Inspect an existing result without rerunning validation:
+Enabled commands emit a bounded `DEV-RESULT v1` envelope and retain complete redacted streams under `.build/agent/`. Each enabled command may additionally use a directly invoked repository diagnostics adapter (`required: true` makes a missing structured source visible); each invocation receives isolated `DEV_TOOLS_RUN_ID` and `DEV_TOOLS_RUN_DIR` values. Inspect an existing result without rerunning validation:
 
 ```bash
 dev-tools result <job>

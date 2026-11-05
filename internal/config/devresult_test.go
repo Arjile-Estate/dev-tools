@@ -185,7 +185,6 @@ func TestDevResultDiagnosticsAdapterRejectsInvalidConfiguration(t *testing.T) {
 		adapterYML string
 		wantError  string
 	}{
-		{name: "adapter on unsupported command", command: "build", adapterYML: "command: [adapter]\n        start_when: [results.json]", wantError: "build"},
 		{name: "empty command", command: "test", adapterYML: "command: []\n        start_when: [results.json]", wantError: "command"},
 		{name: "empty command argument", command: "test", adapterYML: "command: [adapter, \"\"]\n        start_when: [results.json]", wantError: "command"},
 		{name: "empty start patterns", command: "test", adapterYML: "command: [adapter]\n        start_when: []", wantError: "start_when"},
@@ -209,4 +208,41 @@ func TestDevResultDiagnosticsAdapterRejectsInvalidConfiguration(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantError)
 		})
 	}
+}
+
+func TestDevResultDiagnosticsAdapterIsAllowedForBuildAndStaticAnalysis(t *testing.T) {
+	for _, command := range []string{"build", "typecheck", "lint", "lint:dead-code"} {
+		t.Run(command, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), ".dev-config.yaml")
+			contents := "commands:\n  " + command + ":\n    - run: echo ok\ndev_result:\n  commands:\n    " + command + ":\n      enabled: true\n      diagnostics_adapter:\n        command: [node, adapter.mjs]\n        start_when: [report.json]\n        required: true\n"
+			require.NoError(t, os.WriteFile(configPath, []byte(contents), 0o600))
+
+			cfg, err := LoadConfigFromFile(configPath)
+			require.NoError(t, err)
+			adapter := cfg.DevResult.Commands[command].DiagnosticsAdapter
+			require.NotNil(t, adapter)
+			assert.True(t, adapter.Required)
+		})
+	}
+}
+
+func TestDevResultDiagnosticsAdapterRequiresRoomForTheDiagnosticsLine(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".dev-config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`commands:
+  build:
+    - run: echo ok
+dev_result:
+  commands:
+    build:
+      enabled: true
+      success:
+        lines: 7
+      diagnostics_adapter:
+        command: [node, adapter.mjs]
+        start_when: [report.json]
+`), 0o600))
+
+	_, err := LoadConfigFromFile(configPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "greater than or equal to 8")
 }

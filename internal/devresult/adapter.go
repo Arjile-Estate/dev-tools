@@ -103,7 +103,7 @@ func ExecuteAdapter(ctx context.Context, options AdapterOptions) AdapterResult {
 		return result
 	}
 	if err := ValidateDiagnosticsResponse(response, limits); err != nil {
-		result.Err = err
+		result.Err = fmt.Errorf("invalid diagnostics adapter response: %w", err)
 		return result
 	}
 	result.Response = &response
