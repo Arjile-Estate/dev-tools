@@ -591,11 +591,13 @@ func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 			// de-duplication; the sidecar keeps every field.
 			stripEvidenceDetail(compact.Failures)
 			stripEvidenceDetail(compact.Warnings)
-		case shortenEvidence(compact.Failures, compact.Warnings):
-			// Shorten messages before dropping evidence; the sidecar keeps them whole.
+		case shortenEvidence(compact.Warnings):
+			// Shorten warnings before dropping them; the sidecar keeps every message whole.
 		case len(compact.Warnings) > 0:
 			compact.Warnings = compact.Warnings[:len(compact.Warnings)-1]
 			compact.Truncation.Shown.Warnings = len(compact.Warnings)
+		case shortenEvidence(compact.Failures):
+			// Failures are shortened only once every warning is gone.
 		case len(compact.Failures) > 0:
 			compact.Failures = compact.Failures[:len(compact.Failures)-1]
 			compact.Truncation.Shown.Failures = len(compact.Failures)

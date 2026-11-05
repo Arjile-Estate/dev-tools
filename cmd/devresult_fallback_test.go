@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 
 	"dev-tools/internal/devresult"
+	"dev-tools/internal/logger"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -40,4 +43,19 @@ func TestAdapterFallbackWarningsAndReasons(t *testing.T) {
 			assert.Equal(t, tt.reason, collected.fallbackReason)
 		})
 	}
+}
+
+func TestLogDiagnosticsFallbackRedactsTheActivityLog(t *testing.T) {
+	t.Setenv("BUILD_API_TOKEN", "secret-demo-12345")
+	var output bytes.Buffer
+	logger.Init(&output, logger.InfoLevel, false)
+	t.Cleanup(func() { logger.Init(io.Discard, logger.InfoLevel, false) })
+
+	logDiagnosticsFallback("build", collectedDiagnostics{warning: "structured diagnostics are unavailable: token secret-demo-12345 rejected", fallbackReason: "adapter failed"})
+	logDiagnosticsFallback("lint", collectedDiagnostics{fallbackReason: "reason secret-demo-12345"})
+
+	logged := output.String()
+	assert.Contains(t, logged, "DEV-RESULT build diagnostics fell back to the rendered log")
+	assert.Contains(t, logged, "DEV-RESULT lint diagnostics fell back to the rendered log")
+	assert.NotContains(t, logged, "secret-demo-12345")
 }

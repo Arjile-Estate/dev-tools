@@ -478,12 +478,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		retainedEvidence := collected.evidence
 		if collected.warning != "" {
 			resultWarnings = append(resultWarnings, collected.warning)
-			warning, _ := redactRetainedEvidence(collected.warning)
-			logger.Warnf("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, warning)
-		} else if collected.fallbackReason != "" {
-			reason, _ := redactRetainedEvidence(collected.fallbackReason)
-			logger.Infof("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, reason)
 		}
+		logDiagnosticsFallback(commandName, collected)
 		if cfg.DevResult != nil && validationRun.ID != "" {
 			retention, retentionErr := devresult.ApplyRetention(cmdCfg.ProjectDir, validationRun.ID, time.Now(), devresult.RetentionPolicy{
 				MaxAge:   cfg.DevResult.Retention.MaxAge,
@@ -715,6 +711,18 @@ func retainedSourcePath(path string, index int) (string, int) {
 		return path, matches
 	}
 	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted)))), matches
+}
+
+// logDiagnosticsFallback records a fallback in the activity log, redacted like every other
+// persisted artifact: a warning, or the reason alone for a quiet fallback.
+func logDiagnosticsFallback(commandName string, collected collectedDiagnostics) {
+	if collected.warning != "" {
+		warning, _ := redactRetainedEvidence(collected.warning)
+		logger.Warnf("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, warning)
+	} else if collected.fallbackReason != "" {
+		reason, _ := redactRetainedEvidence(collected.fallbackReason)
+		logger.Infof("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, reason)
+	}
 }
 
 // fallback records why structured diagnostics were not used: the visible warning (empty for a

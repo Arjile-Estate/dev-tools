@@ -133,7 +133,7 @@ The sidecar uses `schema: dev-result/v1` and contains:
 - selected/total evidence and line/byte budget information;
 - redaction state and match count.
 
-`--format=json` emits the compact sidecar-shaped result and never embeds raw stdout or stderr. Under its byte budget it first drops retained-artifact paths, then the per-diagnostic `identity`, `package`, `task`, `file`, `line`, `column`, and `rule` fields (the message already renders them), then shortens long messages, and only then drops evidence, last failures; the shown/total counts always say what was dropped. The retained sidecar contains the complete structured evidence used by `--failures` and `--warnings`.
+`--format=json` emits the compact sidecar-shaped result and never embeds raw stdout or stderr. Under its byte budget it first drops retained-artifact paths, then the per-diagnostic `identity`, `package`, `task`, `file`, `line`, `column`, and `rule` fields (the message already renders them), then shortens and drops warnings, and only then shortens and drops failures; the shown/total counts always say what was dropped. The retained sidecar contains the complete structured evidence used by `--failures` and `--warnings`.
 
 ## Retained log
 

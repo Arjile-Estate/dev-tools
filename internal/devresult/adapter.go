@@ -147,12 +147,14 @@ func cancelReason(cancelled bool) string {
 	return ReasonAdapterUnavailable
 }
 
+// schemaVersion extracts the version an adapter claimed, bounded because the schema string
+// is adapter-controlled and reaches the warning, the marker and the activity log.
 func schemaVersion(schema string) string {
 	index := strings.LastIndex(schema, "/v")
 	if index < 0 || index+len("/v") >= len(schema) {
 		return "unknown"
 	}
-	return schema[index+len("/v"):]
+	return truncateText(schema[index+len("/v"):], 32)
 }
 
 func environmentWithOverrides(base []string, overrides map[string]string) []string {
