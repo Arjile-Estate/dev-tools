@@ -3,6 +3,7 @@ package devresult
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -144,9 +145,11 @@ type Result struct {
 }
 
 type Input struct {
-	Job                        string
-	CommandName                string
-	NormalizedCommand          string
+	Job               string
+	CommandName       string
+	NormalizedCommand string
+	// Scope holds the passthrough arguments already inside NormalizedCommand, whose redaction
+	// count covers them; Build redacts Scope without counting it again.
 	Scope                      string
 	ExitCode                   int
 	Duration                   time.Duration
@@ -169,8 +172,11 @@ var (
 	// Turbo `pkg:task: ` prefix (a task name, never a line number); noiseLine keeps any that
 	// still reads as a failure.
 	bannerPattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?(?:> |• |turbo \d+\.\d+|>>> FULL TURBO|(?:Tasks|Cached|Time):\s)`)
+	// codeFramePattern matches a compiler code frame such as `> 12 | const rent = …`, which
+	// shares the `> ` prefix of pnpm script headers but points at the failing source line.
+	codeFramePattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?>\s*\d+\s*\|`)
 	// echoPattern matches package-manager and Turbo lines that only repeat that a task failed.
-	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_RECURSIVE_(?:RUN|EXEC)_FIRST_FAIL\b|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
+	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_RECURSIVE_(?:RUN|EXEC)_FIRST_FAIL\b|^(?:\S+:\S+: )?ERROR: command finished with error: (?:\S+#\S+: )?command \(.*\) .*exited \(\d+\)|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
 	failurePattern  = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
 	warningPattern  = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
 	progressPattern = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)
@@ -181,8 +187,8 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	stderr, stderrMatches := Redact(input.Stderr, environment)
 	normalizedCommand, commandMatches := Redact(input.NormalizedCommand, environment)
 	commandMatches += strings.Count(input.NormalizedCommand, RedactionMarker)
-	scope, scopeMatches := Redact(input.Scope, environment)
-	commandMatches += scopeMatches
+	// The scope repeats the normalized command's arguments, whose matches are already counted.
+	scope, _ := Redact(input.Scope, environment)
 	redactedWarnings := make([]string, 0, len(input.Warnings))
 	warningMatches := 0
 	for _, warning := range input.Warnings {
@@ -439,18 +445,20 @@ func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome
 		}
 	}
 	if outcome != OutcomePass && len(failures) == 0 {
-		switch {
-		case len(echoes) > 0:
-			failures = append(failures, echoes[0])
-		case len(fallback) > 0:
+		// No line names a failure: keep the first remaining line, which may be the cause the
+		// keywords missed, then the first echo, which at least says that the task failed.
+		if len(fallback) > 0 {
 			failures = append(failures, fallback[0])
+		}
+		if len(echoes) > 0 {
+			failures = append(failures, echoes[0])
 		}
 	}
 	return failures, warnings
 }
 
 func noiseLine(line string) bool {
-	if progressPattern.MatchString(line) || (bannerPattern.MatchString(line) && !failurePattern.MatchString(line)) {
+	if progressPattern.MatchString(line) || (bannerPattern.MatchString(line) && !failurePattern.MatchString(line) && !codeFramePattern.MatchString(line)) {
 		return true
 	}
 	lower := strings.ToLower(line)
@@ -548,7 +556,18 @@ func Compact(result Result, budgets Budgets) Result {
 }
 
 func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
-	compact := Compact(result, budgets)
+	// JSON selects its own evidence against its byte budget: start from the text compaction's
+	// metadata limits but none of its line or byte selection, then report the real budget.
+	unlimited := Budget{Lines: math.MaxInt32, Bytes: math.MaxInt32}
+	compact := Compact(result, Budgets{Success: unlimited, Failure: unlimited, Timeout: unlimited, Background: unlimited})
+	compact.Truncation.Budget = budgetFor(result.Outcome, budgets)
+	// Like the text envelope, name a drill-down only for evidence that exists.
+	if compact.Truncation.Total.Failures == 0 {
+		compact.DrillDown.Failures = ""
+	}
+	if compact.Truncation.Total.Warnings == 0 {
+		compact.DrillDown.Warnings = ""
+	}
 	for {
 		data, err := marshalMeasuredJSON(&compact)
 		if err != nil {
@@ -565,9 +584,18 @@ func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 			compact.Artifacts.AdapterStderr = ""
 		case compact.Artifacts.AdapterResponse != "":
 			compact.Artifacts.AdapterResponse = ""
+		case hasEvidenceDetail(compact.Failures) || hasEvidenceDetail(compact.Warnings):
+			// The message already renders task, location and rule, and the identity only serves
+			// de-duplication; the sidecar keeps every field.
+			stripEvidenceDetail(compact.Failures)
+			stripEvidenceDetail(compact.Warnings)
+		case shortenEvidence(compact.Warnings):
+			// Shorten warnings before dropping them; the sidecar keeps every message whole.
 		case len(compact.Warnings) > 0:
 			compact.Warnings = compact.Warnings[:len(compact.Warnings)-1]
 			compact.Truncation.Shown.Warnings = len(compact.Warnings)
+		case shortenEvidence(compact.Failures):
+			// Failures are shortened only once every warning is gone.
 		case len(compact.Failures) > 0:
 			compact.Failures = compact.Failures[:len(compact.Failures)-1]
 			compact.Truncation.Shown.Failures = len(compact.Failures)
@@ -577,6 +605,8 @@ func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 			compact.Command.Normalized = truncateText(compact.Command.Normalized, len(compact.Command.Normalized)-16)
 		case len(compact.Summary) > 32:
 			compact.Summary = truncateText(compact.Summary, len(compact.Summary)-16)
+		case compact.Diagnostics != nil:
+			compact.Diagnostics = nil
 		default:
 			return nil, fmt.Errorf("DEV-RESULT JSON metadata exceeds %d-byte budget", compact.Truncation.Budget.Bytes)
 		}
@@ -618,6 +648,46 @@ func measureText(result *Result) {
 	}
 }
 
+func hasEvidenceDetail(items []Evidence) bool {
+	for _, item := range items {
+		if item.Identity != "" || item.Package != "" || item.Task != "" || item.File != "" || item.Line != 0 || item.Column != 0 || item.Rule != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func stripEvidenceDetail(items []Evidence) {
+	for index := range items {
+		items[index].Identity, items[index].Package, items[index].Task, items[index].File, items[index].Rule = "", "", "", "", ""
+		items[index].Line, items[index].Column = 0, 0
+	}
+}
+
+// compactEvidenceBytes are the successive message lengths compact JSON tries before it drops
+// an evidence item.
+var compactEvidenceBytes = []int{120, 80, 48}
+
+// shortenEvidence cuts every message longer than the next limit down to it, and reports
+// whether anything changed.
+func shortenEvidence(groups ...[]Evidence) bool {
+	for _, limit := range compactEvidenceBytes {
+		shortened := false
+		for _, items := range groups {
+			for index := range items {
+				if len(items[index].Message) > limit {
+					items[index].Message = truncateText(items[index].Message, limit)
+					shortened = true
+				}
+			}
+		}
+		if shortened {
+			return true
+		}
+	}
+	return false
+}
+
 func shrinkMetadata(result *Result) {
 	for {
 		measureText(result)
@@ -625,12 +695,17 @@ func shrinkMetadata(result *Result) {
 			return
 		}
 		switch {
+		case result.Diagnostics != nil && result.Truncation.Shown.Lines > result.Truncation.Budget.Lines:
+			// A budget at the 7-line minimum has no room for the diagnostics line; the sidecar keeps it.
+			result.Diagnostics = nil
 		case len(result.Command.Scope) > 32:
 			result.Command.Scope = truncateText(result.Command.Scope, len(result.Command.Scope)-16)
 		case len(result.Command.Normalized) > 32:
 			result.Command.Normalized = truncateText(result.Command.Normalized, len(result.Command.Normalized)-16)
 		case len(result.Summary) > 32:
 			result.Summary = truncateText(result.Summary, len(result.Summary)-16)
+		case result.Diagnostics != nil:
+			result.Diagnostics = nil
 		default:
 			return
 		}

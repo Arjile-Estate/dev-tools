@@ -226,7 +226,7 @@ func TestDevResultDiagnosticsAdapterIsAllowedForBuildAndStaticAnalysis(t *testin
 	}
 }
 
-func TestDevResultDiagnosticsAdapterRequiresRoomForTheDiagnosticsLine(t *testing.T) {
+func TestDevResultDiagnosticsAdapterAcceptsTheMinimumBudget(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".dev-config.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`commands:
   build:
@@ -242,7 +242,7 @@ dev_result:
         start_when: [report.json]
 `), 0o600))
 
-	_, err := LoadConfigFromFile(configPath)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "greater than or equal to 8")
+	cfg, err := LoadConfigFromFile(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, 7, cfg.DevResult.Commands["build"].Success.Lines)
 }

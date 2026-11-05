@@ -125,6 +125,21 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 		assert.Contains(t, output, "DEV-RESULT v1 PASS")
 		assert.Contains(t, output, "warnings: shown 1/1")
 		assert.Contains(t, output, "- unused export rentLabel (src/rent.ts) [exports]")
+
+		jsonDir := t.TempDir()
+		jsonOutput, jsonErr := arj3539RunRoot(jsonDir, "--format", "json", "lint:dead-code")
+		require.NoError(t, jsonErr)
+		var compact devresult.Result
+		require.NoError(t, json.Unmarshal([]byte(jsonOutput), &compact))
+		assert.Equal(t, devresult.OutcomePass, compact.Outcome)
+		require.Len(t, compact.Warnings, 1, jsonOutput)
+		assert.Contains(t, compact.Warnings[0].Message, "unused export rentLabel")
+		retained := arj3515Sidecar(t, jsonDir)
+		require.Len(t, retained.Warnings, 1)
+		assert.Equal(t, "knip:exports:src/rent.ts:rentLabel", retained.Warnings[0].Identity)
+		assert.Equal(t, "src/rent.ts", retained.Warnings[0].File)
+		assert.Equal(t, "exports", retained.Warnings[0].Rule)
+		assert.Equal(t, "unused export rentLabel (src/rent.ts) [exports]", retained.Warnings[0].Message)
 	})
 
 	t.Run("R1.E3_typecheck_without_an_adapter_is_unchanged", func(t *testing.T) {
@@ -265,6 +280,25 @@ func TestARJ3515BuildAndStaticAnalysisDiagnostics(t *testing.T) {
 		jsonOutput, jsonErr := arj3539RunRoot(jsonDir, "--format", "json", "build")
 		arj3539RequireExitCode(t, jsonErr, 1)
 		assert.Contains(t, jsonOutput, `"diagnostics":{"mode":"structured"}`)
+	})
+
+	t.Run("JSON_at_a_7-line_budget_keeps_evidence_untruncated", func(t *testing.T) {
+		projectDir := t.TempDir()
+		runner := arj3539EvidenceExecutor(t, "turbo-summary.json", "{}", arj3539Failure("build", 1, "build failed"))
+		cfg := arj3515Config("build", arj3515Adapter("ui-build"))
+		resultConfig := cfg.DevResult.Commands["build"]
+		resultConfig.Failure = config.ResultBudgetConfig{Lines: 7, Bytes: 4096}
+		cfg.DevResult.Commands["build"] = resultConfig
+		arj3539Install(t, cfg, runner)
+
+		output, err := arj3539RunRoot(projectDir, "--format", "json", "build")
+
+		arj3539RequireExitCode(t, err, 1)
+		var compact devresult.Result
+		require.NoError(t, json.Unmarshal([]byte(output), &compact), output)
+		require.Len(t, compact.Failures, 1, output)
+		assert.False(t, compact.Truncation.Truncated, output)
+		assert.False(t, arj3515Sidecar(t, projectDir).Truncation.Truncated)
 	})
 
 	t.Run("R4.E2_marks_a_malformed_adapter_fallback_deterministically", func(t *testing.T) {

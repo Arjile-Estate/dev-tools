@@ -22,9 +22,6 @@ type ResultBudgetConfig struct {
 const (
 	MinDevResultLines = 7
 	MinDevResultBytes = 1024
-	// MinDevResultAdapterLines leaves room for the `diagnostics:` line a command with a
-	// diagnostics adapter always renders.
-	MinDevResultAdapterLines = MinDevResultLines + 1
 
 	DefaultDiagnosticsAdapterTimeout                   = 2 * time.Second
 	DefaultDiagnosticsAdapterStdoutBytes         int64 = 1 << 20

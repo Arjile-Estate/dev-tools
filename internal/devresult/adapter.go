@@ -20,11 +20,23 @@ type AdapterOptions struct {
 	Limits     Limits
 }
 
+// Short, deterministic reasons for an adapter run that produced no usable response. They
+// name the failure in the result's diagnostics marker; Err carries the detail.
+const (
+	ReasonAdapterTimeout     = "adapter timeout"
+	ReasonAdapterCancelled   = "adapter cancelled"
+	ReasonMalformedResponse  = "malformed adapter response"
+	ReasonInvalidResponse    = "invalid adapter response"
+	ReasonUnsafeEvidence     = "unsafe structured evidence"
+	ReasonAdapterUnavailable = "structured diagnostics are unavailable"
+)
+
 type AdapterResult struct {
 	Response        *DiagnosticsResponse
 	Stdout          []byte
 	Stderr          []byte
 	Err             error
+	Reason          string
 	TimedOut        bool
 	Cancelled       bool
 	StdoutTruncated bool
@@ -34,18 +46,19 @@ type AdapterResult struct {
 func ExecuteAdapter(ctx context.Context, options AdapterOptions) AdapterResult {
 	limits := options.Limits.withDefaults()
 	if err := validateDiagnosticsRequest(options.Request); err != nil {
-		return AdapterResult{Err: err}
+		return AdapterResult{Err: err, Reason: ReasonAdapterUnavailable}
 	}
 	if len(options.Argv) == 0 || options.Argv[0] == "" {
-		return AdapterResult{Err: errors.New("diagnostics adapter argv is empty")}
+		return AdapterResult{Err: errors.New("diagnostics adapter argv is empty"), Reason: ReasonAdapterUnavailable}
 	}
 	if err := ctx.Err(); err != nil {
-		return AdapterResult{Err: fmt.Errorf("diagnostics adapter cancelled: %w", err), Cancelled: errors.Is(err, context.Canceled)}
+		cancelled := errors.Is(err, context.Canceled)
+		return AdapterResult{Err: fmt.Errorf("diagnostics adapter cancelled: %w", err), Cancelled: cancelled, Reason: cancelReason(cancelled)}
 	}
 
 	request, err := json.Marshal(options.Request)
 	if err != nil {
-		return AdapterResult{Err: fmt.Errorf("encode diagnostics request: %w", err)}
+		return AdapterResult{Err: fmt.Errorf("encode diagnostics request: %w", err), Reason: ReasonAdapterUnavailable}
 	}
 	request = append(request, '\n')
 
@@ -81,33 +94,67 @@ func ExecuteAdapter(ctx context.Context, options AdapterOptions) AdapterResult {
 	if ctx.Err() != nil {
 		result.Cancelled = errors.Is(ctx.Err(), context.Canceled)
 		result.Err = fmt.Errorf("diagnostics adapter cancelled: %w", ctx.Err())
+		result.Reason = cancelReason(result.Cancelled)
 		return result
 	}
 	if errors.Is(runContext.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 		result.Err = fmt.Errorf("diagnostics adapter exceeded timeout %s: %w", limits.Timeout, context.DeadlineExceeded)
+		result.Reason = ReasonAdapterTimeout
 		return result
 	}
 	if result.StdoutTruncated {
 		result.Err = fmt.Errorf("diagnostics adapter standard output limit of %d bytes exceeded", limits.StdoutBytes)
+		result.Reason = ReasonAdapterUnavailable
 		return result
 	}
 	if runErr != nil {
 		result.Err = fmt.Errorf("run diagnostics adapter %q: %w", options.Argv[0], runErr)
+		result.Reason = ReasonAdapterUnavailable
 		return result
 	}
 
 	response, err := decodeDiagnosticsResponse(result.Stdout)
 	if err != nil {
 		result.Err = err
+		result.Reason = ReasonMalformedResponse
+		return result
+	}
+	if response.Schema != DiagnosticsResponseSchemaV1 {
+		result.Reason = "expected version 1, received version " + schemaVersion(response.Schema)
+		result.Err = errors.New(result.Reason)
 		return result
 	}
 	if err := ValidateDiagnosticsResponse(response, limits); err != nil {
 		result.Err = fmt.Errorf("invalid diagnostics adapter response: %w", err)
+		result.Reason = ReasonInvalidResponse
+		var sourceErr SourceError
+		if errors.As(err, &sourceErr) {
+			result.Reason = ReasonUnsafeEvidence
+		}
 		return result
 	}
 	result.Response = &response
 	return result
+}
+
+// cancelReason keeps a parent deadline on the generic reason: only an explicit cancellation
+// is reported as one.
+func cancelReason(cancelled bool) string {
+	if cancelled {
+		return ReasonAdapterCancelled
+	}
+	return ReasonAdapterUnavailable
+}
+
+// schemaVersion extracts the version an adapter claimed, bounded because the schema string
+// is adapter-controlled and reaches the warning, the marker and the activity log.
+func schemaVersion(schema string) string {
+	index := strings.LastIndex(schema, "/v")
+	if index < 0 || index+len("/v") >= len(schema) {
+		return "unknown"
+	}
+	return truncateText(schema[index+len("/v"):], 32)
 }
 
 func environmentWithOverrides(base []string, overrides map[string]string) []string {

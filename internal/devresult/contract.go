@@ -12,6 +12,12 @@ const (
 	DiagnosticsResponseSchemaV1 = "dev-tools/diagnostics-response/v1"
 )
 
+// SourceError reports a returned diagnostic source that cannot be read safely: no kind, or
+// a path that could leave the run directory.
+type SourceError struct{ Message string }
+
+func (err SourceError) Error() string { return err.Message }
+
 type EvidenceState string
 
 const (
@@ -149,11 +155,11 @@ func ValidateDiagnosticsResponse(response DiagnosticsResponse, limits Limits) er
 	}
 	for index, source := range response.Sources {
 		if strings.TrimSpace(source.Kind) == "" {
-			return fmt.Errorf("diagnostic source %d has no kind", index)
+			return SourceError{Message: fmt.Sprintf("diagnostic source %d has no kind", index)}
 		}
 		path := filepath.FromSlash(source.Path)
 		if source.Path == "" || filepath.IsAbs(path) || filepath.Clean(path) == "." || filepath.Clean(path) == ".." || strings.HasPrefix(filepath.Clean(path), ".."+string(filepath.Separator)) {
-			return fmt.Errorf("diagnostic source %d must use a relative source path", index)
+			return SourceError{Message: fmt.Sprintf("diagnostic source %d must use a relative source path", index)}
 		}
 	}
 	return nil

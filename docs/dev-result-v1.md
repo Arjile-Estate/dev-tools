@@ -116,9 +116,9 @@ Failure and warning sections are omitted when their totals are zero. Required me
 
 The `command:` line shows ` | scope: <arguments>` when passthrough arguments were given, so the requested scope stays separate from the task or package a diagnostic names.
 
-Commands with a diagnostics adapter always render a `diagnostics:` line: `diagnostics: structured` when the adapter's evidence was used, or `diagnostics: fallback (<reason>)` when the result comes from the rendered log. The reason is short and deterministic, such as `malformed adapter response`, `invalid adapter response`, `adapter timeout`, `expected version 1, received version 2`, `unsafe structured evidence`, `structured source turbo-summary.json is missing`, `no structured evidence was written`, `structured evidence unavailable`, or `no actionable structured failure`. The detailed cause stays in the warnings. Commands without an adapter render no `diagnostics:` line. Because of that extra line, a command with an adapter needs at least 8 lines in every budget it overrides.
+Commands with a diagnostics adapter always render a `diagnostics:` line: `diagnostics: structured` when the adapter's evidence was used, or `diagnostics: fallback (<reason>)` when the result comes from the rendered log. The reason is short and deterministic, such as `malformed adapter response`, `invalid adapter response`, `adapter timeout`, `expected version 1, received version 2`, `unsafe structured evidence`, `structured source turbo-summary.json is missing`, `no structured evidence was written`, `structured evidence unavailable`, or `no actionable structured failure`. The detailed cause stays in the warnings. Commands without an adapter render no `diagnostics:` line. When a budget has no room for it (the 7-line minimum), the text envelope drops the `diagnostics:` line and marks the result truncated; `--format json` output and the retained sidecar file keep the marker.
 
-The rendered-log fallback drops pnpm script headers (`> pkg@1.0.0 build /path`), Turbo banners (`turbo 2.5.4`, `• Packages in scope: …`) and the `Tasks:`, `Cached:`, and `Time:` totals, including behind a Turbo `pkg:task:` prefix. Package-manager and Turbo lines that only repeat that a task failed (`ELIFECYCLE`, `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `pkg#task: command (…) exited (1)`, `ERROR run failed: …`, `Failed: …`) are used as the failure only when no other actionable line exists, so a failure is never hidden.
+The rendered-log fallback drops pnpm script headers (`> pkg@1.0.0 build /path`), Turbo banners (`turbo 2.5.4`, `• Packages in scope: …`) and the `Tasks:`, `Cached:`, and `Time:` totals, including behind a Turbo `pkg:task:` prefix. Package-manager and Turbo lines that only repeat that a task failed (`ELIFECYCLE`, `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`, `pkg#task: command (…) exited (1)`, Turbo 2 `ERROR: command finished with error: command (…) exited (1)`, `ERROR run failed: …`, `Failed: pkg#task`) are not reported beside a real failure. When no line reads as a failure, the result shows the first remaining log line followed by the first such echo, so a failure is never hidden. Compiler code frames such as `> 12 | const rent = …` are kept.
 
 ## JSON sidecar
 
@@ -133,7 +133,7 @@ The sidecar uses `schema: dev-result/v1` and contains:
 - selected/total evidence and line/byte budget information;
 - redaction state and match count.
 
-`--format=json` emits the compact sidecar-shaped result and never embeds raw stdout or stderr. The retained sidecar contains structured evidence used by `--failures` and `--warnings`.
+`--format=json` emits the compact sidecar-shaped result and never embeds raw stdout or stderr. Under its byte budget it first drops retained-artifact paths, then the per-diagnostic `identity`, `package`, `task`, `file`, `line`, `column`, and `rule` fields (the message already renders them), then shortens and drops warnings, and only then shortens and drops failures; the shown/total counts always say what was dropped. The retained sidecar contains the complete structured evidence used by `--failures` and `--warnings`.
 
 ## Retained log
 
