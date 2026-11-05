@@ -60,6 +60,13 @@ func TestDiagnosticsPublishedFixturesConform(t *testing.T) {
 	require.NoError(t, json.Unmarshal(responseData, &response))
 	require.NoError(t, ValidateDiagnosticsResponse(response, DefaultAdapterLimits()))
 	assert.Equal(t, "checkout/rejects-expired-card", response.Failures[0].Identity)
+
+	buildData, err := os.ReadFile(filepath.Join("testdata", "diagnostics-v1", "build-response.json"))
+	require.NoError(t, err)
+	var build DiagnosticsResponse
+	require.NoError(t, json.Unmarshal(buildData, &build))
+	require.NoError(t, ValidateDiagnosticsResponse(build, DefaultAdapterLimits()))
+	assert.Equal(t, "ui#build: Type 'string' is not assignable to type 'number'. (packages/ui/src/button.ts:12:5) [TS2322]", formatDiagnostic(build.Failures[0]))
 }
 
 func TestDiagnosticsContractRejectsExcessRecordsAndInvalidStates(t *testing.T) {

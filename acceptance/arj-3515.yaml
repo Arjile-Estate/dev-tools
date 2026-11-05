@@ -1,0 +1,35 @@
+# ARJ-3515 R1.E1 — Maison Fictive configures its adapter for build; the build of ui exits 1 and the adapter reports ui#build failed with TS2322 in packages/ui/src/button.ts → DEV-RESULT shows that one failure and exits 1
+# ARJ-3515 R1.E2 — Maison Fictive configures its adapter for lint:dead-code; Knip passes with exit 0 and the adapter reports one unused export as a warning, so DEV-RESULT is PASS with that one warning
+# ARJ-3515 R1.E3 — Atelier Fictif enables DEV-RESULT for typecheck without an adapter; tsc prints error TS2304 Cannot find name Bail in src/lease.ts and exits 2 → DEV-RESULT shows that TS2304 line as the only failure and exits 2
+# ARJ-3515 R2.E1 — The adapter reports TS2322 Type string is not assignable to type number in packages/ui/src/button.ts at line 12 column 5 for task ui#build → DEV-RESULT shows packages/ui/src/button.ts:12:5 with rule TS2322 and task ui#build
+# ARJ-3515 R2.E2 — The adapter reports a no-debugger error in apps/web/src/quittance.ts at line 8 column 3 → the failure reads apps/web/src/quittance.ts:8:3 with rule no-debugger
+# ARJ-3515 R2.E3 — The checkout adapter from test-006 reports checkout rejects an expired card and rent rounds the annual revision with no column, rule or task → DEV-RESULT shows those two failures with the same wording as in test-006 and exits 42
+# ARJ-3515 R2.E4 — The adapter reports column 5 without a line for src/lease.ts while the build exits 8 after printing error Unexpected token → DEV-RESULT says the adapter response is invalid, shows error Unexpected token and exits 8
+# ARJ-3515 R3.E1 — The build is configured to require the Turbo summary but prints Error Cannot find module vite and exits 2 before writing it → the adapter does not start, DEV-RESULT says the structured source turbo-summary.json is missing, shows Error Cannot find module vite and exits 2
+# ARJ-3515 R3.E2 — The same crash with the Turbo summary not required → no missing-source warning, Error Cannot find module vite is shown and the exit is 2
+# ARJ-3515 R3.E3 — Lint requires its Oxlint report oxlint.json, passes with exit 0 but writes no report → DEV-RESULT is PASS with the warning structured source oxlint.json is missing
+# ARJ-3515 R4.E1 — The build of ui exits 1 and its adapter returns complete evidence with one TS2322 failure → the text has a line diagnostics structured and the JSON has mode structured
+# ARJ-3515 R4.E2 — Dead-code validation exits 1 and its adapter prints not json at all → the text says diagnostics fallback with the reason malformed adapter response, the JSON has mode fallback with that reason, and a second run prints the same two lines
+# ARJ-3515 R4.E3 — dev-tools build with the filter web fails in ui#build and exits 1 → the requested scope reads filter web, the failure names task ui#build, and the process exits 1
+# ARJ-3515 R5.E1 — A failed build log holds the pnpm script header, Turbo packages in scope, the tasks, cached and time totals and one error Cannot find module ./rent → the only failure shown is Cannot find module ./rent
+# ARJ-3515 R5.E2 — The same log also ends with ELIFECYCLE Command failed with exit code 1 and ui#build command exited 1 → those echo lines are not shown as extra failures
+# ARJ-3515 R5.E3 — A failed build log contains only ELIFECYCLE Command failed with exit code 1 → that ELIFECYCLE line is shown as the one failure and the exit is 1
+
+story: ARJ-3515
+tests:
+  R1.E1: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R1.E1_build_uses_the_repository_adapter
+  R1.E2: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R1.E2_dead-code_validation_passes_with_an_adapter_warning
+  R1.E3: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R1.E3_typecheck_without_an_adapter_is_unchanged
+  R2.E1: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R2.E1_renders_column_rule_and_task
+  R2.E2: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R2.E2_renders_an_oxlint_location_and_rule
+  R2.E3: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R2.E3_keeps_adapters_without_the_new_fields_unchanged
+  R2.E4: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R2.E4_rejects_a_column_without_a_line
+  R3.E1: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R3.E1_reports_a_missing_required_source
+  R3.E2: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R3.E2_skips_an_optional_missing_source_quietly
+  R3.E3: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R3.E3_passes_with_a_missing_required_source_warning
+  R4.E1: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R4.E1_marks_structured_diagnostics
+  R4.E2: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R4.E2_marks_a_malformed_adapter_fallback_deterministically
+  R4.E3: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R4.E3_reports_the_requested_scope_apart_from_the_failing_task
+  R5.E1: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R5.E1_drops_package-manager_and_Turbo_banners
+  R5.E2: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R5.E2_does_not_repeat_package-manager_echoes
+  R5.E3: cmd/devresult_build_adapter_test.go::TestARJ3515BuildAndStaticAnalysisDiagnostics/R5.E3_shows_an_echo_when_it_is_the_only_failure

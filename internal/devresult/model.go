@@ -56,6 +56,7 @@ func SupportedCommand(name string) bool {
 type Command struct {
 	Name       string `json:"name"`
 	Normalized string `json:"normalized"`
+	Scope      string `json:"scope,omitempty"`
 }
 
 type AttemptSummary struct {
@@ -67,7 +68,27 @@ type Evidence struct {
 	Identity    string `json:"identity,omitempty"`
 	Message     string `json:"message"`
 	Source      string `json:"source"`
+	Package     string `json:"package,omitempty"`
+	Task        string `json:"task,omitempty"`
+	File        string `json:"file,omitempty"`
+	Line        int    `json:"line,omitempty"`
+	Column      int    `json:"column,omitempty"`
+	Rule        string `json:"rule,omitempty"`
 	identityKey string
+}
+
+type DiagnosticsMode string
+
+const (
+	DiagnosticsStructured DiagnosticsMode = "structured"
+	DiagnosticsFallback   DiagnosticsMode = "fallback"
+)
+
+// DiagnosticsSummary records whether a command with a diagnostics adapter used its
+// structured evidence or fell back to the rendered log, and why.
+type DiagnosticsSummary struct {
+	Mode   DiagnosticsMode `json:"mode"`
+	Reason string          `json:"reason,omitempty"`
 }
 
 type Artifacts struct {
@@ -104,27 +125,29 @@ type Redaction struct {
 }
 
 type Result struct {
-	Schema       string         `json:"schema"`
-	Job          string         `json:"job"`
-	Outcome      Outcome        `json:"outcome"`
-	Command      Command        `json:"command"`
-	ExitCode     *int           `json:"exit_code"`
-	DurationMS   int64          `json:"duration_ms"`
-	Attempts     AttemptSummary `json:"attempts"`
-	Summary      string         `json:"summary"`
-	Failures     []Evidence     `json:"failures,omitempty"`
-	Warnings     []Evidence     `json:"warnings,omitempty"`
-	Artifacts    Artifacts      `json:"artifacts"`
-	DrillDown    DrillDown      `json:"drill_down"`
-	Truncation   Truncation     `json:"truncation"`
-	Redaction    Redaction      `json:"redaction"`
-	RawLineCount int            `json:"-"`
+	Schema       string              `json:"schema"`
+	Job          string              `json:"job"`
+	Outcome      Outcome             `json:"outcome"`
+	Command      Command             `json:"command"`
+	ExitCode     *int                `json:"exit_code"`
+	DurationMS   int64               `json:"duration_ms"`
+	Attempts     AttemptSummary      `json:"attempts"`
+	Summary      string              `json:"summary"`
+	Diagnostics  *DiagnosticsSummary `json:"diagnostics,omitempty"`
+	Failures     []Evidence          `json:"failures,omitempty"`
+	Warnings     []Evidence          `json:"warnings,omitempty"`
+	Artifacts    Artifacts           `json:"artifacts"`
+	DrillDown    DrillDown           `json:"drill_down"`
+	Truncation   Truncation          `json:"truncation"`
+	Redaction    Redaction           `json:"redaction"`
+	RawLineCount int                 `json:"-"`
 }
 
 type Input struct {
 	Job                        string
 	CommandName                string
 	NormalizedCommand          string
+	Scope                      string
 	ExitCode                   int
 	Duration                   time.Duration
 	Attempts                   int
@@ -135,11 +158,19 @@ type Input struct {
 	Cancelled                  bool
 	Diagnostics                *DiagnosticsResponse
 	DiagnosticsWarning         string
+	DiagnosticsConfigured      bool
+	DiagnosticsFallbackReason  string
 	AdditionalRedactionMatches int
 }
 
 var (
-	ansiPattern     = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	ansiPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	// bannerPattern matches pnpm script headers and Turbo banners or totals, optionally behind a
+	// Turbo `pkg:task: ` prefix (a task name, never a line number); noiseLine keeps any that
+	// still reads as a failure.
+	bannerPattern = regexp.MustCompile(`^(?:[^\s:]+:[A-Za-z][\w.-]*: )?(?:> |• |turbo \d+\.\d+|>>> FULL TURBO|(?:Tasks|Cached|Time):\s)`)
+	// echoPattern matches package-manager and Turbo lines that only repeat that a task failed.
+	echoPattern     = regexp.MustCompile(`(?i)(?:\bELIFECYCLE\b|\bERR_PNPM_RECURSIVE_(?:RUN|EXEC)_FIRST_FAIL\b|^\S+#\S+: command \(.*\) .*exited \(\d+\)|^(?:x\s+)?ERROR\s+run failed:|^Failed:\s+\S+#\S+)`)
 	failurePattern  = regexp.MustCompile(`(?i)\b(error|fail(?:ed|ure)?|fatal|panic|undefined|cannot|denied|expected|timeout)\b`)
 	warningPattern  = regexp.MustCompile(`(?i)\bwarn(?:ing)?\b`)
 	progressPattern = regexp.MustCompile(`(?i)^(?:progress\s+)?\d{1,3}%$`)
@@ -150,6 +181,8 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	stderr, stderrMatches := Redact(input.Stderr, environment)
 	normalizedCommand, commandMatches := Redact(input.NormalizedCommand, environment)
 	commandMatches += strings.Count(input.NormalizedCommand, RedactionMarker)
+	scope, scopeMatches := Redact(input.Scope, environment)
+	commandMatches += scopeMatches
 	redactedWarnings := make([]string, 0, len(input.Warnings))
 	warningMatches := 0
 	for _, warning := range input.Warnings {
@@ -180,13 +213,33 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 
 	failures, warnings := collectEvidence(stdout, stderr, redactedWarnings, outcome)
 	structuredMatches := input.AdditionalRedactionMatches
+	var diagnostics *DiagnosticsSummary
+	if input.DiagnosticsConfigured {
+		reason, matches := Redact(input.DiagnosticsFallbackReason, environment)
+		structuredMatches += matches
+		if reason == "" {
+			reason = "no structured evidence was written"
+		}
+		diagnostics = &DiagnosticsSummary{Mode: DiagnosticsFallback, Reason: reason}
+	}
 	if input.Diagnostics != nil {
 		structuredFailures, structuredWarnings, matches := collectStructuredEvidence(*input.Diagnostics, environment)
 		structuredMatches += matches
-		if len(structuredFailures) > 0 || outcome == OutcomePass {
+		structuredUsed := len(structuredFailures) > 0 || outcome == OutcomePass
+		if structuredUsed {
 			failures = structuredFailures
 		}
 		warnings = append(structuredWarnings, warnings...)
+		if diagnostics != nil {
+			switch {
+			case input.Diagnostics.EvidenceState == EvidenceUnavailable:
+				diagnostics.Reason = "structured evidence unavailable"
+			case structuredUsed:
+				diagnostics = &DiagnosticsSummary{Mode: DiagnosticsStructured}
+			default:
+				diagnostics.Reason = "no actionable structured failure"
+			}
+		}
 	}
 	if strings.TrimSpace(input.DiagnosticsWarning) != "" {
 		warning, matches := Redact(input.DiagnosticsWarning, environment)
@@ -197,15 +250,16 @@ func Build(input Input, budgets Budgets, environment []string) (Result, string) 
 	warnings = deduplicateEvidence(warnings)
 	exitCode := input.ExitCode
 	result := Result{
-		Schema:     SchemaV1,
-		Job:        input.Job,
-		Outcome:    outcome,
-		Command:    Command{Name: input.CommandName, Normalized: normalizedCommand},
-		ExitCode:   &exitCode,
-		DurationMS: input.Duration.Milliseconds(),
-		Attempts:   AttemptSummary{Shown: input.Attempts, Total: input.Attempts},
-		Failures:   failures,
-		Warnings:   warnings,
+		Schema:      SchemaV1,
+		Job:         input.Job,
+		Outcome:     outcome,
+		Command:     Command{Name: input.CommandName, Normalized: normalizedCommand, Scope: scope},
+		ExitCode:    &exitCode,
+		DurationMS:  input.Duration.Milliseconds(),
+		Attempts:    AttemptSummary{Shown: input.Attempts, Total: input.Attempts},
+		Diagnostics: diagnostics,
+		Failures:    failures,
+		Warnings:    warnings,
 		Redaction: Redaction{
 			Applied: stdoutMatches+stderrMatches+commandMatches+warningMatches+structuredMatches > 0,
 			Matches: stdoutMatches + stderrMatches + commandMatches + warningMatches + structuredMatches,
@@ -230,18 +284,14 @@ func collectStructuredEvidence(response DiagnosticsResponse, environment []strin
 	warnings := make([]Evidence, 0, len(response.Warnings)+len(response.Problems))
 	matches := 0
 	for _, diagnostic := range response.Failures {
-		message, count := Redact(formatDiagnostic(diagnostic), environment)
+		evidence, count := structuredEvidence(diagnostic, environment)
 		matches += count
-		identity, identityMatches := Redact(diagnostic.Identity, environment)
-		matches += identityMatches
-		failures = append(failures, Evidence{Identity: identity, Message: message, Source: "diagnostics-adapter", identityKey: diagnostic.Identity})
+		failures = append(failures, evidence)
 	}
 	for _, diagnostic := range response.Warnings {
-		message, count := Redact(formatDiagnostic(diagnostic), environment)
+		evidence, count := structuredEvidence(diagnostic, environment)
 		matches += count
-		identity, identityMatches := Redact(diagnostic.Identity, environment)
-		matches += identityMatches
-		warnings = append(warnings, Evidence{Identity: identity, Message: message, Source: "diagnostics-adapter", identityKey: diagnostic.Identity})
+		warnings = append(warnings, evidence)
 	}
 	for _, problem := range response.Problems {
 		message, count := Redact(problem.Message, environment)
@@ -254,15 +304,49 @@ func collectStructuredEvidence(response DiagnosticsResponse, environment []strin
 	return failures, warnings, matches
 }
 
+func structuredEvidence(diagnostic Diagnostic, environment []string) (Evidence, int) {
+	matches := 0
+	redact := func(value string) string {
+		redacted, count := Redact(value, environment)
+		matches += count
+		return redacted
+	}
+	evidence := Evidence{
+		Identity:    redact(diagnostic.Identity),
+		Message:     redact(formatDiagnostic(diagnostic)),
+		Source:      "diagnostics-adapter",
+		Package:     redact(diagnostic.Package),
+		Task:        redact(diagnostic.Task),
+		File:        redact(diagnostic.File),
+		Line:        diagnostic.Line,
+		Column:      diagnostic.Column,
+		Rule:        redact(diagnostic.Rule),
+		identityKey: diagnostic.Identity,
+	}
+	return evidence, matches
+}
+
+// formatDiagnostic renders `<task>: <message> (<file>:<line>:<column>) [<rule>]`, omitting
+// every part the adapter did not send.
 func formatDiagnostic(diagnostic Diagnostic) string {
+	message := diagnostic.Message
+	if diagnostic.Task != "" {
+		message = diagnostic.Task + ": " + message
+	}
 	location := diagnostic.File
 	if location != "" && diagnostic.Line > 0 {
 		location = fmt.Sprintf("%s:%d", location, diagnostic.Line)
+		if diagnostic.Column > 0 {
+			location = fmt.Sprintf("%s:%d", location, diagnostic.Column)
+		}
 	}
-	if location == "" {
-		return diagnostic.Message
+	if location != "" {
+		message = fmt.Sprintf("%s (%s)", message, location)
 	}
-	return fmt.Sprintf("%s (%s)", diagnostic.Message, location)
+	if diagnostic.Rule != "" {
+		message = fmt.Sprintf("%s [%s]", message, diagnostic.Rule)
+	}
+	return message
 }
 
 func deduplicateEvidence(items []Evidence) []Evidence {
@@ -331,8 +415,12 @@ func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome
 	var failures, warnings []Evidence
 	seenFailures := map[string]struct{}{}
 	seenWarnings := map[string]struct{}{}
-	var fallback []Evidence
+	var fallback, echoes []Evidence
 	for _, line := range lines {
+		if !line.forceWarning && echoPattern.MatchString(line.text) {
+			echoes = append(echoes, Evidence{Message: line.text, Source: line.source})
+			continue
+		}
 		key := strings.ToLower(line.text)
 		if line.forceWarning || warningPattern.MatchString(line.text) {
 			if _, exists := seenWarnings[key]; !exists {
@@ -350,14 +438,19 @@ func collectEvidence(stdout, stderr string, configuredWarnings []string, outcome
 			}
 		}
 	}
-	if outcome != OutcomePass && len(failures) == 0 && len(fallback) > 0 {
-		failures = append(failures, fallback[0])
+	if outcome != OutcomePass && len(failures) == 0 {
+		switch {
+		case len(echoes) > 0:
+			failures = append(failures, echoes[0])
+		case len(fallback) > 0:
+			failures = append(failures, fallback[0])
+		}
 	}
 	return failures, warnings
 }
 
 func noiseLine(line string) bool {
-	if progressPattern.MatchString(line) {
+	if progressPattern.MatchString(line) || (bannerPattern.MatchString(line) && !failurePattern.MatchString(line)) {
 		return true
 	}
 	lower := strings.ToLower(line)
@@ -411,14 +504,23 @@ func RenderStoredText(result Result) string {
 
 func Compact(result Result, budgets Budgets) Result {
 	originalCommand := result.Command.Normalized
+	originalScope := result.Command.Scope
 	originalSummary := result.Summary
 	previouslyTruncated := result.Truncation.Truncated
 	result.Truncation.Budget = budgetFor(result.Outcome, budgets)
 	result.Truncation.Total.Failures = len(result.Failures)
 	result.Truncation.Total.Warnings = len(result.Warnings)
 	result.Command.Normalized = truncateText(result.Command.Normalized, 256)
+	result.Command.Scope = truncateText(result.Command.Scope, 256)
 	result.Summary = truncateText(result.Summary, 160)
-	metadataTruncated := previouslyTruncated || result.Command.Normalized != originalCommand || result.Summary != originalSummary
+	diagnosticsTruncated := false
+	if result.Diagnostics != nil {
+		diagnostics := *result.Diagnostics
+		diagnostics.Reason = truncateText(diagnostics.Reason, 160)
+		diagnosticsTruncated = diagnostics.Reason != result.Diagnostics.Reason
+		result.Diagnostics = &diagnostics
+	}
+	metadataTruncated := previouslyTruncated || diagnosticsTruncated || result.Command.Normalized != originalCommand || result.Command.Scope != originalScope || result.Summary != originalSummary
 	failureCount := len(result.Failures)
 	warningCount := len(result.Warnings)
 
@@ -469,6 +571,8 @@ func MarshalCompactJSON(result Result, budgets Budgets) ([]byte, error) {
 		case len(compact.Failures) > 0:
 			compact.Failures = compact.Failures[:len(compact.Failures)-1]
 			compact.Truncation.Shown.Failures = len(compact.Failures)
+		case len(compact.Command.Scope) > 32:
+			compact.Command.Scope = truncateText(compact.Command.Scope, len(compact.Command.Scope)-16)
 		case len(compact.Command.Normalized) > 32:
 			compact.Command.Normalized = truncateText(compact.Command.Normalized, len(compact.Command.Normalized)-16)
 		case len(compact.Summary) > 32:
@@ -521,6 +625,8 @@ func shrinkMetadata(result *Result) {
 			return
 		}
 		switch {
+		case len(result.Command.Scope) > 32:
+			result.Command.Scope = truncateText(result.Command.Scope, len(result.Command.Scope)-16)
 		case len(result.Command.Normalized) > 32:
 			result.Command.Normalized = truncateText(result.Command.Normalized, len(result.Command.Normalized)-16)
 		case len(result.Summary) > 32:
@@ -559,11 +665,22 @@ func render(result Result) string {
 	if result.ExitCode != nil {
 		exit = fmt.Sprintf("%d", *result.ExitCode)
 	}
+	command := "command: " + result.Command.Normalized
+	if result.Command.Scope != "" {
+		command += " | scope: " + result.Command.Scope
+	}
 	lines := []string{
 		"DEV-RESULT v1 " + strings.ToUpper(string(result.Outcome)),
-		"command: " + result.Command.Normalized,
+		command,
 		fmt.Sprintf("exit: %s | duration: %s | attempts: %d/%d", exit, formatDuration(result.DurationMS), result.Attempts.Shown, result.Attempts.Total),
 		"summary: " + result.Summary,
+	}
+	if result.Diagnostics != nil {
+		diagnostics := "diagnostics: " + string(result.Diagnostics.Mode)
+		if result.Diagnostics.Reason != "" {
+			diagnostics += " (" + result.Diagnostics.Reason + ")"
+		}
+		lines = append(lines, diagnostics)
 	}
 	if len(result.Failures) > 0 {
 		lines = append(lines, fmt.Sprintf("failures: shown %d/%d", len(result.Failures), result.Truncation.Total.Failures))
@@ -617,9 +734,18 @@ func NewJobID(command string, now time.Time) string {
 
 func NormalizeCommand(command string, args []string) string {
 	parts := []string{"dev-tools", command}
-	redactedArgs := redactCredentialArguments(args)
-	for _, arg := range redactedArgs {
-		if regexp.MustCompile(`^[A-Za-z0-9_./:=+-]+$`).MatchString(arg) {
+	if scope := NormalizeScope(args); scope != "" {
+		parts = append(parts, scope)
+	}
+	return strings.Join(parts, " ")
+}
+
+// NormalizeScope renders the requested passthrough arguments, credential-redacted and
+// shell-quoted, separately from the command name.
+func NormalizeScope(args []string) string {
+	parts := make([]string, 0, len(args))
+	for _, arg := range redactCredentialArguments(args) {
+		if safeArgumentPattern.MatchString(arg) {
 			parts = append(parts, arg)
 		} else {
 			parts = append(parts, "'"+strings.ReplaceAll(arg, "'", "'\\''")+"'")
@@ -627,6 +753,8 @@ func NormalizeCommand(command string, args []string) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+var safeArgumentPattern = regexp.MustCompile(`^[A-Za-z0-9_./:=+-]+$`)
 
 var credentialArgumentPattern = regexp.MustCompile(`(?i)^(--(?:api[_-]?key|token|secret|password|passwd|credential|private[_-]?key))(?:=(.*))?$`)
 

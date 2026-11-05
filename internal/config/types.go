@@ -22,6 +22,9 @@ type ResultBudgetConfig struct {
 const (
 	MinDevResultLines = 7
 	MinDevResultBytes = 1024
+	// MinDevResultAdapterLines leaves room for the `diagnostics:` line a command with a
+	// diagnostics adapter always renders.
+	MinDevResultAdapterLines = MinDevResultLines + 1
 
 	DefaultDiagnosticsAdapterTimeout                   = 2 * time.Second
 	DefaultDiagnosticsAdapterStdoutBytes         int64 = 1 << 20
@@ -69,6 +72,7 @@ type DevResultCommandConfig struct {
 type DiagnosticsAdapterConfig struct {
 	Command             []string      `yaml:"command" json:"command"`
 	StartWhen           []string      `yaml:"start_when" json:"start_when"`
+	Required            bool          `yaml:"required,omitempty" json:"required,omitempty"`
 	Timeout             time.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	StdoutBytes         int64         `yaml:"stdout_bytes,omitempty" json:"stdout_bytes,omitempty"`
 	StderrBytes         int64         `yaml:"stderr_bytes,omitempty" json:"stderr_bytes,omitempty"`
@@ -83,6 +87,7 @@ func (c *DiagnosticsAdapterConfig) UnmarshalYAML(value *yaml.Node) error {
 	type rawDiagnosticsAdapter struct {
 		Command             []string `yaml:"command"`
 		StartWhen           []string `yaml:"start_when"`
+		Required            bool     `yaml:"required"`
 		Timeout             *string  `yaml:"timeout"`
 		StdoutBytes         *int64   `yaml:"stdout_bytes"`
 		StderrBytes         *int64   `yaml:"stderr_bytes"`
@@ -99,6 +104,7 @@ func (c *DiagnosticsAdapterConfig) UnmarshalYAML(value *yaml.Node) error {
 	decoded := DiagnosticsAdapterConfig{
 		Command:             raw.Command,
 		StartWhen:           raw.StartWhen,
+		Required:            raw.Required,
 		Timeout:             DefaultDiagnosticsAdapterTimeout,
 		StdoutBytes:         DefaultDiagnosticsAdapterStdoutBytes,
 		StderrBytes:         DefaultDiagnosticsAdapterStderrBytes,

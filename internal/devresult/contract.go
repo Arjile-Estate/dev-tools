@@ -37,6 +37,9 @@ type Diagnostic struct {
 	Package  string `json:"package,omitempty"`
 	File     string `json:"file,omitempty"`
 	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Rule     string `json:"rule,omitempty"`
+	Task     string `json:"task,omitempty"`
 	Suite    string `json:"suite,omitempty"`
 	Test     string `json:"test,omitempty"`
 }
@@ -130,6 +133,12 @@ func ValidateDiagnosticsResponse(response DiagnosticsResponse, limits Limits) er
 			}
 			if diagnostic.Line < 0 {
 				return fmt.Errorf("%s diagnostic %q has invalid line", group, diagnostic.Identity)
+			}
+			if diagnostic.Column < 0 {
+				return fmt.Errorf("%s diagnostic %q has invalid column", group, diagnostic.Identity)
+			}
+			if diagnostic.Column > 0 && diagnostic.Line == 0 {
+				return fmt.Errorf("%s diagnostic %q has a column without a line", group, diagnostic.Identity)
 			}
 		}
 	}

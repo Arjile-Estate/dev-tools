@@ -59,6 +59,8 @@ func RedactDiagnosticsResponse(response DiagnosticsResponse, environment []strin
 			redactString(&diagnostics[index].Message)
 			redactString(&diagnostics[index].Package)
 			redactString(&diagnostics[index].File)
+			redactString(&diagnostics[index].Rule)
+			redactString(&diagnostics[index].Task)
 			redactString(&diagnostics[index].Suite)
 			redactString(&diagnostics[index].Test)
 		}
