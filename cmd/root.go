@@ -479,7 +479,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if collected.warning != "" {
 			resultWarnings = append(resultWarnings, collected.warning)
 		}
-		logDiagnosticsFallback(commandName, collected)
 		if cfg.DevResult != nil && validationRun.ID != "" {
 			retention, retentionErr := devresult.ApplyRetention(cmdCfg.ProjectDir, validationRun.ID, time.Now(), devresult.RetentionPolicy{
 				MaxAge:   cfg.DevResult.Retention.MaxAge,
@@ -516,6 +515,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			DiagnosticsFallbackReason:  collected.fallbackReason,
 			AdditionalRedactionMatches: retainedEvidence.RedactionMatches,
 		}, budgets, os.Environ())
+		logDiagnosticsFallback(commandName, collected.warning, model.Diagnostics)
 		// Seed the text envelope's truncation; JSON output computes its own from its byte budget.
 		if cmdCfg.Format != "json" {
 			model.Truncation = devresult.Compact(model, budgets).Truncation
@@ -715,16 +715,20 @@ func retainedSourcePath(path string, index int) (string, int) {
 	return filepath.ToSlash(filepath.Join("redacted", fmt.Sprintf("%04d-%s", index+1, filepath.Base(redacted)))), matches
 }
 
-// logDiagnosticsFallback records a fallback in the activity log, redacted like every other
-// persisted artifact: a warning, or the reason alone for a quiet fallback.
-func logDiagnosticsFallback(commandName string, collected collectedDiagnostics) {
-	if collected.warning != "" {
-		warning, _ := redactRetainedEvidence(collected.warning)
-		logger.Warnf("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, warning)
-	} else if collected.fallbackReason != "" {
-		reason, _ := redactRetainedEvidence(collected.fallbackReason)
-		logger.Infof("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, reason)
+// logDiagnosticsFallback records the result's final fallback decision in the activity log,
+// redacted like every other persisted artifact: a warning when the adapter run failed, the
+// marker reason alone otherwise (a quiet skip, or evidence the result could not use).
+func logDiagnosticsFallback(commandName, warning string, diagnostics *devresult.DiagnosticsSummary) {
+	if diagnostics == nil || diagnostics.Mode != devresult.DiagnosticsFallback {
+		return
 	}
+	if warning != "" {
+		redacted, _ := redactRetainedEvidence(warning)
+		logger.Warnf("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, redacted)
+		return
+	}
+	reason, _ := redactRetainedEvidence(diagnostics.Reason)
+	logger.Infof("DEV-RESULT %s diagnostics fell back to the rendered log: %s", commandName, reason)
 }
 
 // fallback records why structured diagnostics were not used: the visible warning (empty for a

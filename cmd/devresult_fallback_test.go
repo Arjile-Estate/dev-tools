@@ -51,11 +51,20 @@ func TestLogDiagnosticsFallbackRedactsTheActivityLog(t *testing.T) {
 	logger.Init(&output, logger.InfoLevel, false)
 	t.Cleanup(func() { logger.Init(io.Discard, logger.InfoLevel, false) })
 
-	logDiagnosticsFallback("build", collectedDiagnostics{warning: "structured diagnostics are unavailable: token secret-demo-12345 rejected", fallbackReason: "adapter failed"})
-	logDiagnosticsFallback("lint", collectedDiagnostics{fallbackReason: "reason secret-demo-12345"})
+	fallback := func(reason string) *devresult.DiagnosticsSummary {
+		return &devresult.DiagnosticsSummary{Mode: devresult.DiagnosticsFallback, Reason: reason}
+	}
+	logDiagnosticsFallback("build", "structured diagnostics are unavailable: token secret-demo-12345 rejected", fallback("adapter failed"))
+	logDiagnosticsFallback("lint", "", fallback("reason secret-demo-12345"))
+	logDiagnosticsFallback("typecheck", "", fallback("no actionable structured failure"))
+	logDiagnosticsFallback("test", "", &devresult.DiagnosticsSummary{Mode: devresult.DiagnosticsStructured})
+	logDiagnosticsFallback("test:focused", "", nil)
 
 	logged := output.String()
 	assert.Contains(t, logged, "DEV-RESULT build diagnostics fell back to the rendered log")
 	assert.Contains(t, logged, "DEV-RESULT lint diagnostics fell back to the rendered log")
+	assert.Contains(t, logged, "DEV-RESULT typecheck diagnostics fell back to the rendered log: no actionable structured failure")
+	assert.NotContains(t, logged, "DEV-RESULT test ")
+	assert.NotContains(t, logged, "test:focused")
 	assert.NotContains(t, logged, "secret-demo-12345")
 }
