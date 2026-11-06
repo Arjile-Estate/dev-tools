@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-06
+
 ### Added
+- Opt-in DEV-RESULT v1 emits bounded validation summaries while retaining complete redacted stdout, stderr, and drill-down artifacts for later inspection with `dev-tools result`.
+- Enabled validations receive isolated run IDs and directories, bounded retention, and an optional versioned diagnostics-adapter contract with resource limits and source-path confinement.
 - DEV-RESULT diagnostics adapters are available for `build`, `typecheck`, `lint`, and `lint:dead-code`, not only `test` and `test:focused`.
 - Diagnostics responses may carry optional `column`, `rule`, and `task` fields; results render them as `<task>: <message> (<file>:<line>:<column>) [<rule>]`. Older dev-tools releases reject responses that carry these fields.
 - `diagnostics_adapter.required: true` reports `structured source <patterns> is missing` when the command wrote no structured evidence.
@@ -219,6 +223,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Daemon process management with PID tracking
 
+[Unreleased]: https://github.com/Arjile-Estate/dev-tools/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/Arjile-Estate/dev-tools/compare/v1.6.2...v1.7.0
 [1.5.0]: https://github.com/Arjile-Estate/dev-tools/compare/v1.2.0...v1.5.0
 [1.2.0]: https://github.com/Arjile-Estate/dev-tools/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Arjile-Estate/dev-tools/compare/v1.1.0...v1.1.1
