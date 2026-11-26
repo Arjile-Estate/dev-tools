@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-26
+
+### Fixed
+- The `TestSetupLogging` stdout-fallback test no longer assumes the filesystem root is read-only, so the test suite passes in build sandboxes where `/` is writable (for example a single-user Nix build).
+
 ## [1.7.0] - 2026-11-06
 
 ### Added
