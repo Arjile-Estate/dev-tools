@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-26
+
+### Fixed
+- The test suite no longer fails in build sandboxes where `/` is writable (for example a single-user Nix build): the logging stdout-fallback test no longer assumes the filesystem root is read-only.
+
 ## [1.7.0] - 2026-11-06
 
 ### Added
@@ -223,7 +228,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Daemon process management with PID tracking
 
-[Unreleased]: https://github.com/Arjile-Estate/dev-tools/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/Arjile-Estate/dev-tools/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/Arjile-Estate/dev-tools/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/Arjile-Estate/dev-tools/compare/v1.6.2...v1.7.0
 [1.5.0]: https://github.com/Arjile-Estate/dev-tools/compare/v1.2.0...v1.5.0
 [1.2.0]: https://github.com/Arjile-Estate/dev-tools/compare/v1.1.1...v1.2.0
