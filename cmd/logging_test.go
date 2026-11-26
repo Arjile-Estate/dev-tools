@@ -85,10 +85,10 @@ func TestSetupLogging(t *testing.T) {
 
 	t.Run("log directory creation error falls back to stdout", func(t *testing.T) {
 		// Use a project dir with no config, so default path is used.
-		// Set HOME to a read-only location to cause mkdir to fail.
-		originalHome := os.Getenv("HOME")
-		defer func() { _ = os.Setenv("HOME", originalHome) }()
-		_ = os.Setenv("HOME", "/")
+		// HOME is a regular file: mkdir below it fails for every user, root included.
+		homeBlockedByRegularFile := filepath.Join(t.TempDir(), "blocker")
+		require.NoError(t, os.WriteFile(homeBlockedByRegularFile, nil, 0644))
+		t.Setenv("HOME", homeBlockedByRegularFile)
 
 		originalStdout := os.Stdout
 		originalStderr := os.Stderr
